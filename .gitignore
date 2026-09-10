@@ -1,0 +1,12 @@
+# Node
+webapp/node_modules/
+
+# Derlenmiş arayüz (CI ve build.sh üretir)
+web/dist/*
+!web/dist/.gitkeep
+
+# Derlenmiş program ve paketler
+/haproxy-lens
+/build/
+/dist/
+*.tar.gz

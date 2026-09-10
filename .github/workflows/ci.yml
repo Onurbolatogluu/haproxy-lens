@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+
+      - name: Arayüzü derle
+        run: cd webapp && npm ci && npm run build
+
+      - name: Kontrol ve testler
+        run: |
+          test -z "$(gofmt -l $(git ls-files '*.go'))" || { echo "gofmt gerekli:"; gofmt -l $(git ls-files '*.go'); exit 1; }
+          go vet ./...
+          go test ./...
+
+      - name: Derleme denemesi
+        run: CGO_ENABLED=0 go build -trimpath -o haproxy-lens . && ./haproxy-lens -version
+
+      - name: Betik sözdizimi
+        run: bash -n deploy/install.sh && bash -n deploy/uninstall.sh
