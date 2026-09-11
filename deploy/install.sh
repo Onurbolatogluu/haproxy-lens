@@ -50,6 +50,16 @@ if [ "$LISTEN" != 127.0.0.1 ] && command -v ip >/dev/null; then
   ip -o addr show | grep -qF " $LISTEN/" || die "$LISTEN bu sunucunun arayüzlerinde yok."
 fi
 case "$LISTEN" in *:*) LISTEN_HOST="[$LISTEN]" ;; *) LISTEN_HOST="$LISTEN" ;; esac
+# Servisin grupları: socket ve log için bulunanlar + log'u ileride başka yerden okuyabilsin diye
+# adm (syslog dosyaları) ve systemd-journal (journald). Böylece config değişince yeniden kurulum gerekmez.
+GROUPS_ALL="$DET_GROUPS"
+for g in adm systemd-journal; do
+  getent group "$g" >/dev/null 2>&1 && case " $GROUPS_ALL " in *" $g "*) ;; *) GROUPS_ALL="$GROUPS_ALL $g" ;; esac
+done
+GROUPS_ALL="$(echo $GROUPS_ALL)"
+# Log kaynağı: elle verilmediyse ajan kendisi bulur ve çalışırken izler
+LOG_SRC="${LOG:-auto}"
+
 # Erişim listesi: elle verilmediyse güncellemede önceki kurulumunki korunur
 if [ -z "${ALLOW+x}" ] && [ -f "$UNIT" ]; then
   ALLOW="$(sed -n 's/^Environment="LENS_ALLOW=\(.*\)"$/\1/p' "$UNIT")"
@@ -69,7 +79,8 @@ echo
 echo "Yapılacaklar:"
 echo "  - /usr/local/bin/haproxy-lens ve $UNIT dosyaları"
 echo "  - Giriş yapamayan 'haproxy-lens' sistem kullanıcısı"
-echo "  - Servisin ek grupları: ${DET_GROUPS:-yok} (kullanıcı bu gruplara kalıcı olarak eklenmez)"
+echo "  - Servisin ek grupları: ${GROUPS_ALL:-yok} (kullanıcı bu gruplara kalıcı olarak eklenmez)"
+echo "  - Config, log biçimi ve log kaynağı çalışırken izlenir; config değişince yeniden kurulum gerekmez."
 if [ "$LISTEN" = 127.0.0.1 ]; then
   echo "  - Panel: 127.0.0.1:$PORT (dışarıdan erişilemez, SSH tüneliyle açılır)"
 else
@@ -105,12 +116,11 @@ Wants=network-online.target
 Type=simple
 User=haproxy-lens
 Group=haproxy-lens
-SupplementaryGroups=$DET_GROUPS
+SupplementaryGroups=$GROUPS_ALL
 Environment="LENS_SOCKET=$(esc "$DET_SOCKET")"
-Environment="LENS_LOG=$(esc "$DET_LOG")"
-Environment="LENS_LOG_NOTE=$(esc "$DET_LOG_NOTE")"
+Environment="LENS_LOG=$(esc "$LOG_SRC")"
 Environment="LENS_ALLOW=$(esc "$ALLOW")"
-ExecStart=/usr/local/bin/haproxy-lens -socket \${LENS_SOCKET} -log \${LENS_LOG} -log-note \${LENS_LOG_NOTE} -listen $LISTEN_HOST:$PORT -allow \${LENS_ALLOW}
+ExecStart=/usr/local/bin/haproxy-lens -socket \${LENS_SOCKET} -log \${LENS_LOG} -listen $LISTEN_HOST:$PORT -allow \${LENS_ALLOW}
 Restart=on-failure
 RestartSec=5
 

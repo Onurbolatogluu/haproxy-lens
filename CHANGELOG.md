@@ -1,5 +1,15 @@
 # Değişiklikler
 
+## 0.7.0
+
+- Ajan artık her ortama kendini uyduruyor ve çalışırken izliyor: HAProxy config'i ya da süreçleri değişince (reload) en geç 30 saniyede yeniden okuyor; yeniden kurulum gerekmiyor.
+- Log biçimi config'ten okunuyor: `option httplog`, `httpslog`, `tcplog` ve özel `log-format` (JSON benzeri biçimler dahil) destekleniyor. `defaults` mirası, adlı `defaults` ve `from` dikkate alınıyor. Özel biçimli sunucularda log analizi artık kapanmıyor.
+- Host yakalama slotu config'ten biliniyor; aynı bloktaki başka yakalamalar (User-Agent, X-Forwarded-For) alan adıyla karışmıyor.
+- Yeni "Yapılandırma notları" bölümü: log kapalı, seviye filtresi, `dontlog-normal`, eksik log alanları, alan adı yakalanmıyor, sağlık kontrolü yok, okunamayan log satırları (örnekleriyle), stats'ta olup log'da olmayan trafik. Her notta etkisi, eklenebilecek config satırı ve yeri yazıyor. Aynı notlar `./install.sh --check` raporunda da çıkıyor.
+- Log kaynağı varsayılan olarak ajan tarafından bulunuyor ve izleniyor; kaynak susarsa yenisi aranıyor, bulunana kadar 5 saniyede bir deneniyor.
+- Stats socket bir dakika çalışmazsa config'teki başka bir socket deneniyor.
+- Servis, log'u ileride başka bir yerden okuyabilsin diye `adm` ve `systemd-journal` gruplarıyla (varsa) kuruluyor.
+
 ## 0.6.0
 
 - "Engellenen ve karşılıksız kalan istekler" ve "Hata alan adresler" satırları tıklanınca açılıyor: tam adres, gerçek yollar ({id} ile birleşmiş satırlarda) ve isteği gönderen IP'ler (Cloudflare etiketli).

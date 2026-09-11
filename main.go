@@ -22,7 +22,7 @@ var version = "dev"
 
 func main() {
 	socket := flag.String("socket", "/run/haproxy/admin.sock", "HAProxy stats socket: unix yolu ya da tcp:host:port")
-	logSrc := flag.String("log", "", "Log kaynağı: dosya yolu ya da journal:haproxy (boşsa log analizi kapalı)")
+	logSrc := flag.String("log", "auto", "Log kaynağı: auto (ajan kendisi bulur ve izler), dosya yolu, journal:haproxy ya da boş (kapalı)")
 	logNote := flag.String("log-note", "", "Log analizi kapalıysa panelde gösterilecek sebep")
 	cfList := flag.String("cloudflare-list", "", "Ek Cloudflare IP listesi (isteğe bağlı; yerleşik liste zaten var)")
 	listen := flag.String("listen", "127.0.0.1:8405", "Panelin dinleyeceği adres (IP:port)")
@@ -85,10 +85,18 @@ func main() {
 	go stats.Run()
 
 	var logs *LogAnalyzer
+	logAuto := *logSrc == "auto"
 	if *logSrc != "" {
-		logs = NewLogAnalyzer(*logSrc, *cfList)
+		src := *logSrc
+		if logAuto {
+			src = "" // gözlemci bulacak
+		}
+		logs = NewLogAnalyzer(src, *cfList)
 		go logs.Run()
 	}
+	// Config'i, log kaynağını ve socket'i çalışırken izler; değişiklikleri yeniden kurulum olmadan uygular
+	env := NewEnv(stats, logs, logAuto)
+	go env.Run()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/state", func(w http.ResponseWriter, r *http.Request) {
@@ -103,11 +111,18 @@ func main() {
 			writeJSON(w, LogReport{Enabled: false, Error: *logNote})
 			return
 		}
+		if logs.Source() == "" {
+			writeJSON(w, LogReport{Enabled: false, Searching: true, Error: env.LogNote()})
+			return
+		}
 		m, err := strconv.Atoi(r.URL.Query().Get("minutes"))
 		if err != nil {
 			m = 5
 		}
 		writeJSON(w, logs.Report(m))
+	})
+	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, env.Info())
 	})
 	sub, _ := fs.Sub(webFS, "web/dist")
 	if _, err := fs.Stat(sub, "index.html"); err != nil {

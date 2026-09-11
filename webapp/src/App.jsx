@@ -460,7 +460,7 @@ function ReqDetail({ d, path }) {
           <ul className="space-y-1">
             {samples.map((x) => (
               <li key={x.name} className="flex items-baseline justify-between gap-3">
-                <span style={{ wordBreak: "break-all" }}>{x.name}</span>
+                <span style={{ wordBreak: "break-all", color: x.name === "(diğer)" ? C.faint : C.text }}>{x.name === "(diğer)" ? "(diğer yollar)" : x.name}</span>
                 <span className="tnum whitespace-nowrap" style={{ color: C.muted }}>×{fmtNum(x.n)}</span>
               </li>
             ))}
@@ -472,7 +472,7 @@ function ReqDetail({ d, path }) {
         <ul className="grid gap-x-6 md:grid-cols-2">
           {(d.ips || []).map((c) => (
             <li key={c.ip} className="flex items-baseline justify-between gap-3 py-0.5">
-              <span className="tnum">{c.ip}{c.cloudflare && <span className="text-xs ml-2" style={{ color: C.faint }}>Cloudflare</span>}</span>
+              <span className="tnum" style={{ color: c.ip === "(diğer)" ? C.faint : C.text }}>{c.ip === "(diğer)" ? "(diğer IP'ler)" : c.ip}{c.cloudflare && <span className="text-xs ml-2" style={{ color: C.faint }}>Cloudflare</span>}</span>
               <span className="tnum" style={{ color: C.muted }}>×{fmtNum(c.n)}</span>
             </li>
           ))}
@@ -912,7 +912,8 @@ function buildFindings(model, rates, logs, wrates = {}, label = "") {
     const ns = logs.kinds.noserver || 0;
     if (ns > 0) add("bad", "logs", `Son ${m} dakikada ${fmtNum(ns)} istek, seçilen backend'de çalışan sunucu olmadığı için 503 aldı.`);
   }
-  if (nocheck > 0) add("info", null, `${total} sunucunun ${nocheck} tanesinde sağlık kontrolü (check) yok. Bunlar düşerse HAProxy fark etmez; panel onları "Kontrolsüz" gösterir ve bağlantı hatalarından yakalamaya çalışır.`);
+  // Sağlık kontrolü olmayan sunucular artık "Yapılandırma notları" bölümünde (config'ten, backend adlarıyla)
+  void nocheck; void total;
   return out.sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
 }
 
@@ -936,6 +937,73 @@ function Header({ info, running, onToggleRun, ok, lastAt }) {
         <Btn onClick={onToggleRun}>{running ? <Pause size={14} /> : <Play size={14} />}{running ? "Duraklat" : "Devam et"}</Btn>
       </div>
     </header>
+  );
+}
+
+// Config'te ya da ortamda paneli kısıtlayan ne varsa: ne eksik, neyi etkiliyor, hangi satır eklenebilir
+function ConfigNotes({ cfg }) {
+  const [open, setOpen] = useState(null);
+  if (!cfg) return null;
+  const notes = cfg.notes || [];
+  const warn = notes.filter((n) => n.level === "warn").length;
+  const info = notes.length - warn;
+  const isOpen = open ?? warn > 0;
+  const checked = cfg.checkedAt ? new Date(cfg.checkedAt).toLocaleTimeString("tr-TR") : null;
+  const summary = notes.length === 0 ? "Paneli kısıtlayan bir ayar yok." : [warn && `${warn} uyarı`, info && `${info} öneri`].filter(Boolean).join(", ");
+  const mono = { fontFamily: "ui-monospace, Menlo, Consolas, monospace" };
+  return (
+    <section id="notes" className="mb-6 rounded-lg" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+      <button type="button" onClick={() => setOpen(!isOpen)} aria-expanded={isOpen}
+        className="hl-row w-full text-left flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 rounded-lg">
+        <span className="flex items-center gap-2">
+          {isOpen ? <ChevronDown size={16} color={C.muted} /> : <ChevronRight size={16} color={C.muted} />}
+          <span className="font-medium">Yapılandırma notları</span>
+          <span className="text-sm" style={{ color: warn ? C.warn : C.muted }}>{summary}</span>
+        </span>
+        {checked && <span className="text-xs" style={{ color: C.faint }}>Config en son {checked}'de kontrol edildi; değişiklikler kendiliğinden algılanır.</span>}
+      </button>
+      {isOpen && (
+        <div className="px-4 pb-4 space-y-3">
+          {notes.map((n, i) => (
+            <div key={i} className="rounded-md px-3 py-2.5" style={{ background: C.panel2, boxShadow: `inset 3px 0 0 ${n.level === "warn" ? C.warn : C.info}` }}>
+              <div className="text-sm font-medium">
+                {n.title}
+                {n.where && <span className="text-xs ml-2 font-normal" style={{ color: C.faint }}>{n.where}</span>}
+              </div>
+              <p className="text-sm mt-1 leading-relaxed" style={{ color: C.muted }}>{n.text}</p>
+              {n.fix && (
+                <div className="mt-2 text-xs flex flex-wrap items-center gap-2">
+                  <span style={{ color: C.faint }}>Eklenebilecek satır:</span>
+                  <code className="rounded px-2 py-0.5" style={{ ...mono, background: C.bg, border: `1px solid ${C.line}`, color: C.text }}>{n.fix}</code>
+                </div>
+              )}
+              {(n.samples || []).length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {n.samples.map((x, j) => (
+                    <div key={j} className="text-xs rounded px-2 py-1 overflow-x-auto whitespace-nowrap" style={{ ...mono, background: C.bg, color: C.text }}>{x}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+          {(cfg.frontends || []).length > 0 && (
+            <div className="text-xs leading-relaxed" style={{ color: C.faint }}>
+              Okunan frontend'ler:{" "}
+              {cfg.frontends.map((f, i) => (
+                <span key={f.name}>
+                  {i > 0 && ", "}
+                  <span style={{ color: C.muted }}>{f.name}</span> ({f.mode}{f.mode === "http" ? `, ${f.format}` : ""}{f.hostFrom ? `, alan adı: ${f.hostFrom}` : ""}{!f.logs ? ", log yok" : ""})
+                </span>
+              ))}
+              {cfg.logSource ? `. Log kaynağı: ${cfg.logSource.replace(/^file:/, "").replace(/^journal:/, "journald, ")}.` : "."}
+            </div>
+          )}
+          <p className="text-xs" style={{ color: C.faint }}>
+            Ajan config'e hiçbir şey yazmaz. Önerilen satırları eklemek senin kararın; eklersen HAProxy reload edildikten sonra panel en geç 30 saniye içinde kendiliğinden uyum sağlar.
+          </p>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -1170,8 +1238,13 @@ function LogSection({ logs, minutes }) {
   if (!logs.enabled) {
     return (
       <section id="logs" className="mt-12">
-        <Panel title="Log analizi bu sunucuda kapalı"
-          note={`${logs.error || "Kurulum sırasında okunabilir bir HAProxy log'u bulunamadı."} Yukarıdaki stats bölümü bundan etkilenmez.`} />
+        {logs.searching ? (
+          <Panel title="HAProxy log'u aranıyor"
+            note={`${logs.error || "Henüz okunabilir bir HAProxy log'u bulunamadı."} Ajan birkaç dakikada bir tekrar arıyor; log oluşunca bu bölüm kendiliğinden dolar. Stats bölümü etkilenmez.`} />
+        ) : (
+          <Panel title="Log analizi bu sunucuda kapalı"
+            note={`${logs.error || "Ajan log analizi kapalı olarak başlatılmış."} Yukarıdaki stats bölümü bundan etkilenmez.`} />
+        )}
       </section>
     );
   }
@@ -1350,6 +1423,21 @@ export default function App() {
   const [running, setRunning] = useState(true);
   const [expanded, setExpanded] = useState(() => new Set());
   const [fieldsRow, setFieldsRow] = useState(null);
+  const [cfg, setCfg] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const r = await fetch("/api/config", { cache: "no-store" });
+        const j = await r.json();
+        if (alive) setCfg(j);
+      } catch (e) { /* state isteği hatayı zaten gösteriyor */ }
+    };
+    load();
+    const id = setInterval(load, 30000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
 
   useEffect(() => {
     if (!running) return undefined;
@@ -1432,6 +1520,7 @@ export default function App() {
         ) : (
           <>
             <StatusHero findings={findings} model={model} onJump={jump} />
+            <ConfigNotes cfg={cfg} />
             <PulseStrip model={model} rates={rates} info={cur.info} />
             <RangePicker minutes={minutes} setMinutes={setMinutes} />
             <TrafficCharts points={points} />

@@ -35,10 +35,11 @@ type socketCand struct {
 type logCand struct {
 	Path    string
 	Group   string
-	Traffic int // ip:port [tarih] ile başlayan satır
-	TCP     int // tcplog satırı
-	Parsed  int // httplog olarak okunabilen satır
-	Host    int // bunlardan alan adı bulunan
+	Traffic int  // ip:port [tarih] ile başlayan satır
+	TCP     int  // tcplog satırı
+	Parsed  int  // httplog olarak okunabilen satır
+	Host    int  // bunlardan alan adı bulunan
+	Readble bool // servis kullanıcısı okuyabilir (satırlar okunamasa bile)
 	Usable  bool
 	Note    string
 }
@@ -55,6 +56,8 @@ type detection struct {
 	LogNote     string
 	Groups      []string
 	Listen      listenChoice
+	Config      *haConfig
+	Notes       []Note
 }
 
 var reTCPLogMsg = regexp.MustCompile(`^\S+:\d+ \[[^\]]+\] \S+ \S+/\S+ -?\d+/-?\d+/\+?-?\d+ \+?\d+ \S{2} `)
@@ -83,27 +86,14 @@ func runDetect(forceSocket, forceLog string) *detection {
 		}
 	}
 
+	// ---- config: log biçimleri ve notlar ----
+	d.Config = buildHAConfig(d.ConfigFiles)
+	parser := buildLogParser(d.Config)
+	d.Notes = configNotes(d.Config)
+
 	// ---- log ----
 	d.LogTargets = logTargetsFromConfig(d.ConfigFiles)
-	var paths []string
-	if forceLog != "" {
-		paths = []string{forceLog}
-	} else {
-		paths = logCandidates()
-	}
-	for _, p := range paths {
-		d.Logs = append(d.Logs, checkLog(p))
-	}
-	if forceLog == "" && !anyUsable(d.Logs) {
-		if j := checkLog("journal:haproxy"); j.Traffic > 0 {
-			d.Logs = append(d.Logs, j)
-		}
-	}
-	for i := range d.Logs {
-		if d.Logs[i].Usable && (d.Log == nil || d.Logs[i].Parsed > d.Log.Parsed) {
-			d.Log = &d.Logs[i]
-		}
-	}
+	d.Logs, d.Log = scanLogSources(parser, forceLog)
 	if d.Log == nil {
 		d.LogNote = explainNoLog(d)
 	}
@@ -120,6 +110,32 @@ func runDetect(forceSocket, forceLog string) *detection {
 		}
 	}
 	return d
+}
+
+// Aday log kaynaklarını dener, en çok satırı okunabileni seçer (kurulumda ve çalışırken kullanılır)
+func scanLogSources(parser *LogParser, force string) ([]logCand, *logCand) {
+	var paths []string
+	if force != "" && force != "auto" {
+		paths = []string{force}
+	} else {
+		paths = logCandidates()
+	}
+	var ls []logCand
+	for _, p := range paths {
+		ls = append(ls, checkLogWith(parser, p))
+	}
+	if (force == "" || force == "auto") && !anyUsable(ls) {
+		if j := checkLogWith(parser, "journal:haproxy"); j.Traffic > 0 {
+			ls = append(ls, j)
+		}
+	}
+	var best *logCand
+	for i := range ls {
+		if ls[i].Usable && (best == nil || ls[i].Parsed > best.Parsed) {
+			best = &ls[i]
+		}
+	}
+	return ls, best
 }
 
 func anyUsable(ls []logCand) bool {
@@ -388,7 +404,9 @@ func logCandidates() []string {
 	return out
 }
 
-func checkLog(p string) logCand {
+func checkLog(p string) logCand { return checkLogWith(defaultParser, p) }
+
+func checkLogWith(parser *LogParser, p string) logCand {
 	c := logCand{Path: p}
 	var lines []string
 	groupOK := true
@@ -440,27 +458,31 @@ func checkLog(p string) logCand {
 		} else if !journal {
 			continue // dosyada başka programların satırları
 		}
-		if !reTrafficStart.MatchString(msg) {
+		rec, ok := parser.Parse(line)
+		if !ok && !reTrafficLike.MatchString(msg) {
 			continue // "Server x is DOWN" gibi olay satırları
 		}
 		c.Traffic++
-		if rec, ok := parseLogLine(line); ok {
+		switch {
+		case ok && rec.Kind == KindTCP:
+			c.TCP++
+		case ok:
 			c.Parsed++
 			if rec.Host != "" {
 				c.Host++
 			}
-		} else if reTCPLogMsg.MatchString(msg) {
-			c.TCP++
 		}
 	}
 	httpLines := c.Traffic - c.TCP
+	// Okunabilir: servis kullanıcısı dosyayı açabilir ve içinde HAProxy trafiği var (satırlar okunamasa bile)
+	c.Readble = groupOK && c.Traffic > 0
 	switch {
 	case c.Traffic == 0:
 		c.Note = "son kayıtlarda HAProxy trafik satırı yok"
 	case httpLines == 0:
 		c.Note = "sadece TCP modu satırları var; HTTP analizi yapılamaz"
 	case float64(c.Parsed)/float64(httpLines) < 0.8:
-		c.Note = fmt.Sprintf("satırların çoğu okunamadı (%d/%d); özel log-format kullanılıyor olabilir", c.Parsed, httpLines)
+		c.Note = fmt.Sprintf("satırların çoğu okunamadı (%d/%d); biçimleri config'teki log tanımıyla uyuşmuyor", c.Parsed, httpLines)
 	case !groupOK && journal:
 		c.Note = "systemd-journal grubu yok, servis kullanıcısı journald'ı okuyamaz"
 	case !groupOK:
@@ -551,6 +573,24 @@ func (d *detection) printReport(w io.Writer) {
 		}
 	}
 	fmt.Fprintln(w)
+	if len(d.Notes) > 0 {
+		fmt.Fprintln(w, "Yapılandırma notları (kurulumu engellemez; panelde de görünür)")
+		for _, n := range d.Notes {
+			tag := "BİLGİ "
+			if n.Level == "warn" {
+				tag = "UYARI "
+			}
+			where := ""
+			if n.Where != "" {
+				where = " [" + n.Where + "]"
+			}
+			fmt.Fprintf(w, "  %s %s%s\n", tag, n.Title, where)
+			if n.Fix != "" {
+				fmt.Fprintf(w, "         Öneri: %s\n", n.Fix)
+			}
+		}
+		fmt.Fprintln(w)
+	}
 	fmt.Fprintln(w, "Panel adresi")
 	if d.Listen.Iface != "" {
 		fmt.Fprintf(w, "  Varsayılan rota arayüzü: %s\n", d.Listen.Iface)

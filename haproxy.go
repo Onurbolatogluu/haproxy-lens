@@ -120,9 +120,11 @@ type Point struct {
 }
 
 type StatsPoller struct {
-	socket   string
-	interval time.Duration
-	maxHist  int
+	sockMu    sync.Mutex
+	failSince time.Time
+	socket    string
+	interval  time.Duration
+	maxHist   int
 
 	mu      sync.RWMutex
 	cur     *Snapshot
@@ -183,16 +185,58 @@ func (p *StatsPoller) Run() {
 	}
 }
 
+// Socket çalışmazsa gözlemci config'teki başka bir socket'e geçebilir.
+func (p *StatsPoller) SetSocket(s string) {
+	p.sockMu.Lock()
+	p.socket = s
+	p.sockMu.Unlock()
+}
+
+func (p *StatsPoller) Socket() string {
+	p.sockMu.Lock()
+	defer p.sockMu.Unlock()
+	return p.socket
+}
+
+// Stats kaç süredir okunamıyor (0: sorun yok)
+func (p *StatsPoller) FailingFor() time.Duration {
+	p.sockMu.Lock()
+	defer p.sockMu.Unlock()
+	if p.failSince.IsZero() {
+		return 0
+	}
+	return time.Since(p.failSince)
+}
+
+// Son N dakikada backend'lerin aldığı toplam istek (log gözlemiyle karşılaştırmak için)
+func (p *StatsPoller) BackendRequests(minutes int) float64 {
+	st := p.State(minutes)
+	if st.Window == nil || st.Cur == nil {
+		return 0
+	}
+	var n float64
+	for _, r := range st.Cur.Rows {
+		if r["type"] == "1" {
+			n += st.Window.Rows[r["pxname"]+"|"+r["svname"]].N
+		}
+	}
+	return n
+}
+
 func (p *StatsPoller) tick() {
-	infoRaw, err := query(p.socket, "show info")
+	sock := p.Socket()
+	infoRaw, err := query(sock, "show info")
 	if err == nil {
 		var statRaw string
-		statRaw, err = query(p.socket, "show stat")
+		statRaw, err = query(sock, "show stat")
 		if err == nil {
 			var rows []map[string]string
 			rows, err = parseStat(statRaw)
 			if err == nil {
 				p.store(&Snapshot{At: time.Now().UnixMilli(), Info: parseInfo(infoRaw), Rows: rows, Header: headerOf(statRaw)})
+				p.sockMu.Lock()
+				p.failSince = time.Time{}
+				p.sockMu.Unlock()
 				return
 			}
 		}
@@ -201,6 +245,11 @@ func (p *StatsPoller) tick() {
 	p.lastErr = err.Error()
 	p.errAt = time.Now().UnixMilli()
 	p.mu.Unlock()
+	p.sockMu.Lock()
+	if p.failSince.IsZero() {
+		p.failSince = time.Now()
+	}
+	p.sockMu.Unlock()
 }
 
 func headerOf(statRaw string) []string {

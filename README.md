@@ -16,7 +16,9 @@ Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur
 ## Temel kurallar
 
 - **HAProxy config'ine ve servisine dokunmaz.** Reload ve restart yapmaz.
-- **Her sunucuya kendini uydurur.** Kurulum, çalışan HAProxy'nin config'ini sadece okuyarak stats socket'ini ve log'unu kendisi bulur ve bulduğunu gerçekten dener.
+- **Her sunucuya kendini uydurur.** Ajan, çalışan HAProxy'nin config'ini sadece okuyarak stats socket'ini, log kaynağını ve her frontend'in log biçimini kendisi bulur. Özel `log-format` tanımları da okunur.
+- **Çalışırken izler, yeniden kurulum istemez.** Config değişip HAProxy reload edilince (yeni log biçimi, yeni Host yakalaması, yeni backend) ajan bunu en geç 30 saniyede fark eder ve kendini günceller. Log kaynağı susarsa yenisini arar; stats socket çalışmazsa config'teki başka bir socket'e geçer.
+- **Eksiği panelde söyler.** Config'te veriyi kısıtlayan bir şey varsa (log kapalı, `dontlog-normal`, alan adı yakalanmıyor, sağlık kontrolü yok, okunamayan log satırları...) panelin üstündeki "Yapılandırma notları" bölümünde ne olduğunu, neyi etkilediğini ve eklenebilecek config satırını yazar.
 - **Emin olamazsa kurmaz.** Çalışan bir stats socket bulamazsa hiçbir şey değiştirmeden durur ve sebebini yazar.
 - **Sadece okur.** HAProxy'ye yalnızca `show info` ve `show stat` komutlarını gönderir. Başka komut gönderen kod yoktur (bkz. `haproxy.go` içindeki `allowedCommands`).
 - **Hassas veri tutmaz.** Log'daki sorgu parametreleri (`?token=...` gibi) hafızada bile tutulmaz.
@@ -77,6 +79,7 @@ Seçenekler:
 | `ALLOW=10.234.0.0/16 ./install.sh` | Panele sadece bu ağ(lar)dan erişilebilir; virgülle birden fazla ağ ya da tek IP verilebilir |
 | `LISTEN=10.0.0.5 ./install.sh` | Panelin adresini elle verir |
 | `LISTEN=127.0.0.1 ./install.sh` | Paneli sadece sunucunun içinden açar (SSH tüneliyle kullanılır) |
+| `LOG=/yol/haproxy.log ./install.sh` | Log kaynağını elle sabitler (varsayılan: ajan kendisi bulur ve izler) |
 
 Güncellemede `ALLOW` verilmezse önceki kurulumdaki liste korunur.
 
@@ -118,6 +121,24 @@ Paketi kendi bilgisayarına indir, sunucuya kopyala, sonra 1. adımdaki `tar` sa
 scp haproxy-lens-linux-amd64.tar.gz SHA256SUMS root@SUNUCU_ADRESI:/root/
 ```
 
+## Yapılandırma notları
+
+Panelin üst kısmındaki bu bölüm, o sunucunun config'inde ya da ortamında paneli kısıtlayan her şeyi listeler. Uyarı varsa kendiliğinden açık gelir. Her notta şunlar yazar: ne eksik, neyi etkiliyor, istersen config'e eklenebilecek satır ve config'teki yeri (`haproxy.cfg:39` gibi). Aynı notlar `./install.sh --check` raporunda da çıkar.
+
+| Not | Ne demek |
+|---|---|
+| Frontend log yazmıyor | `no log` ya da log hedefi yok; log bölümü bu trafiği göremez |
+| Trafik kayıtları log seviyesine takılıyor | Log hedefleri `notice` gibi bir seviyeyle sınırlı; HAProxy trafiği `info` seviyesinde yazar |
+| HTTP log biçimi kullanmıyor | `option httplog` yok; yol ve durum kodu log'da yok |
+| Log biçiminde eksik alanlar | Özel `log-format` durum kodu, yol, backend/sunucu ya da istemci IP'si içermiyor |
+| Başarılı istekleri log'a yazmıyor | `option dontlog-normal` açık; sadece hatalar log'a düşüyor |
+| Alan adını log'a yazmıyor / sadece bazı isteklerde yakalıyor | Host başlığı yakalanmıyor ya da koşullu yakalanıyor |
+| Sağlık kontrolü yok | `check` olmayan sunucular; düşerlerse HAProxy fark etmez |
+| Log satırlarının bir kısmı okunamadı | Satırlar config'teki biçimle uyuşmuyor; örnekleri notta görünür (sorgu parametreleri gizli) |
+| Stats'ta trafik var ama log'da yok | Trafiğin geçtiği yerin log'u kapalı ya da başka yere gidiyor |
+
+Ajan config'e hiçbir şey yazmaz. Önerilen bir satırı eklemek senin kararın; eklersen HAProxy reload edildikten sonra panel en geç 30 saniye içinde kendiliğinden uyum sağlar ve not kalkar.
+
 ## Kurulum sunucuda neleri değiştirir
 
 | Ne | Nerede |
@@ -133,7 +154,7 @@ Başka hiçbir dosyaya yazmaz. Servis, socket'e ve log'a erişmek için gereken 
 - **Stats socket:** unix yolu, `unix@`, `abns@`, `ipv4@` / `ipv6@` ve `host:port` biçimleri. Birden fazla socket varsa çalışan ilkini seçer.
 - **Config:** çalışan HAProxy'nin komut satırındaki bütün `-f` dosyaları ve klasörleri (`conf.d` gibi).
 - **Log kaynağı:** syslog dosyası (yeri rsyslog/syslog-ng ayarından bulunur) ya da journald.
-- **Log biçimi:** varsayılan `option httplog`.
+- **Log biçimi:** `option httplog`, `option httpslog`, `option tcplog` ve özel `log-format` tanımları (JSON benzeri biçimler dahil). `defaults` mirası, adlı `defaults` bölümleri ve `from` desteklenir. Tanınmayan değişkenler atlanır; panelin ihtiyaç duyduğu bir alan yoksa bu not olarak raporlanır. `option httplog clf` (CLF) henüz desteklenmiyor.
 - **İşletim sistemi:** systemd kullanan Linux dağıtımları, amd64 ve arm64.
 
 ## Alan adı (hangi domaine istek gelmiş)
@@ -155,7 +176,7 @@ Alan adını görmek istediğin bir LB'de bunu sen eklemeye karar verirsen en ba
 
 - **Alan adı:** Varsayılan `httplog` biçimi Host bilgisini içermez. Bu yüzden 403 ve 503 alan isteklerde sadece path görünür.
 - **Gerçek IP:** Cloudflare arkasından gelen isteklerde log'daki IP Cloudflare'e aittir; panel bu IP'leri "Cloudflare" diye etiketler.
-- **Özel log biçimi:** Özel `log-format` kullanan sunucularda log analizi kendiliğinden kapanır; stats paneli tam çalışır.
+- **Log biçimi tahmini değil:** Ajan satırları config'teki log tanımına göre okur. Config'te olmayan bir biçimle gelen satırlar (ör. başka bir sunucudan aynı dosyaya yazılanlar) okunamaz ve "Yapılandırma notları"nda örnekleriyle görünür.
 - **Geçmiş:** Grafik ve 5xx verisi 1 saat hafızada tutulur; ajan ya da HAProxy yeniden başlarsa sıfırdan dolmaya başlar. O sırada panel, aralığın gerçekte kaç dakikayı kapsadığını yazar.
 - **Tek sunucu:** Her kurulum sadece kendi sunucusunu gösterir.
 - **Şifre ve HTTPS yok:** Erişim sadece ağ adresine göre sınırlanır. İzinli ağdaki herkes paneli görebilir; gerekirse `ALLOW` ile yönetim ağına daralt.

@@ -5,25 +5,21 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"io"
 	"net"
 	"os"
 	"os/exec"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // option httplog biçimi:
 // %ci:%cp [%tr] %ft %b/%s %TR/%Tw/%Tc/%Tr/%Ta %ST %B %CC %CS %tsc %ac/%fc/%bc/%sc/%rc %sq/%bq %hr %hs %{+Q}r
-// Gruplar: 1 istemci, 2 tarih, 3 frontend, 4 backend, 5 sunucu, 6 Ta, 7 durum, 8 sonlanma,
-// 9 yakalanan başlıklar ({...} blokları), 10 istek satırı, 11 istek satırından sonraki alanlar
-// (option httpslog ya da sonuna alan eklenmiş log-format).
-var reHTTPLog = regexp.MustCompile(`^(\S+):\d+ \[([^\]]+)\] (\S+) (\S+)/(\S+) -?\d+/-?\d+/-?\d+/-?\d+/\+?(-?\d+) (-?\d+) \+?\d+ \S+ \S+ (\S{4}) \d+/\d+/\d+/\d+/\+?\d+ \d+/\d+ ((?:\{[^}]*\} )*)"([^"]*)"(?:\s+(.*?))?\s*$`)
-
 // Alan adı gibi görünen değer: harf içeren bir uzantı şart (böylece IP'ler ve User-Agent elenir)
 var reHostName = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,63}(:\d{1,5})?$`)
 var reHostIP = regexp.MustCompile(`^\d{1,3}(\.\d{1,3}){3}(:\d{1,5})?$`)
@@ -35,6 +31,7 @@ const (
 	KindNoServer = "noserver" // backend seçildi ama çalışan sunucu yok
 	KindRedirect = "redirect" // HAProxy yönlendirdi (ör. http -> https)
 	KindProxy    = "proxy"    // HAProxy'nin kendisi yanıtladı (400, 408, kopma...)
+	KindTCP      = "tcp"      // TCP modu satırı (HTTP ayrıntısı yok)
 )
 
 type logRecord struct {
@@ -117,44 +114,9 @@ func rawPathOf(uri string) string {
 	return uri
 }
 
+// Config bilinmeden, hazır biçimlerle okuma (testler ve kurulum öncesi kontrol için)
 func parseLogLine(line string) (logRecord, bool) {
-	var rec logRecord
-	// syslog satırı ("... haproxy[123]: mesaj") ya da journald'dan gelen çıplak mesaj
-	msg := line
-	if i := strings.Index(line, "]: "); i >= 0 && strings.Contains(line[:i], "haproxy[") {
-		msg = line[i+3:]
-	}
-	m := reHTTPLog.FindStringSubmatch(msg)
-	if m == nil {
-		return rec, false
-	}
-	at, err := time.ParseInLocation("02/Jan/2006:15:04:05.000", m[2], time.Local)
-	if err != nil {
-		return rec, false
-	}
-	rec.At = at
-	rec.Client = m[1]
-	rec.TLS = strings.HasSuffix(m[3], "~")
-	rec.Frontend = strings.TrimSuffix(m[3], "~")
-	rec.Backend = m[4]
-	rec.Server = m[5]
-	rec.Ta, _ = strconv.Atoi(m[6])
-	rec.Status, _ = strconv.Atoi(m[7])
-	rec.Term = m[8]
-	uri := ""
-	parts := strings.SplitN(m[10], " ", 3)
-	if len(parts) >= 2 {
-		rec.Method = parts[0]
-		uri = parts[1]
-		rec.Path = normPath(uri)
-		rec.RawPath = rawPathOf(uri)
-	} else {
-		rec.Path = m[10] // <BADREQ> gibi
-		rec.RawPath = m[10]
-	}
-	rec.Host = extractHost(m[9], uri, m[11])
-	rec.Kind = classify(rec)
-	return rec, true
+	return defaultParser.Parse(line)
 }
 
 func classify(r logRecord) string {
@@ -337,47 +299,150 @@ func newBucket() *bucket {
 }
 
 type LogAnalyzer struct {
-	source  string // "file:/yol" ya da "journal:haproxy"
-	path    string
-	cfNets  []*net.IPNet
-	mu      sync.Mutex
-	buckets map[int64]*bucket
-	lines   int64
-	parsed  int64
-	lastAt  time.Time
-	lastErr string
+	source   string // "file:/yol", "journal:haproxy" ya da "" (henüz yok)
+	path     string
+	cfNets   []*net.IPNet
+	parser   atomic.Pointer[LogParser]
+	mu       sync.Mutex
+	stop     chan struct{} // kaynak değişince eski okuyucuyu durdurur
+	changed  chan struct{}
+	buckets  map[int64]*bucket
+	lines    int64
+	parsed   int64
+	tcpLines int64
+	lastAt   time.Time
+	lastLine time.Time // kaynaktan en son satır geldiği an (okunmasa bile)
+	lastErr  string
+	// okunamayan trafik satırları: dakikalık sayım + son örnekler
+	unparsed map[int64]int64
+	samples  []string
+}
+
+var reTrafficLike = regexp.MustCompile(`^\S+:\d+ |^\d{1,3}(\.\d{1,3}){3}[ :,]|^[\[{]|\d{2}/\w{3}/\d{4}:\d{2}:\d{2}:\d{2}`)
+var reQuery = regexp.MustCompile(`\?[^ "]*`)
+
+func normSource(source string) string {
+	if source == "" || strings.HasPrefix(source, "journal:") || strings.HasPrefix(source, "file:") {
+		return source
+	}
+	return "file:" + source
 }
 
 func NewLogAnalyzer(source, cloudflareList string) *LogAnalyzer {
-	if !strings.HasPrefix(source, "journal:") && !strings.HasPrefix(source, "file:") {
-		source = "file:" + source
-	}
+	source = normSource(source)
 	_, path, _ := strings.Cut(source, ":")
 	nets := append(builtinCloudflareNets(), loadCIDRs(cloudflareList)...)
-	return &LogAnalyzer{source: source, path: path, cfNets: nets, buckets: map[int64]*bucket{}}
+	a := &LogAnalyzer{source: source, path: path, cfNets: nets, buckets: map[int64]*bucket{},
+		stop: make(chan struct{}), changed: make(chan struct{}, 1), unparsed: map[int64]int64{}}
+	a.parser.Store(defaultParser)
+	return a
+}
+
+// Config değişince yeni ayrıştırıcı; okuma kesilmeden devreye girer. Eski biçime göre
+// "okunamadı" sayılan satırlar yeni durumu yansıtmadığı için o sayaç sıfırlanır.
+func (a *LogAnalyzer) SetParser(p *LogParser) {
+	a.parser.Store(p)
+	a.mu.Lock()
+	a.unparsed = map[int64]int64{}
+	a.samples = nil
+	a.mu.Unlock()
+}
+
+// Log kaynağını değiştirir; eski okuyucu durur, yenisi başlar.
+func (a *LogAnalyzer) SetSource(source string) {
+	source = normSource(source)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if source == a.source {
+		return
+	}
+	a.source = source
+	_, a.path, _ = strings.Cut(source, ":")
+	a.lastErr = ""
+	close(a.stop)
+	a.stop = make(chan struct{})
+	select {
+	case a.changed <- struct{}{}:
+	default:
+	}
+}
+
+func (a *LogAnalyzer) Source() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.source
+}
+
+// Kaynaktan en son ne zaman satır geldi (kaynak sessiz mi?)
+func (a *LogAnalyzer) LastLine() time.Time {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.lastLine
 }
 
 func (a *LogAnalyzer) handleLine(line string) {
+	line = strings.TrimRight(line, "\r\n")
+	now := time.Now()
 	a.mu.Lock()
 	a.lines++
+	a.lastLine = now
 	a.mu.Unlock()
-	if rec, ok := parseLogLine(strings.TrimRight(line, "\r\n")); ok {
+	rec, ok := a.parser.Load().Parse(line)
+	if ok {
+		if rec.Kind == KindTCP {
+			a.mu.Lock()
+			a.tcpLines++
+			a.mu.Unlock()
+			return
+		}
 		a.add(rec)
+		return
 	}
+	msg := syslogMessage(line)
+	if !reTrafficLike.MatchString(msg) {
+		return // "Server x is DOWN" gibi olay satırı; okunamayan sayılmaz
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.unparsed[now.Unix()/60]++
+	if len(a.samples) >= 3 {
+		a.samples = a.samples[1:]
+	}
+	smp := reQuery.ReplaceAllString(msg, "?…") // sorgudaki token/kimlikler saklanmaz
+	if len(smp) > 400 {
+		smp = smp[:400] + "…"
+	}
+	a.samples = append(a.samples, smp)
 }
 
 // journald'dan okuma: "journalctl -f" çıktısını satır satır işler, kapanırsa yeniden başlatır.
-func (a *LogAnalyzer) runJournal() {
+func (a *LogAnalyzer) runJournal(tag string, stop chan struct{}) {
 	n := "2000"
 	for {
-		cmd := exec.Command("journalctl", "--no-pager", "-q", "-o", "cat", "-f", "-n", n, "-t", a.path)
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			select {
+			case <-stop:
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+		cmd := exec.CommandContext(ctx, "journalctl", "--no-pager", "-q", "-o", "cat", "-f", "-n", n, "-t", tag)
 		out, err := cmd.StdoutPipe()
 		if err == nil {
 			err = cmd.Start()
 		}
 		if err != nil {
+			cancel()
 			a.setErr("journalctl başlatılamadı: " + err.Error())
-			time.Sleep(10 * time.Second)
+			if sleepOrStop(10*time.Second, stop) {
+				return
+			}
 			continue
 		}
 		a.setErr("")
@@ -388,8 +453,20 @@ func (a *LogAnalyzer) runJournal() {
 			a.handleLine(sc.Text())
 		}
 		_ = cmd.Wait()
+		cancel()
 		a.setErr("journalctl kapandı, yeniden başlatılıyor")
-		time.Sleep(5 * time.Second)
+		if sleepOrStop(5*time.Second, stop) {
+			return
+		}
+	}
+}
+
+func sleepOrStop(d time.Duration, stop chan struct{}) bool {
+	select {
+	case <-stop:
+		return true
+	case <-time.After(d):
+		return false
 	}
 }
 
@@ -530,12 +607,30 @@ func (a *LogAnalyzer) add(r logRecord) {
 	}
 }
 
+// Kaynak değiştikçe uygun okuyucuyu başlatır.
 func (a *LogAnalyzer) Run() {
-	if strings.HasPrefix(a.source, "journal:") {
-		a.runJournal()
-		return
+	for {
+		a.mu.Lock()
+		src, path, stop := a.source, a.path, a.stop
+		a.mu.Unlock()
+		switch {
+		case src == "":
+			<-a.changed
+		case strings.HasPrefix(src, "journal:"):
+			a.runJournal(path, stop)
+		default:
+			a.runFile(path, stop)
+		}
 	}
+}
+
+func (a *LogAnalyzer) runFile(path string, stop chan struct{}) {
 	var f *os.File
+	defer func() {
+		if f != nil {
+			f.Close()
+		}
+	}()
 	var rd *bufio.Reader
 	var info os.FileInfo
 	var pending strings.Builder
@@ -543,10 +638,12 @@ func (a *LogAnalyzer) Run() {
 	for {
 		if f == nil {
 			var err error
-			f, err = os.Open(a.path)
+			f, err = os.Open(path)
 			if err != nil {
 				a.setErr(err.Error())
-				time.Sleep(5 * time.Second)
+				if sleepOrStop(5*time.Second, stop) {
+					return
+				}
 				continue
 			}
 			a.setErr("")
@@ -574,8 +671,10 @@ func (a *LogAnalyzer) Run() {
 			pending.Reset()
 		}
 		// Dosya sonu: yeni satır bekle
-		time.Sleep(500 * time.Millisecond)
-		st, serr := os.Stat(a.path)
+		if sleepOrStop(500*time.Millisecond, stop) {
+			return
+		}
+		st, serr := os.Stat(path)
 		if serr != nil {
 			continue // logrotate anı; dosya birazdan yeniden oluşur
 		}
@@ -590,6 +689,32 @@ func (a *LogAnalyzer) Run() {
 			pending.Reset()
 		}
 	}
+}
+
+// Son N dakikanın özeti: notlar için
+func (a *LogAnalyzer) Observe(minutes int) logObservation {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	o := logObservation{Enabled: true, Source: a.source, Err: a.lastErr, Samples: append([]string(nil), a.samples...)}
+	from := time.Now().Unix()/60 - int64(minutes) + 1
+	for m, b := range a.buckets {
+		if m < from {
+			continue
+		}
+		for _, v := range b.kinds {
+			o.Parsed += v
+		}
+		o.Served += b.kinds[KindServed]
+		o.HostLines += b.withHost
+	}
+	for m, n := range a.unparsed {
+		if m >= from {
+			o.Unparsed += n
+		} else if m < from-120 {
+			delete(a.unparsed, m)
+		}
+	}
+	return o
 }
 
 func (a *LogAnalyzer) setErr(s string) {
@@ -654,6 +779,9 @@ func topN(m map[string]int64, n int) []NameCount {
 		out = append(out, NameCount{Name: k, N: v})
 	}
 	sort.Slice(out, func(i, j int) bool {
+		if (out[i].Name == otherKey) != (out[j].Name == otherKey) {
+			return out[j].Name == otherKey // "(diğer)" hep sonda
+		}
 		if out[i].N != out[j].N {
 			return out[i].N > out[j].N
 		}
@@ -690,6 +818,7 @@ type ClientRow struct {
 }
 type LogReport struct {
 	Enabled    bool             `json:"enabled"`
+	Searching  bool             `json:"searching,omitempty"` // log kaynağı henüz bulunamadı, aranıyor
 	Source     string           `json:"source,omitempty"`
 	Error      string           `json:"error,omitempty"`
 	Minutes    int              `json:"minutes"`
