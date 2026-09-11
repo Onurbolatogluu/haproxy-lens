@@ -1,5 +1,9 @@
 # Değişiklikler
 
+Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak komutlar da var.
+GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
+sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
+
 ## 0.7.0
 
 - Ajan artık her ortama kendini uyduruyor ve çalışırken izliyor: HAProxy config'i ya da süreçleri değişince (reload) en geç 30 saniyede yeniden okuyor; yeniden kurulum gerekmiyor.
@@ -10,6 +14,20 @@
 - Stats socket bir dakika çalışmazsa config'teki başka bir socket deneniyor.
 - Servis, log'u ileride başka bir yerden okuyabilsin diye `adm` ve `systemd-journal` gruplarıyla (varsa) kuruluyor.
 
+### Kurulum ve güncelleme
+
+Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    sha256sum -c --ignore-missing SHA256SUMS
+    tar xzf haproxy-lens-linux-amd64.tar.gz
+    cd haproxy-lens
+    ./install.sh
+
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.6.0
 
 - "Engellenen ve karşılıksız kalan istekler" ve "Hata alan adresler" satırları tıklanınca açılıyor: tam adres, gerçek yollar ({id} ile birleşmiş satırlarda) ve isteği gönderen IP'ler (Cloudflare etiketli).
@@ -18,12 +36,40 @@
 - Ayrıştırıcı istek satırından sonra ek alanı olan satırları da okuyor (`option httpslog` gibi).
 - Ayrıntılar için bellek sınırı: dakikada en fazla 300 satırın ayrıntısı tutuluyor, sayılar yine eksiksiz.
 
+### Kurulum ve güncelleme
+
+Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    sha256sum -c --ignore-missing SHA256SUMS
+    tar xzf haproxy-lens-linux-amd64.tar.gz
+    cd haproxy-lens
+    ./install.sh
+
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.5.0
 
 - Backend ayrıntısında 5xx özetinin yanına 4xx (istemci hatası) özeti eklendi. 4xx'in genelde istemci kaynaklı olduğu (404, 401/403, 429) not ediliyor.
 - Sunucu tablosuna 4xx sütunu eklendi (5xx'in yanına). Her ikisi de seçili zaman aralığına göre.
 - Log bölümüne "Hata alan adresler" paneli: sunucuya ulaşıp 4xx/5xx dönen path'ler, en çok hata alan üstte. Her path'in yanında tam kod dökümü (ör. 502×88, 503×57) ve kısa açıklaması.
 - Ajan artık log'da path başına tam hata kodlarını (4xx/5xx) sayıyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    sha256sum -c --ignore-missing SHA256SUMS
+    tar xzf haproxy-lens-linux-amd64.tar.gz
+    cd haproxy-lens
+    ./install.sh
+
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
 
 ## 0.4.0
 
@@ -33,6 +79,20 @@
 - Durum özetindeki 5xx uyarısı artık seçili aralığa göre hesaplanıyor (2 saniyelik ölçümün oynaklığı yok) ve en çok hata dönen sunucuyu yazıyor.
 - Ajan her 10 saniyede satır bazında sayaç örneği tutuyor (son 1 saat); grafik verisi en fazla 360 noktaya seyreltilerek gönderiliyor.
 
+### Kurulum ve güncelleme
+
+Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    sha256sum -c --ignore-missing SHA256SUMS
+    tar xzf haproxy-lens-linux-amd64.tar.gz
+    cd haproxy-lens
+    ./install.sh
+
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.3.0
 
 - Panel artık sunucunun kendi iç IP'sinde açılıyor. Adres, varsayılan rotanın geçtiği arayüzden seçiliyor; keepalived VIP'leri atlanıyor, ağ ayarlarında (netplan, ifupdown, ifcfg, NetworkManager, systemd-networkd) sabit tanımlı adres tercih ediliyor.
@@ -41,6 +101,20 @@
 - `LISTEN=IP ./install.sh` ile adres elle verilebiliyor.
 - `./install.sh --check` raporuna "Panel adresi" bölümü eklendi.
 - Servis ağ hazır olduktan sonra başlıyor (`network-online.target`).
+
+### Kurulum ve güncelleme
+
+Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    sha256sum -c --ignore-missing SHA256SUMS
+    tar xzf haproxy-lens-linux-amd64.tar.gz
+    cd haproxy-lens
+    ./install.sh
+
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
 
 ## 0.2.0 (2026-09-10)
 
@@ -52,6 +126,34 @@
 - Kurulum ve kaldırma sonunda config sha256 özeti ve HAProxy süreç numarası doğrulaması.
 - Cloudflare IP aralıkları programın içinde; ayrı bir liste dosyası gerekmiyor.
 
+### Kurulum ve güncelleme
+
+Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    sha256sum -c --ignore-missing SHA256SUMS
+    tar xzf haproxy-lens-linux-amd64.tar.gz
+    cd haproxy-lens
+    ./install.sh
+
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.1.0 (2026-09-10)
 
 - İlk sürüm: stats paneli, log analizi, systemd servisi, kurulum ve kaldırma betikleri.
+
+### Kurulum ve güncelleme
+
+Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    sha256sum -c --ignore-missing SHA256SUMS
+    tar xzf haproxy-lens-linux-amd64.tar.gz
+    cd haproxy-lens
+    ./install.sh
+
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).

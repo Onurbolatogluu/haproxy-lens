@@ -215,9 +215,13 @@ Dosyalar:
 
 ## Yeni sürüm yayınlama
 
-1. `CHANGELOG.md` dosyasına yeni sürümü yaz.
-2. GitHub'da **Releases > Draft a new release**, yeni bir etiket oluştur (ör. `v0.2.1`) ve **Publish release**'e bas.
-3. **Actions** sekmesindeki `release` işi birkaç dakika içinde paketleri derleyip release'e ekler.
+1. `CHANGELOG.md` dosyasına yeni sürümü yaz. Bir önceki sürümün "Kurulum ve güncelleme" bölümünü olduğu gibi kopyala; her sürümde aynıdır.
+2. GitHub'da **Releases > Draft a new release**, yeni bir etiket oluştur (ör. `v0.7.1`), başlığa `haproxy-lens 0.7.1` yaz.
+3. Açıklama kutusuna `CHANGELOG.md`'deki o sürüm bölümünün tamamını yapıştır (en üstteki sürüm numarası satırı hariç). Kurulum komutları böylece release sayfasında hazır gelir.
+4. **Publish release**'e bas. **Set as a pre-release** işaretli olmamalı, yoksa `latest` adresi o sürümü göstermez.
+5. **Actions** sekmesindeki `release` işi birkaç dakika içinde paketleri derleyip release'e ekler. Sunucularda `wget` çekmeden önce bu işin yeşile dönmesini bekle.
+
+Sürüm numarası: hata düzeltmesinde son hane (0.7.0 → 0.7.1), yeni özellikte ortadaki hane (0.7.0 → 0.8.0) artar.
 
 ## Lisans
 
