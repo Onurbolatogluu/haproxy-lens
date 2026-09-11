@@ -18,7 +18,7 @@ Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur
 - **Sadece okur.** HAProxy'ye yalnızca `show info` ve `show stat` komutlarını gönderir. Başka komut gönderen kod yoktur (bkz. `haproxy.go` içindeki `allowedCommands`).
 - **Hassas veri tutmaz.** Log'daki sorgu parametreleri (`?token=...` gibi) hafızada bile tutulmaz.
 - **Kaynak tavanı var.** CPU %10 ve RAM 128 MB sınırıyla, düşük öncelikte çalışır; `/etc` ve `/usr` altına yazamaz.
-- **Dışarıya açılmaz.** Panel sadece `127.0.0.1` üzerinde çalışır, SSH tüneliyle açılır.
+- **İnternete açılmaz.** Panel sunucunun kendi iç IP'sinde açılır (keepalived VIP'inde değil) ve sadece izin verilen ağlardan gelen isteklere cevap verir. Varsayılan liste özel ağlardır (10.x, 172.16-31.x, 192.168.x). Sunucunun ana IP'si herkese açık bir adresse panel `127.0.0.1`'de kalır.
 - **Kanıtlar.** Kurulum ve kaldırma sonunda config dosyalarının sha256 özetinin ve HAProxy süreç numaralarının değişmediğini kendisi kontrol edip yazar.
 
 ## Kurulum
@@ -65,17 +65,35 @@ Doğrulama: HAProxy config dosyaları değişmedi (1 dosya, sha256 aynı).
 Doğrulama: HAProxy yeniden başlatılmadı ve reload edilmedi (süreç numaraları aynı).
 ```
 
-Onay sormadan kurmak için `./install.sh -y`, farklı port için `PORT=8415 ./install.sh`.
+Seçenekler:
+
+| Komut | Ne yapar |
+|---|---|
+| `./install.sh -y` | Onay sormadan kurar |
+| `PORT=8415 ./install.sh` | Farklı port kullanır |
+| `ALLOW=10.234.0.0/16 ./install.sh` | Panele sadece bu ağ(lar)dan erişilebilir; virgülle birden fazla ağ ya da tek IP verilebilir |
+| `LISTEN=10.0.0.5 ./install.sh` | Panelin adresini elle verir |
+| `LISTEN=127.0.0.1 ./install.sh` | Paneli sadece sunucunun içinden açar (SSH tüneliyle kullanılır) |
+
+Güncellemede `ALLOW` verilmezse önceki kurulumdaki liste korunur.
 
 ### 4. Paneli aç
 
-Kendi bilgisayarında:
+Tarayıcıda kurulumun sonunda yazan adresi aç, örneğin `http://10.0.0.5:8405`.
 
-```bash
-ssh -L 8405:127.0.0.1:8405 root@SUNUCU_ADRESI
-```
+Panel `127.0.0.1`'de kurulduysa kendi bilgisayarında `ssh -L 8405:127.0.0.1:8405 root@SUNUCU_ADRESI` çalıştır, sonra `http://localhost:8405` adresini aç.
 
-Bağlantı açıkken tarayıcıda: http://localhost:8405
+Sunucuda güvenlik duvarı açıksa (ufw, firewalld) panelin portuna kendi ağın için izin vermen gerekebilir. Kurulum bunu fark ederse hatırlatır ama güvenlik duvarına dokunmaz.
+
+### Panelin adresi nasıl seçilir
+
+1. Varsayılan rotanın geçtiği arayüz bulunur (`/proc/net/route`).
+2. O arayüzdeki keepalived VIP'leri atlanır (`/etc/keepalived/keepalived.conf` ve `include` ettiği dosyalar). VIP master/slave arasında yer değiştirdiği için panel her sunucunun kendi adresinde durur.
+3. Kalan adreslerden ağ ayarlarında sabit tanımlı olan seçilir: netplan, `/etc/network/interfaces`, `ifcfg-*`, NetworkManager, systemd-networkd.
+4. Bulunamazsa arayüzün birincil adresi seçilir; `/32`, `secondary` ve etiketli (`eth0:1`) adresler VIP olabileceği için atlanır.
+5. Seçilen adres herkese açık bir IP ise kullanılmaz, panel `127.0.0.1`'de kalır.
+
+`./install.sh --check` raporundaki "Panel adresi" bölümü hangi adresin neden seçildiğini ve hangilerinin neden atlandığını gösterir.
 
 ## Güncelleme
 
@@ -122,11 +140,12 @@ Başka hiçbir dosyaya yazmaz. Servis, socket'e ve log'a erişmek için gereken 
 - **Özel log biçimi:** Özel `log-format` kullanan sunucularda log analizi kendiliğinden kapanır; stats paneli tam çalışır.
 - **Geçmiş:** Grafik verisi 1 saat hafızada tutulur; servis yeniden başlarsa sıfırlanır.
 - **Tek sunucu:** Her kurulum sadece kendi sunucusunu gösterir.
+- **Şifre ve HTTPS yok:** Erişim sadece ağ adresine göre sınırlanır. İzinli ağdaki herkes paneli görebilir; gerekirse `ALLOW` ile yönetim ağına daralt.
 
 ## Nasıl çalışır
 
 ```
-HAProxy ──(stats socket: show info, show stat)──► haproxy-lens ──► panel (127.0.0.1:8405)
+HAProxy ──(stats socket: show info, show stat)──► haproxy-lens ──► panel (sunucunun iç IP'si:8405)
    │                                                  ▲
    └──► syslog / journald ──(sadece okuma)────────────┘
 ```
@@ -150,6 +169,8 @@ Dosyalar:
 | `logtail.go` | Log dosyasını / journald'ı izleme ve özetleme |
 | `detect.go` | Kurulum öncesi otomatik tespit (`-detect`) |
 | `main.go` | Parametreler ve web sunucusu |
+| `listen.go` | Panelin dinleyeceği IP'nin seçimi (keepalived VIP hariç) |
+| `access.go` | Panele erişebilecek ağların kontrolü |
 | `webapp/` | Panel arayüzü (React) |
 | `deploy/` | `install.sh` ve `uninstall.sh` |
 

@@ -6,6 +6,8 @@
 #   ./install.sh           Raporu gösterir, onay ister, kurar (güncelleme için de aynı komut)
 #   ./install.sh -y        Onay sormadan kurar
 #   PORT=8415 ./install.sh Panel için farklı port
+#   LISTEN=10.0.0.5 ./install.sh     Panelin adresini elle ver (127.0.0.1 = sadece SSH tüneliyle)
+#   ALLOW=10.0.0.0/24 ./install.sh   Panele erişebilecek ağlar (varsayılan: özel ağlar)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -41,6 +43,20 @@ fi
 command -v systemctl >/dev/null || die "systemd bulunamadı"
 eval "$("$BIN" -detect-env)"
 
+# Panel adresi: elle verilmediyse tespit edilen iç IP, o da yoksa 127.0.0.1
+LISTEN="${LISTEN:-$DET_LISTEN_IP}"
+[ -n "$LISTEN" ] || LISTEN=127.0.0.1
+if [ "$LISTEN" != 127.0.0.1 ] && command -v ip >/dev/null; then
+  ip -o addr show | grep -qF " $LISTEN/" || die "$LISTEN bu sunucunun arayüzlerinde yok."
+fi
+case "$LISTEN" in *:*) LISTEN_HOST="[$LISTEN]" ;; *) LISTEN_HOST="$LISTEN" ;; esac
+# Erişim listesi: elle verilmediyse güncellemede önceki kurulumunki korunur
+if [ -z "${ALLOW+x}" ] && [ -f "$UNIT" ]; then
+  ALLOW="$(sed -n 's/^Environment="LENS_ALLOW=\(.*\)"$/\1/p' "$UNIT")"
+fi
+ALLOW="${ALLOW:-}"
+ALLOW_TEXT="$("$BIN" -show-allow -allow "$ALLOW")" || die "ALLOW listesi hatalı: $ALLOW"
+
 # 2) Port: güncellemede kendi servisimiz zaten o portta olabilir
 UPDATE=0
 [ -f "$UNIT" ] && UPDATE=1
@@ -54,7 +70,12 @@ echo "Yapılacaklar:"
 echo "  - /usr/local/bin/haproxy-lens ve $UNIT dosyaları"
 echo "  - Giriş yapamayan 'haproxy-lens' sistem kullanıcısı"
 echo "  - Servisin ek grupları: ${DET_GROUPS:-yok} (kullanıcı bu gruplara kalıcı olarak eklenmez)"
-echo "  - Panel: 127.0.0.1:$PORT (dışarıdan erişilemez, SSH tüneliyle açılır)"
+if [ "$LISTEN" = 127.0.0.1 ]; then
+  echo "  - Panel: 127.0.0.1:$PORT (dışarıdan erişilemez, SSH tüneliyle açılır)"
+else
+  echo "  - Panel: http://$LISTEN_HOST:$PORT"
+  echo "  - Panele erişebilecek ağlar: $ALLOW_TEXT (şifre yok; değiştirmek için ALLOW=ağ/önek)"
+fi
 echo "  - HAProxy config'ine ve servisine dokunulmaz."
 if [ "$YES" -ne 1 ]; then
   read -r -p "Devam edilsin mi? [e/H] " ans
@@ -77,7 +98,8 @@ cat > "$UNIT" <<UNITEOF
 # haproxy-lens kurulum betiği tarafından oluşturuldu. Kaldırmak için: uninstall.sh
 [Unit]
 Description=haproxy-lens: HAProxy icin salt okunur panel
-After=network.target haproxy.service
+After=network-online.target haproxy.service
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -87,7 +109,8 @@ SupplementaryGroups=$DET_GROUPS
 Environment="LENS_SOCKET=$(esc "$DET_SOCKET")"
 Environment="LENS_LOG=$(esc "$DET_LOG")"
 Environment="LENS_LOG_NOTE=$(esc "$DET_LOG_NOTE")"
-ExecStart=/usr/local/bin/haproxy-lens -socket \${LENS_SOCKET} -log \${LENS_LOG} -log-note \${LENS_LOG_NOTE} -listen 127.0.0.1:$PORT
+Environment="LENS_ALLOW=$(esc "$ALLOW")"
+ExecStart=/usr/local/bin/haproxy-lens -socket \${LENS_SOCKET} -log \${LENS_LOG} -log-note \${LENS_LOG_NOTE} -listen $LISTEN_HOST:$PORT -allow \${LENS_ALLOW}
 Restart=on-failure
 RestartSec=5
 
@@ -122,7 +145,7 @@ echo
 OK=0
 if command -v curl >/dev/null; then
   for _ in $(seq 1 10); do
-    if curl -s "http://127.0.0.1:$PORT/api/state" | grep -q '"ok":true'; then OK=1; break; fi
+    if curl -s "http://$LISTEN_HOST:$PORT/api/state" | grep -q '"ok":true'; then OK=1; break; fi
     sleep 1
   done
   if [ "$OK" -eq 1 ]; then
@@ -148,7 +171,17 @@ else
 fi
 
 echo
-echo "Paneli açmak için KENDİ bilgisayarında:"
-echo "  ssh -L $PORT:127.0.0.1:$PORT $(whoami)@$(hostname)"
-echo "Sonra tarayıcıda: http://localhost:$PORT"
+if [ "$LISTEN" = 127.0.0.1 ]; then
+  echo "Paneli açmak için KENDİ bilgisayarında:"
+  echo "  ssh -L $PORT:127.0.0.1:$PORT $(whoami)@$(hostname)"
+  echo "Sonra tarayıcıda: http://localhost:$PORT"
+else
+  echo "Panel: http://$LISTEN_HOST:$PORT"
+  echo "Erişebilecek ağlar: $ALLOW_TEXT"
+  if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+    echo "Not: ufw açık. Bu betik güvenlik duvarına dokunmaz; $PORT kapalıysa örnek: ufw allow from 10.0.0.0/8 to any port $PORT proto tcp"
+  elif command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then
+    echo "Not: firewalld açık. Bu betik güvenlik duvarına dokunmaz; $PORT kapalıysa kendi ağın için izin vermen gerekebilir."
+  fi
+fi
 echo "Kaldırmak için: $HERE/uninstall.sh"

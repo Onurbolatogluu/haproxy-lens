@@ -25,15 +25,26 @@ func main() {
 	logSrc := flag.String("log", "", "Log kaynağı: dosya yolu ya da journal:haproxy (boşsa log analizi kapalı)")
 	logNote := flag.String("log-note", "", "Log analizi kapalıysa panelde gösterilecek sebep")
 	cfList := flag.String("cloudflare-list", "", "Ek Cloudflare IP listesi (isteğe bağlı; yerleşik liste zaten var)")
-	listen := flag.String("listen", "127.0.0.1:8405", "Panelin dinleyeceği adres")
+	listen := flag.String("listen", "127.0.0.1:8405", "Panelin dinleyeceği adres (IP:port)")
+	allow := flag.String("allow", "", "Panele erişebilecek ağlar, virgülle (boşsa özel ağlar: "+defaultAllow+")")
 	interval := flag.Duration("interval", 2*time.Second, "Stats okuma aralığı")
 	detect := flag.Bool("detect", false, "Uyumluluk kontrolü: bul, dene, rapor ver ve çık (hiçbir şey değiştirmez)")
 	detectEnv := flag.Bool("detect-env", false, "Tespit sonucunu kurulum betiği için yaz ve çık")
+	showAllow := flag.Bool("show-allow", false, "-allow listesini doğrula, anlaşılır hâlini yaz ve çık")
 	showVersion := flag.Bool("version", false, "Sürümü yaz ve çık")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Println("haproxy-lens", version)
+		return
+	}
+	if *showAllow {
+		nets, err := parseAllow(*allow)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Hatalı izin listesi:", err)
+			os.Exit(1)
+		}
+		fmt.Println(netsString(nets))
 		return
 	}
 	if *detect || *detectEnv {
@@ -58,9 +69,15 @@ func main() {
 		return
 	}
 
+	allowNets, err := parseAllow(*allow)
+	if err != nil {
+		log.Fatalf("-allow hatalı: %v", err)
+	}
+	var listenIP net.IP
 	if host, _, err := net.SplitHostPort(*listen); err == nil {
-		if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
-			log.Printf("UYARI: panel %s adresinde dinliyor ve şifre koruması yok. SSH tüneliyle kullanmak için 127.0.0.1 önerilir.", *listen)
+		listenIP = net.ParseIP(host)
+		if listenIP == nil || !listenIP.IsLoopback() {
+			log.Printf("Panel %s adresinde açık; sadece şu ağlardan erişilebilir: %s", *listen, netsString(allowNets))
 		}
 	}
 
@@ -97,7 +114,7 @@ func main() {
 		mux.Handle("/", http.FileServer(http.FS(sub)))
 	}
 
-	srv := &http.Server{Addr: *listen, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Addr: *listen, Handler: allowOnly(allowNets, listenIP, mux), ReadHeaderTimeout: 5 * time.Second}
 	log.Printf("haproxy-lens %s başladı: http://%s (socket: %s, log: %q)", version, *listen, *socket, *logSrc)
 	log.Fatal(srv.ListenAndServe())
 }

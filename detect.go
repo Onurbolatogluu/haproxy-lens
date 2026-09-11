@@ -53,6 +53,7 @@ type detection struct {
 	Log         *logCand
 	LogNote     string
 	Groups      []string
+	Listen      listenChoice
 }
 
 var reTCPLogMsg = regexp.MustCompile(`^\S+:\d+ \[[^\]]+\] \S+ \S+/\S+ -?\d+/-?\d+/\+?-?\d+ \+?\d+ \S{2} `)
@@ -105,6 +106,9 @@ func runDetect(forceSocket, forceLog string) *detection {
 	if d.Log == nil {
 		d.LogNote = explainNoLog(d)
 	}
+
+	// ---- panelin dinleyeceği adres ----
+	d.Listen = detectListen()
 
 	// ---- servis kullanıcısının ihtiyaç duyacağı gruplar ----
 	seen := map[string]bool{}
@@ -535,6 +539,19 @@ func (d *detection) printReport(w io.Writer) {
 		}
 	}
 	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Panel adresi")
+	if d.Listen.Iface != "" {
+		fmt.Fprintf(w, "  Varsayılan rota arayüzü: %s\n", d.Listen.Iface)
+	}
+	for _, s := range d.Listen.Skipped {
+		fmt.Fprintf(w, "  ATLANDI %s\n", s)
+	}
+	if d.Listen.IP != "" {
+		fmt.Fprintf(w, "  TAMAM  %s (%s)\n", d.Listen.IP, d.Listen.Why)
+	} else {
+		fmt.Fprintf(w, "  NOT    %s. Panel 127.0.0.1'de açılacak (SSH tüneliyle). Elle vermek için: LISTEN=IP ./install.sh\n", d.Listen.Note)
+	}
+	fmt.Fprintln(w)
 	switch {
 	case d.Socket == nil:
 		fmt.Fprintln(w, "SONUÇ: KURULAMAZ. Çalışan ve erişilebilir bir stats socket bulunamadı; bu sunucuda hiçbir şey kurulmayacak.")
@@ -561,4 +578,5 @@ func (d *detection) printEnv(w io.Writer) {
 	fmt.Fprintf(w, "DET_LOG_NOTE=%s\n", shq(d.LogNote))
 	fmt.Fprintf(w, "DET_GROUPS=%s\n", shq(strings.Join(d.Groups, " ")))
 	fmt.Fprintf(w, "DET_CONFIG_FILES=%s\n", shq(strings.Join(d.ConfigFiles, " ")))
+	fmt.Fprintf(w, "DET_LISTEN_IP=%s\n", shq(d.Listen.IP))
 }
