@@ -419,6 +419,81 @@ function CodeChip({ code, n }) {
     </span>
   );
 }
+
+// Satıra tıklayınca açılan ayrıntı: tam adres (alan adı log'da varsa), gerçek yollar, IP'ler
+function ReqDetail({ d, path }) {
+  if (!d) {
+    return <p className="text-xs mt-2" style={{ color: C.faint }}>Bu satır için ayrıntı tutulmadı (o dakikada çok fazla farklı adres vardı).</p>;
+  }
+  const unknown = d.total - d.hostKnown;
+  const samples = (d.samples || []).filter((x) => x.name !== path || d.samples.length > 1);
+  const pathFor = (origin) => (samples.length === 1 ? samples[0].name : path);
+  const box = { background: C.bg, border: `1px solid ${C.line}` };
+  const Head = ({ children }) => <div className="text-xs mb-1" style={{ color: C.muted }}>{children}</div>;
+  return (
+    <div className="mt-2 rounded-md p-3 space-y-3 text-sm" style={box}>
+      <div>
+        <Head>Tam adres</Head>
+        {d.hostKnown === 0 ? (
+          <p className="text-xs leading-relaxed" style={{ color: C.faint }}>
+            Bu LB'nin log biçiminde alan adı yok, bu yüzden isteğin hangi alan adına geldiği bilinmiyor. Yol: <span style={{ color: C.text }}>{path}</span>
+          </p>
+        ) : (
+          <ul className="space-y-1">
+            {d.origins.filter((o) => o.name).map((o) => (
+              <li key={o.name} className="flex items-baseline justify-between gap-3">
+                <span className="tnum" style={{ wordBreak: "break-all", color: C.text }}>{o.name === "(diğer)" ? "(diğer alan adları)" : `${o.name}${pathFor(o.name)}`}</span>
+                <span className="tnum whitespace-nowrap" style={{ color: C.muted }}>×{fmtNum(o.n)}</span>
+              </li>
+            ))}
+            {unknown > 0 && (
+              <li className="text-xs" style={{ color: C.faint }}>
+                {fmtNum(unknown)} istekte alan adı log'a yazılmamış (yakalama sadece bazı isteklerde olabilir).
+              </li>
+            )}
+          </ul>
+        )}
+      </div>
+      {samples.length > 0 && (samples.length > 1 || samples[0].name !== path) && (
+        <div>
+          <Head>Gerçek yollar (sorgu parametreleri saklanmaz)</Head>
+          <ul className="space-y-1">
+            {samples.map((x) => (
+              <li key={x.name} className="flex items-baseline justify-between gap-3">
+                <span style={{ wordBreak: "break-all" }}>{x.name}</span>
+                <span className="tnum whitespace-nowrap" style={{ color: C.muted }}>×{fmtNum(x.n)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div>
+        <Head>Bu istekleri gönderen IP'ler</Head>
+        <ul className="grid gap-x-6 md:grid-cols-2">
+          {(d.ips || []).map((c) => (
+            <li key={c.ip} className="flex items-baseline justify-between gap-3 py-0.5">
+              <span className="tnum">{c.ip}{c.cloudflare && <span className="text-xs ml-2" style={{ color: C.faint }}>Cloudflare</span>}</span>
+              <span className="tnum" style={{ color: C.muted }}>×{fmtNum(c.n)}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// Tıklanınca açılıp kapanan satır
+function ExpandRow({ open, onToggle, head, children, first }) {
+  return (
+    <div style={{ borderTop: first ? "none" : `1px solid ${C.line}` }}>
+      <button type="button" onClick={onToggle} aria-expanded={open} className="hl-row w-full text-left flex gap-2 items-start py-2 px-1 rounded">
+        <span className="mt-0.5" style={{ color: C.muted, flexShrink: 0 }}>{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
+        <span className="flex-1" style={{ minWidth: 0 }}>{head}</span>
+      </button>
+      {open && <div className="pl-6 pb-2">{children}</div>}
+    </div>
+  );
+}
 function CodeBar({ row, compact }) {
   const { wrates, label } = useContext(WinCtx);
   const c = codeCounts(row, wrates);
@@ -1085,6 +1160,12 @@ function BackendList({ model, rates, expanded, onToggle, onFields }) {
 }
 
 function LogSection({ logs, minutes }) {
+  const [openRows, setOpenRows] = useState(() => new Set());
+  const toggleRow = (key) => setOpenRows((cur) => {
+    const n = new Set(cur);
+    if (n.has(key)) n.delete(key); else n.add(key);
+    return n;
+  });
   if (!logs) return null;
   if (!logs.enabled) {
     return (
@@ -1108,6 +1189,15 @@ function LogSection({ logs, minutes }) {
             {ago != null ? ` En son satır ${fmtDur(Math.max(0, ago))} önce.` : " Henüz satır okunmadı."}
             {" "}Sorgu parametreleri (?...) saklanmaz.
             {logs.source ? <span style={{ color: C.faint }}> Kaynak: {logs.source.replace(/^file:/, "").replace(/^journal:/, "journald, ")}.</span> : null}
+            {total > 0 && (
+              <span style={{ color: C.faint }}>
+                {" "}{logs.hostLines === 0
+                  ? "Bu LB'nin log biçiminde alan adı yok; ayrıntılarda yol ve IP görünür."
+                  : logs.hostLines >= total * 0.9
+                    ? "Log'da alan adı var; ayrıntılarda tam adres görünür."
+                    : `Alan adı satırların sadece ${fmtPct(logs.hostLines / total)} kadarında var.`}
+              </span>
+            )}
           </p>
         </div>
       </div>
@@ -1167,33 +1257,28 @@ function LogSection({ logs, minutes }) {
         </Panel>
 
         <Panel title="Engellenen ve karşılıksız kalan istekler"
-          note="403 alanlar ve hiçbir backend'e yönlendirilemeyip 503 alanlar. Varsayılan log biçiminde alan adı bulunmadığı için path gösteriliyor.">
+          note="403 alanlar ve hiçbir backend'e yönlendirilemeyip 503 alanlar. Satıra tıklayınca tam adres (alan adı log'da varsa), gerçek yollar ve isteği gönderen IP'ler açılır.">
           {(logs.blocked || []).length === 0 ? <p className="text-sm" style={{ color: C.faint }}>Bu aralıkta engellenen ya da karşılıksız istek yok.</p> : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
-                <thead>
-                  <tr className="text-xs" style={{ color: C.muted }}>
-                    <th className="py-2 pr-3 font-normal text-left">Adres</th>
-                    <th className="py-2 pr-3 font-normal text-left">Ne oldu</th>
-                    <th className="py-2 font-normal text-right">İstek</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {logs.blocked.slice(0, 20).map((b, i) => (
-                    <tr key={i} style={{ borderTop: `1px solid ${C.line}` }}>
-                      <td className="py-2 pr-3 align-top" style={{ maxWidth: 340, wordBreak: "break-all" }}>
-                        <span style={{ color: C.faint }}>{b.method} </span>{b.path}
-                      </td>
-                      <td className="py-2 pr-3 align-top whitespace-nowrap">
-                        <span className="inline-flex items-center gap-2">
-                          <span style={{ width: 8, height: 8, borderRadius: 2, background: KIND[b.kind]?.[1] }} />{KIND[b.kind]?.[0] || b.kind}
+            <div className="text-sm">
+              {logs.blocked.slice(0, 20).map((b, i) => {
+                const key = `b|${b.kind}|${b.method}|${b.path}`;
+                return (
+                  <ExpandRow key={key} first={i === 0} open={openRows.has(key)} onToggle={() => toggleRow(key)}
+                    head={
+                      <span className="flex items-baseline justify-between gap-3">
+                        <span style={{ minWidth: 0, wordBreak: "break-all" }}><span style={{ color: C.faint }}>{b.method} </span>{b.path}</span>
+                        <span className="flex items-baseline gap-3 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-2 text-xs" style={{ color: C.muted }}>
+                            <span style={{ width: 8, height: 8, borderRadius: 2, background: KIND[b.kind]?.[1] }} />{KIND[b.kind]?.[0] || b.kind}
+                          </span>
+                          <span className="tnum">{fmtNum(b.n)}</span>
                         </span>
-                      </td>
-                      <td className="py-2 text-right tnum align-top">{fmtNum(b.n)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </span>
+                    }>
+                    <ReqDetail d={b.detail} path={b.path} />
+                  </ExpandRow>
+                );
+              })}
             </div>
           )}
         </Panel>
@@ -1201,27 +1286,33 @@ function LogSection({ logs, minutes }) {
 
       <div className="mt-4">
         <Panel title="Hata alan adresler"
-          note="Sunucuya ulaşıp 4xx ya da 5xx dönen istekler; en çok hata alanlar üstte. Yanındaki rozetler tam olarak hangi kodun kaç kez döndüğünü gösterir. Sayı içeren yol parçaları {id} olarak birleştirildi.">
+          note="Sunucuya ulaşıp 4xx ya da 5xx dönen istekler; en çok hata alanlar üstte. Rozetler hangi kodun kaç kez döndüğünü gösterir. Satıra tıklayınca tam adres (alan adı log'da varsa), gerçek yollar ve IP'ler açılır.">
           {(logs.errorPaths || []).length === 0 ? <p className="text-sm" style={{ color: C.faint }}>Bu aralıkta hata alan adres yok.</p> : (
-            <div className="space-y-2">
+            <div className="text-sm">
               {logs.errorPaths.slice(0, 20).map((e, i) => {
+                const key = `e|${e.backend}|${e.method}|${e.path}`;
                 const oran = e.n > 0 ? e.errs / e.n : 0;
                 return (
-                  <div key={i} className="py-2" style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
-                    <div className="flex items-baseline justify-between gap-3 text-sm">
-                      <span style={{ minWidth: 0, wordBreak: "break-all" }}>
-                        <span style={{ color: C.faint }}>{e.method} </span>{e.path}
-                        <span className="text-xs ml-2" style={{ color: C.faint }}>{e.backend}</span>
-                      </span>
-                      <span className="tnum whitespace-nowrap" style={{ color: e.class === "5xx" ? C.bad : e.class === "4xx" ? C.warn : C.text }}>
-                        {fmtNum(e.errs)} hata
-                        <span className="text-xs ml-1" style={{ color: C.faint }}>/ {fmtNum(e.n)} ({fmtPct(oran)})</span>
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5 mt-1.5">
-                      {(e.codes || []).map((c) => <CodeChip key={c.code} code={c.code} n={c.n} />)}
-                    </div>
-                  </div>
+                  <ExpandRow key={key} first={i === 0} open={openRows.has(key)} onToggle={() => toggleRow(key)}
+                    head={
+                      <>
+                        <span className="flex items-baseline justify-between gap-3">
+                          <span style={{ minWidth: 0, wordBreak: "break-all" }}>
+                            <span style={{ color: C.faint }}>{e.method} </span>{e.path}
+                            <span className="text-xs ml-2" style={{ color: C.faint }}>{e.backend}</span>
+                          </span>
+                          <span className="tnum whitespace-nowrap" style={{ color: e.class === "5xx" ? C.bad : e.class === "4xx" ? C.warn : C.text }}>
+                            {fmtNum(e.errs)} hata
+                            <span className="text-xs ml-1" style={{ color: C.faint }}>/ {fmtNum(e.n)} ({fmtPct(oran)})</span>
+                          </span>
+                        </span>
+                        <span className="flex flex-wrap gap-1.5 mt-1.5">
+                          {(e.codes || []).map((c) => <CodeChip key={c.code} code={c.code} n={c.n} />)}
+                        </span>
+                      </>
+                    }>
+                    <ReqDetail d={e.detail} path={e.path} />
+                  </ExpandRow>
                 );
               })}
             </div>

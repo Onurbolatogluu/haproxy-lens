@@ -1,5 +1,13 @@
 # Değişiklikler
 
+## 0.6.0
+
+- "Engellenen ve karşılıksız kalan istekler" ve "Hata alan adresler" satırları tıklanınca açılıyor: tam adres, gerçek yollar ({id} ile birleşmiş satırlarda) ve isteği gönderen IP'ler (Cloudflare etiketli).
+- Alan adı log'da varsa kendiliğinden bulunuyor: yakalanan Host başlığı, HTTP/2 tam adres, `option httpslog` SNI ya da log-format'ın sonuna eklenmiş host. Yoksa ayrıntıda yol ve IP gösteriliyor; config'e dokunulmuyor.
+- Log bölümü ve `./install.sh --check` raporu, o LB'nin log'unda alan adının olup olmadığını (ya da satırların ne kadarında olduğunu) yazıyor.
+- Ayrıştırıcı istek satırından sonra ek alanı olan satırları da okuyor (`option httpslog` gibi).
+- Ayrıntılar için bellek sınırı: dakikada en fazla 300 satırın ayrıntısı tutuluyor, sayılar yine eksiksiz.
+
 ## 0.5.0
 
 - Backend ayrıntısında 5xx özetinin yanına 4xx (istemci hatası) özeti eklendi. 4xx'in genelde istemci kaynaklı olduğu (404, 401/403, 429) not ediliyor.

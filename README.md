@@ -9,6 +9,7 @@ Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur
 - Canlı grafikler: saniyedeki istek (yanıt türüne göre) ve trafik; zaman aralığı 5 dk, 15 dk ya da 1 saat seçilebilir.
 - 4xx ve 5xx hatalarının en çok hangi sunucudan döndüğü; hatalar sunuculara eşit dağılmışsa sorunun ortak bir yerde olabileceği uyarısı.
 - Log'dan "Hata alan adresler": hangi path'in hata aldığı ve tam olarak hangi kodu (404, 502, 503...) kaç kez aldığı.
+- Hatalı ve engellenen isteklerde satıra tıklayınca açılan ayrıntı: tam adres (alan adı log'da varsa), gerçek yollar ve isteği gönderen IP'ler.
 - Log'dan: en çok istenen adresler, engellenen (403) ve hiçbir backend'e eşleşmeyen (503) istekler, en çok istek atan IP'ler.
 - Her terimin sade Türkçe açıklaması ve her satır için HAProxy'nin verdiği tüm alanlar.
 
@@ -134,6 +135,21 @@ Başka hiçbir dosyaya yazmaz. Servis, socket'e ve log'a erişmek için gereken 
 - **Log kaynağı:** syslog dosyası (yeri rsyslog/syslog-ng ayarından bulunur) ya da journald.
 - **Log biçimi:** varsayılan `option httplog`.
 - **İşletim sistemi:** systemd kullanan Linux dağıtımları, amd64 ve arm64.
+
+## Alan adı (hangi domaine istek gelmiş)
+
+haproxy-lens config'e dokunmaz; alan adını log'da bulabildiği kadarıyla gösterir. Her LB'de kendiliğinden şu kaynaklara bakar:
+
+| Log'da alan adı olur, eğer | Örnek |
+|---|---|
+| Host başlığı yakalanıyorsa | `capture request header Host len 64` ya da `http-request capture req.hdr(host) len 64` |
+| İstek HTTP/2 ise | HAProxy istek satırına `https://alan.com/yol` yazar |
+| `option httpslog` kullanılıyorsa | Satırın sonundaki SNI alanından |
+| `log-format`'ın sonuna host eklenmişse | `... %{+Q}r %[req.hdr(host)]` |
+
+Hiçbiri yoksa ayrıntıda sadece yol ve IP görünür. Yakalama koşulluysa (ör. `if rate_limit_abuse`) alan adı sadece o isteklerde görünür; panel kaç istekte bilindiğini yazar. `./install.sh --check` raporu da o LB'de alan adının log'da olup olmadığını söyler.
+
+Alan adını görmek istediğin bir LB'de bunu sen eklemeye karar verirsen en basit yol frontend'e `capture request header Host len 64` satırıdır. Bu satır mevcut log satırlarına `{alan.com}` bölümünü ekler; o log'u okuyan başka bir araç (Elasticsearch, fail2ban gibi) varsa önce onu kontrol et ve değişikliği önce bir slave'de dene.
 
 ## Bilinen sınırlar
 

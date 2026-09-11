@@ -19,7 +19,14 @@ import (
 
 // option httplog biçimi:
 // %ci:%cp [%tr] %ft %b/%s %TR/%Tw/%Tc/%Tr/%Ta %ST %B %CC %CS %tsc %ac/%fc/%bc/%sc/%rc %sq/%bq %hr %hs %{+Q}r
-var reHTTPLog = regexp.MustCompile(`^(\S+):\d+ \[([^\]]+)\] (\S+) (\S+)/(\S+) -?\d+/-?\d+/-?\d+/-?\d+/\+?(-?\d+) (-?\d+) \+?\d+ \S+ \S+ (\S{4}) \d+/\d+/\d+/\d+/\+?\d+ \d+/\d+ (?:\{[^}]*\} )*"(.*)"\s*$`)
+// Gruplar: 1 istemci, 2 tarih, 3 frontend, 4 backend, 5 sunucu, 6 Ta, 7 durum, 8 sonlanma,
+// 9 yakalanan başlıklar ({...} blokları), 10 istek satırı, 11 istek satırından sonraki alanlar
+// (option httpslog ya da sonuna alan eklenmiş log-format).
+var reHTTPLog = regexp.MustCompile(`^(\S+):\d+ \[([^\]]+)\] (\S+) (\S+)/(\S+) -?\d+/-?\d+/-?\d+/-?\d+/\+?(-?\d+) (-?\d+) \+?\d+ \S+ \S+ (\S{4}) \d+/\d+/\d+/\d+/\+?\d+ \d+/\d+ ((?:\{[^}]*\} )*)"([^"]*)"(?:\s+(.*?))?\s*$`)
+
+// Alan adı gibi görünen değer: harf içeren bir uzantı şart (böylece IP'ler ve User-Agent elenir)
+var reHostName = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,63}(:\d{1,5})?$`)
+var reHostIP = regexp.MustCompile(`^\d{1,3}(\.\d{1,3}){3}(:\d{1,5})?$`)
 
 const (
 	KindServed   = "served"   // bir sunucu yanıtladı
@@ -40,8 +47,74 @@ type logRecord struct {
 	Status   int
 	Term     string
 	Method   string
-	Path     string
+	Path     string // sayılar {id} olarak birleştirilmiş, sorgusuz
+	RawPath  string // gerçek yol, sorgusuz (örnek göstermek için)
+	Host     string // log'da varsa alan adı, yoksa boş
+	TLS      bool   // frontend adı "~" ile bitiyorsa bağlantı SSL
 	Kind     string
+}
+
+// Log satırında alan adı hangi yoldan geçiyor olabilir, sırayla bakılır:
+//  1. İstek satırında tam adres (HTTP/2 ya da proxy isteği): "GET https://alan.com/yol HTTP/2.0"
+//  2. Yakalanan başlıklar: capture request header Host / http-request capture req.hdr(host)
+//  3. İstek satırından sonraki alanlar: option httpslog'daki SNI ya da log-format'a eklenmiş host
+func extractHost(captures, uri, trailing string) string {
+	if i := strings.Index(uri, "://"); i >= 0 {
+		rest := uri[i+3:]
+		if j := strings.IndexAny(rest, "/?"); j >= 0 {
+			rest = rest[:j]
+		}
+		if rest != "" {
+			return strings.ToLower(rest)
+		}
+	}
+	var vals []string
+	for _, blk := range strings.Split(captures, "} ") {
+		blk = strings.Trim(strings.TrimSpace(blk), "{}")
+		if blk == "" {
+			continue
+		}
+		vals = append(vals, strings.Split(blk, "|")...)
+	}
+	for _, v := range vals {
+		if v = strings.TrimSpace(v); reHostName.MatchString(v) {
+			return strings.ToLower(v)
+		}
+	}
+	// Tek yakalanan değer bir IP ise o büyük ihtimalle Host başlığıdır (istek IP ile yapılmış)
+	if len(vals) == 1 && reHostIP.MatchString(strings.TrimSpace(vals[0])) {
+		return strings.TrimSpace(vals[0])
+	}
+	// Sonraki alanlarda tam URL taşıyanlar (Referer, Origin gibi) hedef değildir, atlanır
+	for _, field := range strings.Fields(trailing) {
+		if strings.Contains(field, "://") {
+			continue
+		}
+		for _, tok := range strings.FieldsFunc(field, func(r rune) bool { return r == '/' || r == '"' || r == ',' || r == '{' || r == '}' || r == '|' }) {
+			if reHostName.MatchString(tok) {
+				return strings.ToLower(tok)
+			}
+		}
+	}
+	return ""
+}
+
+func rawPathOf(uri string) string {
+	if i := strings.IndexAny(uri, "?#"); i >= 0 {
+		uri = uri[:i]
+	}
+	if i := strings.Index(uri, "://"); i >= 0 {
+		rest := uri[i+3:]
+		if j := strings.Index(rest, "/"); j >= 0 {
+			uri = rest[j:]
+		} else {
+			uri = "/"
+		}
+	}
+	if len(uri) > 200 {
+		uri = uri[:200] + "…"
+	}
+	return uri
 }
 
 func parseLogLine(line string) (logRecord, bool) {
@@ -61,19 +134,25 @@ func parseLogLine(line string) (logRecord, bool) {
 	}
 	rec.At = at
 	rec.Client = m[1]
+	rec.TLS = strings.HasSuffix(m[3], "~")
 	rec.Frontend = strings.TrimSuffix(m[3], "~")
 	rec.Backend = m[4]
 	rec.Server = m[5]
 	rec.Ta, _ = strconv.Atoi(m[6])
 	rec.Status, _ = strconv.Atoi(m[7])
 	rec.Term = m[8]
-	parts := strings.SplitN(m[9], " ", 3)
+	uri := ""
+	parts := strings.SplitN(m[10], " ", 3)
 	if len(parts) >= 2 {
 		rec.Method = parts[0]
-		rec.Path = normPath(parts[1])
+		uri = parts[1]
+		rec.Path = normPath(uri)
+		rec.RawPath = rawPathOf(uri)
 	} else {
-		rec.Path = m[9] // <BADREQ> gibi
+		rec.Path = m[10] // <BADREQ> gibi
+		rec.RawPath = m[10]
 	}
+	rec.Host = extractHost(m[9], uri, m[11])
 	rec.Kind = classify(rec)
 	return rec, true
 }
@@ -146,6 +225,67 @@ type blockKey struct{ Kind, Method, Path string }
 type pathAgg struct {
 	N, S2, S3, S4, S5, SumTa, NTa int64
 	Codes                         map[int]int64 // spesifik kod (404, 502...) -> sayı; sadece 4xx/5xx
+	Err                           *errDetail    // hata alan isteklerin ayrıntısı
+}
+
+type blockAgg struct {
+	N   int64
+	Det *errDetail
+}
+
+// Hata ve engelleme ayrıntısı: nereye (adres), kimden (IP), hangi gerçek yol.
+// Bellek sınırlı kalsın diye her dakikalık kovada en fazla maxDetailKeys satırın,
+// her listede en fazla maxDetailValues değerin ayrıntısı tutulur; gerisi "(diğer)" olur.
+const (
+	maxDetailKeys   = 300
+	maxDetailValues = 6
+	otherKey        = "(diğer)"
+)
+
+type errDetail struct {
+	Origins map[string]int64 // "https://alan.com"; alan adı log'da yoksa ""
+	IPs     map[string]int64
+	Samples map[string]int64 // gerçek yollar (sorgusuz)
+}
+
+func newErrDetail() *errDetail {
+	return &errDetail{Origins: map[string]int64{}, IPs: map[string]int64{}, Samples: map[string]int64{}}
+}
+
+func addCapped(m map[string]int64, k string) {
+	if _, ok := m[k]; ok || len(m) < maxDetailValues {
+		m[k]++
+	} else {
+		m[otherKey]++
+	}
+}
+
+func originOf(r logRecord) string {
+	if r.Host == "" {
+		return ""
+	}
+	if r.TLS {
+		return "https://" + r.Host
+	}
+	return "http://" + r.Host
+}
+
+func (d *errDetail) add(r logRecord) {
+	addCapped(d.Origins, originOf(r))
+	addCapped(d.IPs, r.Client)
+	addCapped(d.Samples, r.RawPath)
+}
+
+func (d *errDetail) merge(o *errDetail) {
+	for k, v := range o.Origins {
+		d.Origins[k] += v
+	}
+	for k, v := range o.IPs {
+		d.IPs[k] += v
+	}
+	for k, v := range o.Samples {
+		d.Samples[k] += v
+	}
 }
 
 func (pa *pathAgg) addCodeN(code int, n int64) {
@@ -172,14 +312,28 @@ func (pa *pathAgg) addCode(code int) {
 type clientAgg struct{ N, Blocked int64 }
 
 type bucket struct {
-	kinds   map[string]int64
-	paths   map[pathKey]*pathAgg
-	blocked map[blockKey]int64
-	clients map[string]*clientAgg
+	kinds      map[string]int64
+	paths      map[pathKey]*pathAgg
+	blocked    map[blockKey]*blockAgg
+	clients    map[string]*clientAgg
+	withHost   int64 // alan adı bulunan satır sayısı
+	detailKeys int   // ayrıntısı tutulan satır sayısı (sınır: maxDetailKeys)
+}
+
+// Kovada yer varsa yeni bir ayrıntı açar; yoksa nil (sayılar yine tutulur, ayrıntı tutulmaz)
+func (b *bucket) detail(cur *errDetail) *errDetail {
+	if cur != nil {
+		return cur
+	}
+	if b.detailKeys >= maxDetailKeys {
+		return nil
+	}
+	b.detailKeys++
+	return newErrDetail()
 }
 
 func newBucket() *bucket {
-	return &bucket{kinds: map[string]int64{}, paths: map[pathKey]*pathAgg{}, blocked: map[blockKey]int64{}, clients: map[string]*clientAgg{}}
+	return &bucket{kinds: map[string]int64{}, paths: map[pathKey]*pathAgg{}, blocked: map[blockKey]*blockAgg{}, clients: map[string]*clientAgg{}}
 }
 
 type LogAnalyzer struct {
@@ -300,6 +454,9 @@ func (a *LogAnalyzer) add(r logRecord) {
 		a.lastAt = r.At
 	}
 	b.kinds[r.Kind]++
+	if r.Host != "" {
+		b.withHost++
+	}
 	blocked := r.Kind == KindDenied || r.Kind == KindNoMatch || r.Kind == KindNoServer
 	if r.Kind == KindServed || r.Kind == KindNoServer {
 		k := pathKey{r.Backend, r.Method, r.Path}
@@ -331,13 +488,29 @@ func (a *LogAnalyzer) add(r logRecord) {
 			pa.SumTa += int64(r.Ta)
 			pa.NTa++
 		}
+		if r.Status >= 400 {
+			if pa.Err = b.detail(pa.Err); pa.Err != nil {
+				pa.Err.add(r)
+			}
+		}
 	}
 	if blocked {
 		k := blockKey{r.Kind, r.Method, r.Path}
-		if _, ok := b.blocked[k]; !ok && len(b.blocked) >= maxKeysPerBucket {
-			k = blockKey{r.Kind, "", "(diğer)"}
+		ba := b.blocked[k]
+		if ba == nil {
+			if len(b.blocked) >= maxKeysPerBucket {
+				k = blockKey{r.Kind, "", "(diğer)"}
+				ba = b.blocked[k]
+			}
+			if ba == nil {
+				ba = &blockAgg{}
+				b.blocked[k] = ba
+			}
 		}
-		b.blocked[k]++
+		ba.N++
+		if ba.Det = b.detail(ba.Det); ba.Det != nil {
+			ba.Det.add(r)
+		}
 	}
 	ck := r.Client
 	ca := b.clients[ck]
@@ -452,13 +625,63 @@ type ErrorPathRow struct {
 	Errs    int64       `json:"errs"`  // 4xx+5xx toplamı
 	Class   string      `json:"class"` // "4xx", "5xx" ya da "karışık"
 	Codes   []CodeCount `json:"codes"` // en çok görülen kodlar, çoktan aza
+	Detail  *Detail     `json:"detail,omitempty"`
 }
 type BlockRow struct {
-	Kind   string `json:"kind"`
-	Method string `json:"method"`
-	Path   string `json:"path"`
-	N      int64  `json:"n"`
+	Kind   string  `json:"kind"`
+	Method string  `json:"method"`
+	Path   string  `json:"path"`
+	N      int64   `json:"n"`
+	Detail *Detail `json:"detail,omitempty"`
 }
+
+// Panelde satıra tıklayınca açılan ayrıntı
+type NameCount struct {
+	Name string `json:"name"`
+	N    int64  `json:"n"`
+}
+type Detail struct {
+	Total     int64       `json:"total"`     // ayrıntısı tutulan istek sayısı
+	HostKnown int64       `json:"hostKnown"` // bunlardan alan adı log'da olan
+	Origins   []NameCount `json:"origins"`   // "https://alan.com"; "" = alan adı log'da yok
+	Samples   []NameCount `json:"samples"`   // gerçek yollar (sorgusuz)
+	IPs       []ClientRow `json:"ips"`
+}
+
+func topN(m map[string]int64, n int) []NameCount {
+	out := make([]NameCount, 0, len(m))
+	for k, v := range m {
+		out = append(out, NameCount{Name: k, N: v})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].N != out[j].N {
+			return out[i].N > out[j].N
+		}
+		return out[i].Name < out[j].Name
+	})
+	if len(out) > n {
+		out = out[:n]
+	}
+	return out
+}
+
+func (a *LogAnalyzer) buildDetail(d *errDetail) *Detail {
+	if d == nil {
+		return nil
+	}
+	out := &Detail{Origins: topN(d.Origins, 8), Samples: topN(d.Samples, 5)}
+	for k, v := range d.Origins {
+		out.Total += v
+		if k != "" {
+			out.HostKnown += v
+		}
+	}
+	for _, ip := range topN(d.IPs, 8) {
+		out.IPs = append(out.IPs, ClientRow{IP: ip.Name, N: ip.N, Cloudflare: a.isCloudflare(ip.Name)})
+	}
+	return out
+}
+
 type ClientRow struct {
 	IP         string `json:"ip"`
 	N          int64  `json:"n"`
@@ -479,6 +702,7 @@ type LogReport struct {
 	Blocked    []BlockRow       `json:"blocked"`
 	Clients    []ClientRow      `json:"clients"`
 	CFKnown    bool             `json:"cfKnown"`
+	HostLines  int64            `json:"hostLines"` // aralıkta alan adı bulunan satır sayısı
 }
 
 func (a *LogAnalyzer) Report(minutes int) LogReport {
@@ -496,12 +720,13 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 	}
 	from := time.Now().Unix()/60 - int64(minutes) + 1
 	paths := map[pathKey]*pathAgg{}
-	blocked := map[blockKey]int64{}
+	blocked := map[blockKey]*blockAgg{}
 	clients := map[string]*clientAgg{}
 	for m, b := range a.buckets {
 		if m < from {
 			continue
 		}
+		rep.HostLines += b.withHost
 		for k, v := range b.kinds {
 			rep.Kinds[k] += v
 		}
@@ -518,12 +743,29 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 			t.S5 += v.S5
 			t.SumTa += v.SumTa
 			t.NTa += v.NTa
+			if v.Err != nil {
+				if t.Err == nil {
+					t.Err = newErrDetail()
+				}
+				t.Err.merge(v.Err)
+			}
 			for code, n := range v.Codes {
 				t.addCodeN(code, n)
 			}
 		}
 		for k, v := range b.blocked {
-			blocked[k] += v
+			t := blocked[k]
+			if t == nil {
+				t = &blockAgg{}
+				blocked[k] = t
+			}
+			t.N += v.N
+			if v.Det != nil {
+				if t.Det == nil {
+					t.Det = newErrDetail()
+				}
+				t.Det.merge(v.Det)
+			}
 		}
 		for k, v := range b.clients {
 			t := clients[k]
@@ -551,7 +793,7 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 		if errs == 0 {
 			continue
 		}
-		row := ErrorPathRow{Backend: k.Backend, Method: k.Method, Path: k.Path, N: v.N, Errs: errs}
+		row := ErrorPathRow{Backend: k.Backend, Method: k.Method, Path: k.Path, N: v.N, Errs: errs, Detail: a.buildDetail(v.Err)}
 		switch {
 		case v.S4 > 0 && v.S5 > 0:
 			row.Class = "karışık"
@@ -574,7 +816,7 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 		rep.ErrorPaths = rep.ErrorPaths[:30]
 	}
 	for k, v := range blocked {
-		rep.Blocked = append(rep.Blocked, BlockRow{Kind: k.Kind, Method: k.Method, Path: k.Path, N: v})
+		rep.Blocked = append(rep.Blocked, BlockRow{Kind: k.Kind, Method: k.Method, Path: k.Path, N: v.N, Detail: a.buildDetail(v.Det)})
 	}
 	sort.Slice(rep.Blocked, func(i, j int) bool { return rep.Blocked[i].N > rep.Blocked[j].N })
 	if len(rep.Blocked) > 40 {

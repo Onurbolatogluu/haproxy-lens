@@ -38,6 +38,7 @@ type logCand struct {
 	Traffic int // ip:port [tarih] ile başlayan satır
 	TCP     int // tcplog satırı
 	Parsed  int // httplog olarak okunabilen satır
+	Host    int // bunlardan alan adı bulunan
 	Usable  bool
 	Note    string
 }
@@ -443,8 +444,11 @@ func checkLog(p string) logCand {
 			continue // "Server x is DOWN" gibi olay satırları
 		}
 		c.Traffic++
-		if _, ok := parseLogLine(line); ok {
+		if rec, ok := parseLogLine(line); ok {
 			c.Parsed++
+			if rec.Host != "" {
+				c.Host++
+			}
 		} else if reTCPLogMsg.MatchString(msg) {
 			c.TCP++
 		}
@@ -534,6 +538,14 @@ func (d *detection) printReport(w io.Writer) {
 	for _, l := range d.Logs {
 		if l.Usable {
 			fmt.Fprintf(w, "  TAMAM  %s: son kayıtlardaki %d HTTP satırının %d tanesi okunabildi\n", l.Path, l.Traffic-l.TCP, l.Parsed)
+			switch {
+			case l.Host == 0:
+				fmt.Fprintln(w, "         Alan adı: log biçiminde yok. Hatalı isteklerin ayrıntısında yol ve IP görünecek.")
+			case l.Host*10 >= l.Parsed*9:
+				fmt.Fprintln(w, "         Alan adı: log'da var. Hatalı isteklerin tam adresi görünecek.")
+			default:
+				fmt.Fprintf(w, "         Alan adı: satırların sadece %d/%d tanesinde var (koşullu yakalama olabilir). Olanlarda tam adres görünecek.\n", l.Host, l.Parsed)
+			}
 		} else {
 			fmt.Fprintf(w, "  SORUN  %s: %s\n", l.Path, l.Note)
 		}

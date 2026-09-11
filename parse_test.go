@@ -213,3 +213,78 @@ func TestErrorPathsFromLog(t *testing.T) {
 		t.Fatalf("4xx yolu: %+v", web)
 	}
 }
+
+func TestHostFromLog(t *testing.T) {
+	pre := `Sep 11 12:00:00 lb haproxy[1]: 203.0.113.7:5000 [11/Sep/2026:12:00:00.100] `
+	mid := ` 0/0/1/40/41 503 216 - - SC-- 4/2/0/0/0 0/0 `
+	cases := []struct {
+		name, line, host, raw string
+		tls                   bool
+	}{
+		{"Host başlığı yakalanıyor", pre + `fe~ be/s1` + mid + `{www.ornek.com} "GET /api/auth/GetGuestToken?cihaz=123 HTTP/1.1"`, "www.ornek.com", "/api/auth/GetGuestToken", true},
+		{"iki yakalama: User-Agent ve Host", pre + `fe be/s1` + mid + `{Mozilla/5.0 (X11; Linux)|shop.ornek.com.tr:8443} "GET / HTTP/1.1"`, "shop.ornek.com.tr:8443", "/", false},
+		{"HTTP/2 tam adres", pre + `fe~ be/s1` + mid + `{} "GET https://api.ornek.com/v1/siparis/42?x=1 HTTP/2.0"`, "api.ornek.com", "/v1/siparis/42", true},
+		{"option httpslog SNI", pre + `fe~ be/s1` + mid + `{} "GET /x HTTP/1.1" 0/0/0/0/0 app.ornek.com/TLSv1.3/TLS_AES_256_GCM_SHA384`, "app.ornek.com", "/x", true},
+		{"koşullu yakalama bu satırda boş", pre + `fe~ fe/<NOSRV>` + mid + `{} "GET /login HTTP/1.1"`, "", "/login", true},
+		{"istek IP ile yapılmış", pre + `fe fe/<NOSRV>` + mid + `{10.234.20.35:8405} "GET / HTTP/1.1"`, "10.234.20.35:8405", "/", false},
+		{"iki IP yakalaması (X-Forwarded-For gibi) alan adı sayılmaz", pre + `fe be/s1` + mid + `{198.51.100.1|198.51.100.2} "GET / HTTP/1.1"`, "", "/", false},
+		{"sonraki alandaki Referer URL'si hedef sayılmaz", pre + `fe be/s1` + mid + `{} "GET / HTTP/1.1" https://google.com/arama`, "", "/", false},
+		{"yakalama bloğu hiç yok", pre + `fe be/s1` + mid + `"GET /eski HTTP/1.1"`, "", "/eski", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r, ok := parseLogLine(c.line)
+			if !ok {
+				t.Fatalf("satır okunamadı")
+			}
+			if r.Host != c.host || r.RawPath != c.raw || r.TLS != c.tls {
+				t.Fatalf("host=%q raw=%q tls=%v", r.Host, r.RawPath, r.TLS)
+			}
+		})
+	}
+}
+
+func TestBlockedDetail(t *testing.T) {
+	a := NewLogAnalyzer("file:/yok", "")
+	rec := func(host, client, raw string) logRecord {
+		return logRecord{At: time.Now(), Client: client, Frontend: "fe", Backend: "fe", Server: "<NOSRV>", Status: 503,
+			Method: "GET", Path: normPath(raw), RawPath: raw, Host: host, TLS: true, Kind: KindNoMatch}
+	}
+	for i := 0; i < 30; i++ {
+		a.add(rec("app.ornek.com", "162.158.1.1", "/api/auth/GetGuestToken"))
+	}
+	for i := 0; i < 10; i++ {
+		a.add(rec("", "85.105.1.2", "/api/auth/GetGuestToken"))
+	}
+	rep := a.Report(60)
+	if len(rep.Blocked) != 1 || rep.Blocked[0].Detail == nil {
+		t.Fatalf("engellenen satır: %+v", rep.Blocked)
+	}
+	d := rep.Blocked[0].Detail
+	if d.Total != 40 || d.HostKnown != 30 || d.Origins[0].Name != "https://app.ornek.com" || d.Origins[0].N != 30 || d.Origins[1].Name != "" {
+		t.Fatalf("adresler: %+v", d)
+	}
+	if !d.IPs[0].Cloudflare || d.IPs[0].N != 30 || d.IPs[1].Cloudflare {
+		t.Fatalf("IP'ler: %+v", d.IPs)
+	}
+	if rep.HostLines != 30 {
+		t.Fatalf("alan adlı satır: %d", rep.HostLines)
+	}
+}
+
+func TestDetailMemoryCap(t *testing.T) {
+	a := NewLogAnalyzer("file:/yok", "")
+	now := time.Now()
+	// Tarayıcı botu gibi binlerce farklı yola 403
+	for i := 0; i < 2000; i++ {
+		p := "/tarama/" + strconv.Itoa(i) + "x"
+		a.add(logRecord{At: now, Client: "198.51.100.9", Frontend: "fe", Backend: "fe", Server: "<NOSRV>", Status: 403, Method: "GET", Path: p, RawPath: p, Kind: KindDenied})
+	}
+	b := a.buckets[now.Unix()/60]
+	if b.detailKeys > maxDetailKeys {
+		t.Fatalf("ayrıntı sınırı aşıldı: %d", b.detailKeys)
+	}
+	if b.kinds[KindDenied] != 2000 {
+		t.Fatalf("sayım eksik: %d", b.kinds[KindDenied])
+	}
+}
