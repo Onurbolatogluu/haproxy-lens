@@ -176,3 +176,40 @@ func TestWindowAndDownsample(t *testing.T) {
 		t.Fatalf("seyreltme: %d nokta, %+v", len(ds), ds[len(ds)-1])
 	}
 }
+
+func TestErrorPathsFromLog(t *testing.T) {
+	a := NewLogAnalyzer("file:/yok", "")
+	mk := func(be, path string, status int) logRecord {
+		return logRecord{At: time.Now(), Client: "1.2.3.4", Frontend: "fe", Backend: be, Server: "s1", Status: status, Method: "GET", Path: path, Kind: KindServed}
+	}
+	for i := 0; i < 50; i++ {
+		a.add(mk("be_api", "/api/orders", 200))
+	}
+	for i := 0; i < 12; i++ {
+		a.add(mk("be_api", "/api/orders", 502))
+	}
+	for i := 0; i < 3; i++ {
+		a.add(mk("be_api", "/api/orders", 503))
+	}
+	for i := 0; i < 8; i++ {
+		a.add(mk("be_web", "/gizli", 404))
+	}
+	for i := 0; i < 4; i++ {
+		a.add(mk("be_web", "/gizli", 403))
+	}
+	rep := a.Report(60)
+	if len(rep.ErrorPaths) != 2 {
+		t.Fatalf("hata yolu sayısı %d", len(rep.ErrorPaths))
+	}
+	top := rep.ErrorPaths[0] // en çok hatalı: /api/orders (15)
+	if top.Path != "/api/orders" || top.Errs != 15 || top.Class != "5xx" {
+		t.Fatalf("ilk hata yolu: %+v", top)
+	}
+	if top.Codes[0].Code != 502 || top.Codes[0].N != 12 {
+		t.Fatalf("en çok kod: %+v", top.Codes)
+	}
+	web := rep.ErrorPaths[1]
+	if web.Class != "4xx" || web.Codes[0].Code != 404 || web.Codes[0].N != 8 {
+		t.Fatalf("4xx yolu: %+v", web)
+	}
+}

@@ -113,7 +113,8 @@ const GLOSSARY = {
   uweight: ["Yapılandırmadaki ağırlık", "haproxy.cfg'de verilen ağırlık."],
   _reqps: ["İstek/sn", "Tüm frontend'lere saniyede gelen istek.", "Hesaplanan: iki ölçüm arasındaki req_tot farkı"],
   _err5: ["Sunucu hatası oranı", "Seçili zaman aralığında yanıtların yüzde kaçının 5xx (sunucu hatası) olduğu.", "Hesaplanan: hrsp_5xx farkı / tüm yanıtların farkı"],
-  _srv5xx: ["Sunucunun 5xx'leri", "Seçili zaman aralığında bu sunucudan dönen sunucu hatası (5xx) sayısı; altında bu sunucunun kendi yanıtları içindeki oranı. En çok hata dönen sunucu sarı görünür.", "Hesaplanan: sunucu satırının hrsp_5xx farkı"],
+  _srv4xx: ["Sunucunun 4xx'leri", "Seçili zaman aralığında bu sunucudan dönen istemci hatası (4xx) sayısı; altında bu sunucunun kendi yanıtları içindeki oranı.", "Hesaplanan: sunucu satırının hrsp_4xx farkı"],
+  _srv5xx: ["Sunucunun 5xx'leri", "Seçili zaman aralığında bu sunucudan dönen sunucu hatası (5xx) sayısı; altında bu sunucunun kendi yanıtları içindeki oranı. En çok hata dönen sunucu kırmızı görünür.", "Hesaplanan: sunucu satırının hrsp_5xx farkı"],
   _traffic: ["Trafik", "Saniyede gelen ve giden veri.", "Hesaplanan: bin ve bout farkı"],
   _healthy: ["Sağlıklı sunucu", "Sorunsuz çalışan sunucuların tüm sunuculara oranı.", "Hesaplanan: status alanından"],
   _uptime: ["Çalışma süresi", "HAProxy'nin son yeniden başlatmadan beri açık kaldığı süre.", "show info: Uptime_sec"],
@@ -398,6 +399,26 @@ function SectionTitle({ title, sub }) {
 }
 
 const CODE_PARTS = [["Başarılı", 1, C.ok], ["Yönlendirme", 2, C.info], ["İstemci hatası", 3, C.warn], ["Sunucu hatası", 4, C.bad]];
+// HTTP kodunun kısa açıklaması (log'daki hata yollarında gösterilir)
+const CODE_TEXT = {
+  400: "hatalı istek", 401: "yetki gerekli", 403: "erişim yok", 404: "bulunamadı", 405: "yöntem izinli değil",
+  408: "istek zaman aşımı", 409: "çakışma", 410: "kaldırıldı", 413: "istek çok büyük", 415: "desteklenmeyen tür",
+  429: "çok fazla istek", 431: "başlık çok büyük",
+  500: "sunucu hatası", 501: "desteklenmiyor", 502: "geçit hatası (backend yanıt vermedi)",
+  503: "servis yok (sunucu meşgul ya da kapalı)", 504: "geçit zaman aşımı (backend yavaş)", 507: "yetersiz alan",
+  0: "diğer",
+};
+const codeColor = (code) => (code >= 500 || code === 0 ? C.bad : code === 429 ? C.warn : C.info);
+function CodeChip({ code, n }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs tnum" style={{ background: C.panel2, border: `1px solid ${C.line}` }} title={CODE_TEXT[code] || ""}>
+      <span style={{ width: 7, height: 7, borderRadius: 2, background: codeColor(code) }} />
+      <b style={{ color: C.text }}>{code === 0 ? "diğer" : code}</b>
+      {CODE_TEXT[code] && code !== 0 ? <span style={{ color: C.faint }}>{CODE_TEXT[code]}</span> : null}
+      <span style={{ color: C.muted }}>×{fmtNum(n)}</span>
+    </span>
+  );
+}
 function CodeBar({ row, compact }) {
   const { wrates, label } = useContext(WinCtx);
   const c = codeCounts(row, wrates);
@@ -456,12 +477,23 @@ function ServerTable({ servers, rates, onFields }) {
   const { wrates, label } = useContext(WinCtx);
   if (!servers.length) return <p className="text-sm" style={{ color: C.faint }}>Bu backend'de sunucu yok.</p>;
   const td = "py-2.5 pr-4 align-top";
-  const e5 = (s) => wrates[keyOf(s)]?.codes?.[4] ?? null;
+  const codeOf = (s, i) => wrates[keyOf(s)]?.codes?.[i] ?? null;
   const tot = (s) => (wrates[keyOf(s)]?.codes || []).reduce((a, x) => a + x, 0);
-  const maxE5 = Math.max(0, ...servers.map((s) => e5(s) || 0));
+  const maxOf = (i) => Math.max(0, ...servers.map((s) => codeOf(s, i) || 0));
+  const max4 = maxOf(3), max5 = maxOf(4);
+  const errCell = (s, i, mx, warnCol) => {
+    const v = codeOf(s, i), t = tot(s);
+    if (v == null) return <td className={`${td} text-right tnum`}>—</td>;
+    return (
+      <td className={`${td} text-right tnum`} title={label}>
+        <div style={{ color: v > 0 && v === mx ? warnCol : C.text }}>{fmtNum(v)}</div>
+        {t > 0 && v > 0 && <div className="text-xs mt-0.5" style={{ color: C.faint }}>{fmtPct(v / t)}</div>}
+      </td>
+    );
+  };
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm" style={{ borderCollapse: "collapse", minWidth: 940 }}>
+      <table className="w-full text-sm" style={{ borderCollapse: "collapse", minWidth: 1020 }}>
         <thead>
           <tr className="text-xs" style={{ color: C.muted }}>
             <Th>Sunucu</Th>
@@ -470,6 +502,7 @@ function ServerTable({ servers, rates, onFields }) {
             <Th k="weight" right>Ağırlık</Th>
             <Th k="scur">Açık bağlantı</Th>
             <Th k="req_rate" right>İstek/sn</Th>
+            <Th k="_srv4xx" right>4xx</Th>
             <Th k="_srv5xx" right>5xx</Th>
             <Th k="rtime" right>Yanıt süresi</Th>
             <Th k="econ" right>Bağlanamama</Th>
@@ -508,14 +541,8 @@ function ServerTable({ servers, rates, onFields }) {
                 <td className={`${td} text-right tnum`}>{fmtNum(num(s.weight))}</td>
                 <td className={td}><Meter value={num(s.scur) || 0} max={num(s.slim)} /></td>
                 <td className={`${td} text-right tnum`}>{fmtRate(rpsOf(s, rates))}</td>
-                <td className={`${td} text-right tnum`} title={label}>
-                  {e5(s) == null ? "—" : (
-                    <>
-                      <div style={{ color: e5(s) > 0 && e5(s) === maxE5 ? C.warn : C.text }}>{fmtNum(e5(s))}</div>
-                      {tot(s) > 0 && <div className="text-xs mt-0.5" style={{ color: C.faint }}>{fmtPct(e5(s) / tot(s))}</div>}
-                    </>
-                  )}
-                </td>
+                {errCell(s, 3, max4, C.warn)}
+                {errCell(s, 4, max5, C.bad)}
                 <td className={`${td} text-right tnum`}>{fmtMs(num(s.rtime))}</td>
                 <td className={`${td} text-right tnum`} style={{ color: econ > 0 ? C.warn : C.text }}>{fmtNum(econ)}</td>
                 <td className={`${td} text-right tnum`}>{fmtNum(num(s.eresp))}</td>
@@ -530,31 +557,37 @@ function ServerTable({ servers, rates, onFields }) {
   );
 }
 
-function FiveXXSummary({ b }) {
+// idx: 4 = 5xx (sunucu hatası), 3 = 4xx (istemci hatası)
+function ErrorSummary({ b, idx }) {
   const { wrates, label } = useContext(WinCtx);
   const wb = wrates[keyOf(b)];
   if (!wb || !b.servers.length) return null;
-  const be5 = wb.codes[4];
+  const isSrv = idx === 4;
+  const adi = isSrv ? "sunucu hatası (5xx)" : "istemci hatası (4xx)";
+  const beN = wb.codes[idx];
   const per = b.servers.map((s) => {
     const w = wrates[keyOf(s)];
-    return { s, e: w?.codes?.[4] || 0, tot: w ? w.codes.reduce((a, x) => a + x, 0) : 0 };
+    return { s, e: w?.codes?.[idx] || 0, tot: w ? w.codes.reduce((a, x) => a + x, 0) : 0 };
   });
   const sum = per.reduce((a, x) => a + x.e, 0);
   const box = { background: C.panel2 };
-  if (be5 === 0 && sum === 0) {
-    return <p className="rounded-md px-4 py-3 mb-4 text-sm" style={{ ...box, color: C.muted }}>{cap(label)} içinde bu backend'den hiç sunucu hatası (5xx) dönmedi.</p>;
+  if (beN === 0 && sum === 0) {
+    return <p className="rounded-md px-4 py-2.5 mb-3 text-sm" style={{ ...box, color: C.muted }}>{cap(label)} içinde bu backend'den hiç {adi} dönmedi.</p>;
   }
+  const col = isSrv ? C.bad : C.warn;
   const top = [...per].sort((a, c) => c.e - a.e)[0];
   const busy = per.filter((x) => x.tot >= 20);
   const ratios = busy.map((x) => x.e / x.tot);
   const even = busy.length >= 2 && Math.min(...ratios) > 0 && Math.max(...ratios) / Math.min(...ratios) < 1.5;
-  const fromProxy = be5 - sum;
+  const fromProxy = beN - sum;
   return (
-    <p className="rounded-md px-4 py-3 mb-4 text-sm leading-relaxed" style={{ ...box, boxShadow: `inset 3px 0 0 ${C.warn}` }}>
-      {cap(label)} içinde bu backend'den {fmtNum(Math.max(be5, sum))} sunucu hatası (5xx) döndü.
-      {top.e > 0 && <> En çok <b>{top.s.svname}</b> sunucusundan: {fmtNum(top.e)} tane, sunuculardan dönen 5xx'lerin {fmtPct(top.e / sum)} kadarı.</>}
-      {even && <> Hata oranları sunucular arasında birbirine yakın; sorun büyük ihtimalle tek bir sunucuda değil, hepsinin kullandığı ortak bir yerde (uygulama, veritabanı, dış servis).</>}
-      {fromProxy > Math.max(5, be5 * 0.1) && <> {fmtNum(fromProxy)} tanesi hiçbir sunucuya ulaşmadan HAProxy tarafından üretildi (ör. çalışan sunucu yokken 503).</>}
+    <p className="rounded-md px-4 py-3 mb-3 text-sm leading-relaxed" style={{ ...box, boxShadow: `inset 3px 0 0 ${col}` }}>
+      {cap(label)} içinde bu backend'den {fmtNum(Math.max(beN, sum))} {adi} döndü.
+      {top.e > 0 && sum > 0 && <> En çok <b>{top.s.svname}</b> sunucusundan: {fmtNum(top.e)} tane, sunuculardan dönenlerin {fmtPct(top.e / sum)} kadarı.</>}
+      {isSrv && even && <> Hata oranları sunucular arasında birbirine yakın; sorun büyük ihtimalle tek bir sunucuda değil, hepsinin kullandığı ortak bir yerde (uygulama, veritabanı, dış servis).</>}
+      {isSrv && fromProxy > Math.max(5, beN * 0.1) && <> {fmtNum(fromProxy)} tanesi hiçbir sunucuya ulaşmadan HAProxy tarafından üretildi (ör. çalışan sunucu yokken 503).</>}
+      {!isSrv && <> 4xx genelde istemci kaynaklıdır (404 bulunamadı, 401/403 yetki, 429 çok istek); her zaman sunucu sorunu değildir.</>}
+      {" "}Hangi adreslerin hata aldığını aşağıdaki <b>Log'dan gelenler</b> bölümünde görebilirsin.
     </p>
   );
 }
@@ -578,7 +611,8 @@ function BackendDetail({ b, rates, onFields }) {
         <Fact k="cli_abrt">{fmtNum(num(b.cli_abrt))}</Fact>
       </dl>
       <CodeBar row={b} />
-      <FiveXXSummary b={b} />
+      <ErrorSummary b={b} idx={4} />
+      <ErrorSummary b={b} idx={3} />
       <ServerTable servers={b.servers} rates={rates} onFields={onFields} />
       <button type="button" className="mt-4 text-sm" style={{ color: C.info }} onClick={() => onFields(b)}>
         Bu backend'in tüm alanlarını göster
@@ -1160,6 +1194,36 @@ function LogSection({ logs, minutes }) {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </Panel>
+      </div>
+
+      <div className="mt-4">
+        <Panel title="Hata alan adresler"
+          note="Sunucuya ulaşıp 4xx ya da 5xx dönen istekler; en çok hata alanlar üstte. Yanındaki rozetler tam olarak hangi kodun kaç kez döndüğünü gösterir. Sayı içeren yol parçaları {id} olarak birleştirildi.">
+          {(logs.errorPaths || []).length === 0 ? <p className="text-sm" style={{ color: C.faint }}>Bu aralıkta hata alan adres yok.</p> : (
+            <div className="space-y-2">
+              {logs.errorPaths.slice(0, 20).map((e, i) => {
+                const oran = e.n > 0 ? e.errs / e.n : 0;
+                return (
+                  <div key={i} className="py-2" style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
+                    <div className="flex items-baseline justify-between gap-3 text-sm">
+                      <span style={{ minWidth: 0, wordBreak: "break-all" }}>
+                        <span style={{ color: C.faint }}>{e.method} </span>{e.path}
+                        <span className="text-xs ml-2" style={{ color: C.faint }}>{e.backend}</span>
+                      </span>
+                      <span className="tnum whitespace-nowrap" style={{ color: e.class === "5xx" ? C.bad : e.class === "4xx" ? C.warn : C.text }}>
+                        {fmtNum(e.errs)} hata
+                        <span className="text-xs ml-1" style={{ color: C.faint }}>/ {fmtNum(e.n)} ({fmtPct(oran)})</span>
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {(e.codes || []).map((c) => <CodeChip key={c.code} code={c.code} n={c.n} />)}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </Panel>

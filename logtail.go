@@ -145,7 +145,30 @@ type blockKey struct{ Kind, Method, Path string }
 
 type pathAgg struct {
 	N, S2, S3, S4, S5, SumTa, NTa int64
+	Codes                         map[int]int64 // spesifik kod (404, 502...) -> sayı; sadece 4xx/5xx
 }
+
+func (pa *pathAgg) addCodeN(code int, n int64) {
+	if pa.Codes == nil {
+		pa.Codes = map[int]int64{}
+	}
+	pa.Codes[code] += n
+}
+
+func (pa *pathAgg) addCode(code int) {
+	if code < 400 || code == 0 {
+		return
+	}
+	if pa.Codes == nil {
+		pa.Codes = map[int]int64{}
+	}
+	if len(pa.Codes) < 16 || pa.Codes[code] > 0 {
+		pa.Codes[code]++
+	} else {
+		pa.Codes[0]++ // taşma: "diğer"
+	}
+}
+
 type clientAgg struct{ N, Blocked int64 }
 
 type bucket struct {
@@ -299,8 +322,10 @@ func (a *LogAnalyzer) add(r logRecord) {
 			pa.S3++
 		case 4:
 			pa.S4++
+			pa.addCode(r.Status)
 		case 5:
 			pa.S5++
+			pa.addCode(r.Status)
 		}
 		if r.Ta >= 0 && r.Kind == KindServed {
 			pa.SumTa += int64(r.Ta)
@@ -413,6 +438,21 @@ type PathRow struct {
 	S5      int64   `json:"s5"`
 	AvgMs   float64 `json:"avgMs"`
 }
+
+// Belirli bir kodu (404, 502...) en çok alan yollar
+type CodeCount struct {
+	Code int   `json:"code"`
+	N    int64 `json:"n"`
+}
+type ErrorPathRow struct {
+	Backend string      `json:"backend"`
+	Method  string      `json:"method"`
+	Path    string      `json:"path"`
+	N       int64       `json:"n"`     // bu yoldaki toplam istek
+	Errs    int64       `json:"errs"`  // 4xx+5xx toplamı
+	Class   string      `json:"class"` // "4xx", "5xx" ya da "karışık"
+	Codes   []CodeCount `json:"codes"` // en çok görülen kodlar, çoktan aza
+}
 type BlockRow struct {
 	Kind   string `json:"kind"`
 	Method string `json:"method"`
@@ -426,18 +466,19 @@ type ClientRow struct {
 	Cloudflare bool   `json:"cloudflare"`
 }
 type LogReport struct {
-	Enabled bool             `json:"enabled"`
-	Source  string           `json:"source,omitempty"`
-	Error   string           `json:"error,omitempty"`
-	Minutes int              `json:"minutes"`
-	Lines   int64            `json:"lines"`
-	Parsed  int64            `json:"parsed"`
-	LastAt  int64            `json:"lastAt"`
-	Kinds   map[string]int64 `json:"kinds"`
-	Paths   []PathRow        `json:"paths"`
-	Blocked []BlockRow       `json:"blocked"`
-	Clients []ClientRow      `json:"clients"`
-	CFKnown bool             `json:"cfKnown"`
+	Enabled    bool             `json:"enabled"`
+	Source     string           `json:"source,omitempty"`
+	Error      string           `json:"error,omitempty"`
+	Minutes    int              `json:"minutes"`
+	Lines      int64            `json:"lines"`
+	Parsed     int64            `json:"parsed"`
+	LastAt     int64            `json:"lastAt"`
+	Kinds      map[string]int64 `json:"kinds"`
+	Paths      []PathRow        `json:"paths"`
+	ErrorPaths []ErrorPathRow   `json:"errorPaths"`
+	Blocked    []BlockRow       `json:"blocked"`
+	Clients    []ClientRow      `json:"clients"`
+	CFKnown    bool             `json:"cfKnown"`
 }
 
 func (a *LogAnalyzer) Report(minutes int) LogReport {
@@ -477,6 +518,9 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 			t.S5 += v.S5
 			t.SumTa += v.SumTa
 			t.NTa += v.NTa
+			for code, n := range v.Codes {
+				t.addCodeN(code, n)
+			}
 		}
 		for k, v := range b.blocked {
 			blocked[k] += v
@@ -501,6 +545,33 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 	sort.Slice(rep.Paths, func(i, j int) bool { return rep.Paths[i].N > rep.Paths[j].N })
 	if len(rep.Paths) > 40 {
 		rep.Paths = rep.Paths[:40]
+	}
+	for k, v := range paths {
+		errs := v.S4 + v.S5
+		if errs == 0 {
+			continue
+		}
+		row := ErrorPathRow{Backend: k.Backend, Method: k.Method, Path: k.Path, N: v.N, Errs: errs}
+		switch {
+		case v.S4 > 0 && v.S5 > 0:
+			row.Class = "karışık"
+		case v.S5 > 0:
+			row.Class = "5xx"
+		default:
+			row.Class = "4xx"
+		}
+		for code, n := range v.Codes {
+			row.Codes = append(row.Codes, CodeCount{Code: code, N: n})
+		}
+		sort.Slice(row.Codes, func(i, j int) bool { return row.Codes[i].N > row.Codes[j].N })
+		if len(row.Codes) > 5 {
+			row.Codes = row.Codes[:5]
+		}
+		rep.ErrorPaths = append(rep.ErrorPaths, row)
+	}
+	sort.Slice(rep.ErrorPaths, func(i, j int) bool { return rep.ErrorPaths[i].Errs > rep.ErrorPaths[j].Errs })
+	if len(rep.ErrorPaths) > 30 {
+		rep.ErrorPaths = rep.ErrorPaths[:30]
 	}
 	for k, v := range blocked {
 		rep.Blocked = append(rep.Blocked, BlockRow{Kind: k.Kind, Method: k.Method, Path: k.Path, N: v})

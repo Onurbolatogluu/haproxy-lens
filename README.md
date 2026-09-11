@@ -7,7 +7,8 @@ Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur
 - Sade bir durum özeti: "api içindeki srv3, 12 dakikadır çalışmıyor. Sebep: bağlantı zaman aşımı."
 - Backend'ler ve sunucular: durum, sağlık kontrolünün anlamı, bağlantı doluluğu, yanıt süresi, hatalar.
 - Canlı grafikler: saniyedeki istek (yanıt türüne göre) ve trafik; zaman aralığı 5 dk, 15 dk ya da 1 saat seçilebilir.
-- 5xx hatalarının en çok hangi sunucudan döndüğü; hatalar sunuculara eşit dağılmışsa sorunun ortak bir yerde olabileceği uyarısı.
+- 4xx ve 5xx hatalarının en çok hangi sunucudan döndüğü; hatalar sunuculara eşit dağılmışsa sorunun ortak bir yerde olabileceği uyarısı.
+- Log'dan "Hata alan adresler": hangi path'in hata aldığı ve tam olarak hangi kodu (404, 502, 503...) kaç kez aldığı.
 - Log'dan: en çok istenen adresler, engellenen (403) ve hiçbir backend'e eşleşmeyen (503) istekler, en çok istek atan IP'ler.
 - Her terimin sade Türkçe açıklaması ve her satır için HAProxy'nin verdiği tüm alanlar.
 
