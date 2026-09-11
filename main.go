@@ -92,7 +92,11 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/state", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, stats.State())
+		m, err := strconv.Atoi(r.URL.Query().Get("minutes"))
+		if err != nil {
+			m = 60
+		}
+		writeJSON(w, stats.State(m))
 	})
 	mux.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
 		if logs == nil {

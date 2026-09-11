@@ -128,8 +128,46 @@ type StatsPoller struct {
 	cur     *Snapshot
 	prev    *Snapshot
 	hist    []Point
+	samples []counterSample // 10 saniyede bir, satır bazında sayaç örnekleri (son 1 saat)
 	lastErr string
 	errAt   int64
+}
+
+// Zaman aralığı hesapları için saklanan sayaçlar (sıra önemli, windowRow bu sırayı kullanır)
+var windowFields = []string{"req_tot", "stot", "hrsp_1xx", "hrsp_2xx", "hrsp_3xx", "hrsp_4xx", "hrsp_5xx", "hrsp_other", "econ", "eresp"}
+
+const (
+	sampleEveryMs = 10_000
+	maxSamples    = 3600*1000/sampleEveryMs + 2
+	maxWindowMin  = 60
+	maxChartPts   = 360
+)
+
+type counterSample struct {
+	At   int64
+	Vals map[string][]float64
+}
+
+func rowCounters(r map[string]string) []float64 {
+	v := make([]float64, len(windowFields))
+	for i, f := range windowFields {
+		v[i] = num(r[f])
+	}
+	return v
+}
+
+func (p *StatsPoller) addSample(s *Snapshot) {
+	if n := len(p.samples); n > 0 && s.At-p.samples[n-1].At < sampleEveryMs {
+		return
+	}
+	vals := make(map[string][]float64, len(s.Rows))
+	for _, r := range s.Rows {
+		vals[r["pxname"]+"|"+r["svname"]] = rowCounters(r)
+	}
+	p.samples = append(p.samples, counterSample{At: s.At, Vals: vals})
+	if len(p.samples) > maxSamples {
+		p.samples = p.samples[len(p.samples)-maxSamples:]
+	}
 }
 
 func NewStatsPoller(socket string, interval time.Duration, maxHist int) *StatsPoller {
@@ -177,6 +215,10 @@ func headerOf(statRaw string) []string {
 func (p *StatsPoller) store(s *Snapshot) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.cur != nil && num(s.Info["Uptime_sec"]) < num(p.cur.Info["Uptime_sec"]) {
+		p.samples = nil // HAProxy yeniden başladı, sayaçlar sıfırlandı; aralık hesabı baştan
+	}
+	p.addSample(s)
 	p.prev, p.cur = p.cur, s
 	p.lastErr = ""
 	if p.prev == nil {
@@ -231,14 +273,114 @@ type StateResponse struct {
 	Cur     *Snapshot `json:"cur"`
 	Prev    *Snapshot `json:"prev"`
 	History []Point   `json:"history"`
+	Window  *Window   `json:"window"`
 }
 
-func (p *StatsPoller) State() StateResponse {
+// Seçilen aralıkta her satırın sayaç farkı: kaç istek, kaçı hangi yanıt sınıfı, kaç bağlantı hatası.
+type WindowRow struct {
+	N     float64    `json:"n"`
+	Codes [6]float64 `json:"codes"` // 1xx, 2xx, 3xx, 4xx, 5xx, diğer
+	Econ  float64    `json:"econ"`
+	Eresp float64    `json:"eresp"`
+}
+
+type Window struct {
+	Minutes int                  `json:"minutes"`
+	Seconds float64              `json:"seconds"` // gerçekte kapsanan süre (ajan yeni başladıysa daha kısa)
+	Rows    map[string]WindowRow `json:"rows"`
+}
+
+func clampMinutes(m int) int {
+	if m < 1 {
+		return 1
+	}
+	if m > maxWindowMin {
+		return maxWindowMin
+	}
+	return m
+}
+
+func (p *StatsPoller) State(minutes int) StateResponse {
+	minutes = clampMinutes(minutes)
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	h := make([]Point, len(p.hist))
-	copy(h, p.hist)
-	return StateResponse{OK: p.lastErr == "" && p.cur != nil, Error: p.lastErr, ErrorAt: p.errAt, Cur: p.cur, Prev: p.prev, History: h}
+	resp := StateResponse{OK: p.lastErr == "" && p.cur != nil, Error: p.lastErr, ErrorAt: p.errAt, Cur: p.cur, Prev: p.prev}
+	if p.cur == nil {
+		return resp
+	}
+	from := p.cur.At - int64(minutes)*60_000
+	var pts []Point
+	for _, pt := range p.hist {
+		if pt.T >= from {
+			pts = append(pts, pt)
+		}
+	}
+	resp.History = downsample(pts, maxChartPts)
+	resp.Window = p.window(from, minutes)
+	return resp
+}
+
+// Aralığın başına denk gelen (ya da ondan hemen önceki) örnekle şimdiki değerlerin farkı
+func (p *StatsPoller) window(from int64, minutes int) *Window {
+	if len(p.samples) == 0 {
+		return nil
+	}
+	base := p.samples[0]
+	for _, s := range p.samples {
+		if s.At > from {
+			break
+		}
+		base = s
+	}
+	w := &Window{Minutes: minutes, Seconds: float64(p.cur.At-base.At) / 1000, Rows: map[string]WindowRow{}}
+	for _, r := range p.cur.Rows {
+		k := r["pxname"] + "|" + r["svname"]
+		b, ok := base.Vals[k]
+		if !ok {
+			continue
+		}
+		c := rowCounters(r)
+		d := func(i int) float64 {
+			if v := c[i] - b[i]; v > 0 {
+				return v
+			}
+			return 0
+		}
+		n := d(0)
+		if r["req_tot"] == "" {
+			n = d(1) // eski sürümlerde sunucu satırında req_tot yok
+		}
+		w.Rows[k] = WindowRow{N: n, Codes: [6]float64{d(2), d(3), d(4), d(5), d(6), d(7)}, Econ: d(8), Eresp: d(9)}
+	}
+	return w
+}
+
+// Grafik için en fazla max nokta: ardışık noktaların ortalaması
+func downsample(pts []Point, max int) []Point {
+	if len(pts) <= max {
+		return pts
+	}
+	size := (len(pts) + max - 1) / max
+	var out []Point
+	for i := 0; i < len(pts); i += size {
+		end := i + size
+		if end > len(pts) {
+			end = len(pts)
+		}
+		var a Point
+		for _, p := range pts[i:end] {
+			a.C2 += p.C2
+			a.C3 += p.C3
+			a.C4 += p.C4
+			a.C5 += p.C5
+			a.In += p.In
+			a.Out += p.Out
+			a.Reqs += p.Reqs
+		}
+		n := float64(end - i)
+		out = append(out, Point{T: pts[end-1].T, C2: a.C2 / n, C3: a.C3 / n, C4: a.C4 / n, C5: a.C5 / n, In: a.In / n, Out: a.Out / n, Reqs: a.Reqs / n})
+	}
+	return out
 }
 
 func num(s string) float64 {

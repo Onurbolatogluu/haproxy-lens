@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, createContext, useContext } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { ChevronDown, ChevronRight, Info, X, Pause, Play } from "lucide-react";
 
@@ -112,7 +112,8 @@ const GLOSSARY = {
   used_conn_cur: ["Kullanımdaki bağlantı", "Şu an kullanımda olan sunucu bağlantısı."],
   uweight: ["Yapılandırmadaki ağırlık", "haproxy.cfg'de verilen ağırlık."],
   _reqps: ["İstek/sn", "Tüm frontend'lere saniyede gelen istek.", "Hesaplanan: iki ölçüm arasındaki req_tot farkı"],
-  _err5: ["Sunucu hatası oranı", "Yanıtların yüzde kaçının 5xx (sunucu hatası) olduğu.", "Hesaplanan: hrsp_5xx / tüm yanıtlar"],
+  _err5: ["Sunucu hatası oranı", "Seçili zaman aralığında yanıtların yüzde kaçının 5xx (sunucu hatası) olduğu.", "Hesaplanan: hrsp_5xx farkı / tüm yanıtların farkı"],
+  _srv5xx: ["Sunucunun 5xx'leri", "Seçili zaman aralığında bu sunucudan dönen sunucu hatası (5xx) sayısı; altında bu sunucunun kendi yanıtları içindeki oranı. En çok hata dönen sunucu sarı görünür.", "Hesaplanan: sunucu satırının hrsp_5xx farkı"],
   _traffic: ["Trafik", "Saniyede gelen ve giden veri.", "Hesaplanan: bin ve bout farkı"],
   _healthy: ["Sağlıklı sunucu", "Sorunsuz çalışan sunucuların tüm sunuculara oranı.", "Hesaplanan: status alanından"],
   _uptime: ["Çalışma süresi", "HAProxy'nin son yeniden başlatmadan beri açık kaldığı süre.", "show info: Uptime_sec"],
@@ -237,6 +238,23 @@ function fmtField(k, v, row) {
   if (k === "throttle") return `%${n}`;
   return fmtNum(n);
 }
+
+// ---------------- Zaman aralığı ----------------
+const RANGES = [[5, "5 dk"], [15, "15 dk"], [60, "1 saat"]];
+// Seçili aralığın satır bazındaki sayaç farkları; errRatio/codeCounts ile aynı biçimde
+const WinCtx = createContext({ wrates: {}, label: "açıldığından beri", minutes: 60 });
+
+function windowToRates(win) {
+  const out = {};
+  for (const [k, v] of Object.entries(win?.rows || {})) out[k] = { codes: v.codes, n: v.n, econ: v.econ, eresp: v.eresp };
+  return out;
+}
+function winLabel(win, minutes) {
+  if (!win) return "açıldığından beri";
+  if (win.seconds < minutes * 60 - 20) return `son ${fmtDur(win.seconds)}`;
+  return minutes >= 60 ? "son 1 saat" : `son ${minutes} dakika`;
+}
+const cap = (t) => t.charAt(0).toLocaleUpperCase("tr-TR") + t.slice(1);
 
 // ---------------- Model ----------------
 const keyOf = (r) => `${r.pxname}|${r.svname}`;
@@ -380,8 +398,9 @@ function SectionTitle({ title, sub }) {
 }
 
 const CODE_PARTS = [["Başarılı", 1, C.ok], ["Yönlendirme", 2, C.info], ["İstemci hatası", 3, C.warn], ["Sunucu hatası", 4, C.bad]];
-function CodeBar({ row, rates, compact }) {
-  const c = codeCounts(row, rates);
+function CodeBar({ row, compact }) {
+  const { wrates, label } = useContext(WinCtx);
+  const c = codeCounts(row, wrates);
   const total = c.reduce((a, b) => a + b, 0);
   if (!total) return compact ? <span style={{ color: C.faint }}>—</span> : null;
   const bar = (
@@ -393,7 +412,7 @@ function CodeBar({ row, rates, compact }) {
   return (
     <div className="mb-5">
       <div className="text-xs mb-2" style={{ color: C.muted }}>
-        Yanıt türleri {rates[keyOf(row)] ? `(son ${TICK_SEC} saniye)` : "(açıldığından beri)"}
+        Yanıt türleri ({wrates[keyOf(row)] ? label : "açıldığından beri"})
       </div>
       {bar}
       <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-xs" style={{ color: C.muted }}>
@@ -434,8 +453,12 @@ function Th({ k, children, right }) {
 }
 
 function ServerTable({ servers, rates, onFields }) {
+  const { wrates, label } = useContext(WinCtx);
   if (!servers.length) return <p className="text-sm" style={{ color: C.faint }}>Bu backend'de sunucu yok.</p>;
   const td = "py-2.5 pr-4 align-top";
+  const e5 = (s) => wrates[keyOf(s)]?.codes?.[4] ?? null;
+  const tot = (s) => (wrates[keyOf(s)]?.codes || []).reduce((a, x) => a + x, 0);
+  const maxE5 = Math.max(0, ...servers.map((s) => e5(s) || 0));
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm" style={{ borderCollapse: "collapse", minWidth: 940 }}>
@@ -447,6 +470,7 @@ function ServerTable({ servers, rates, onFields }) {
             <Th k="weight" right>Ağırlık</Th>
             <Th k="scur">Açık bağlantı</Th>
             <Th k="req_rate" right>İstek/sn</Th>
+            <Th k="_srv5xx" right>5xx</Th>
             <Th k="rtime" right>Yanıt süresi</Th>
             <Th k="econ" right>Bağlanamama</Th>
             <Th k="eresp" right>Yanıt hatası</Th>
@@ -484,6 +508,14 @@ function ServerTable({ servers, rates, onFields }) {
                 <td className={`${td} text-right tnum`}>{fmtNum(num(s.weight))}</td>
                 <td className={td}><Meter value={num(s.scur) || 0} max={num(s.slim)} /></td>
                 <td className={`${td} text-right tnum`}>{fmtRate(rpsOf(s, rates))}</td>
+                <td className={`${td} text-right tnum`} title={label}>
+                  {e5(s) == null ? "—" : (
+                    <>
+                      <div style={{ color: e5(s) > 0 && e5(s) === maxE5 ? C.warn : C.text }}>{fmtNum(e5(s))}</div>
+                      {tot(s) > 0 && <div className="text-xs mt-0.5" style={{ color: C.faint }}>{fmtPct(e5(s) / tot(s))}</div>}
+                    </>
+                  )}
+                </td>
                 <td className={`${td} text-right tnum`}>{fmtMs(num(s.rtime))}</td>
                 <td className={`${td} text-right tnum`} style={{ color: econ > 0 ? C.warn : C.text }}>{fmtNum(econ)}</td>
                 <td className={`${td} text-right tnum`}>{fmtNum(num(s.eresp))}</td>
@@ -495,6 +527,35 @@ function ServerTable({ servers, rates, onFields }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+function FiveXXSummary({ b }) {
+  const { wrates, label } = useContext(WinCtx);
+  const wb = wrates[keyOf(b)];
+  if (!wb || !b.servers.length) return null;
+  const be5 = wb.codes[4];
+  const per = b.servers.map((s) => {
+    const w = wrates[keyOf(s)];
+    return { s, e: w?.codes?.[4] || 0, tot: w ? w.codes.reduce((a, x) => a + x, 0) : 0 };
+  });
+  const sum = per.reduce((a, x) => a + x.e, 0);
+  const box = { background: C.panel2 };
+  if (be5 === 0 && sum === 0) {
+    return <p className="rounded-md px-4 py-3 mb-4 text-sm" style={{ ...box, color: C.muted }}>{cap(label)} içinde bu backend'den hiç sunucu hatası (5xx) dönmedi.</p>;
+  }
+  const top = [...per].sort((a, c) => c.e - a.e)[0];
+  const busy = per.filter((x) => x.tot >= 20);
+  const ratios = busy.map((x) => x.e / x.tot);
+  const even = busy.length >= 2 && Math.min(...ratios) > 0 && Math.max(...ratios) / Math.min(...ratios) < 1.5;
+  const fromProxy = be5 - sum;
+  return (
+    <p className="rounded-md px-4 py-3 mb-4 text-sm leading-relaxed" style={{ ...box, boxShadow: `inset 3px 0 0 ${C.warn}` }}>
+      {cap(label)} içinde bu backend'den {fmtNum(Math.max(be5, sum))} sunucu hatası (5xx) döndü.
+      {top.e > 0 && <> En çok <b>{top.s.svname}</b> sunucusundan: {fmtNum(top.e)} tane, sunuculardan dönen 5xx'lerin {fmtPct(top.e / sum)} kadarı.</>}
+      {even && <> Hata oranları sunucular arasında birbirine yakın; sorun büyük ihtimalle tek bir sunucuda değil, hepsinin kullandığı ortak bir yerde (uygulama, veritabanı, dış servis).</>}
+      {fromProxy > Math.max(5, be5 * 0.1) && <> {fmtNum(fromProxy)} tanesi hiçbir sunucuya ulaşmadan HAProxy tarafından üretildi (ör. çalışan sunucu yokken 503).</>}
+    </p>
   );
 }
 
@@ -516,7 +577,8 @@ function BackendDetail({ b, rates, onFields }) {
         <Fact k="wredis">{fmtNum(num(b.wredis))}</Fact>
         <Fact k="cli_abrt">{fmtNum(num(b.cli_abrt))}</Fact>
       </dl>
-      <CodeBar row={b} rates={rates} />
+      <CodeBar row={b} />
+      <FiveXXSummary b={b} />
       <ServerTable servers={b.servers} rates={rates} onFields={onFields} />
       <button type="button" className="mt-4 text-sm" style={{ color: C.info }} onClick={() => onFields(b)}>
         Bu backend'in tüm alanlarını göster
@@ -561,7 +623,7 @@ function FrontendTable({ model, rates, onFields }) {
               <td className={`${td} text-right tnum`}>{fmtNum(num(f.dreq))}</td>
               <td className={`${td} text-right tnum`}>{fmtNum(num(f.ereq))}</td>
               <td className={`${td} text-right tnum whitespace-nowrap`}>{fmtBytes(num(f.bout))} / {fmtBytes(num(f.bin))}</td>
-              <td className={td} style={{ minWidth: 120 }}><CodeBar row={f} rates={rates} compact /></td>
+              <td className={td} style={{ minWidth: 120 }}><CodeBar row={f} compact /></td>
             </tr>
           ))}
         </tbody>
@@ -683,7 +745,7 @@ function computeRates(prevRows, rows, dt) {
   return out;
 }
 
-function buildFindings(model, rates, logs) {
+function buildFindings(model, rates, logs, wrates = {}, label = "") {
   const out = [];
   const add = (level, target, text) => out.push({ level, target, text });
   let nocheck = 0, total = 0;
@@ -710,9 +772,18 @@ function buildFindings(model, rates, logs) {
     }
     const q = num(b.qcur);
     if (q > 0) add("warn", name, `${name} kuyruğunda ${fmtNum(q)} istek bekliyor. Sunucular bağlantı sınırına dayanmış, kapasite yetmiyor.`);
-    const er = errRatio([b], rates);
-    const rps = rpsOf(b, rates);
-    if (er != null && er > 0.02 && (rps == null || rps >= 1)) add("warn", name, `${name} yanıtlarının ${fmtPct(er)} kadarı sunucu hatası (5xx).`);
+    const er = errRatio([b], wrates);
+    const wn = (wrates[keyOf(b)]?.codes || []).reduce((a, x) => a + x, 0);
+    if (er != null && er > 0.02 && wn >= 50) {
+      let top = null, sum = 0;
+      for (const s of sv) {
+        const e = wrates[keyOf(s)]?.codes?.[4] || 0;
+        sum += e;
+        if (!top || e > top.e) top = { s, e };
+      }
+      const who = top && top.e > 0 && sv.length > 1 ? ` En çok ${top.s.svname} sunucusundan (${fmtPct(top.e / sum)}).` : "";
+      add("warn", name, `${cap(label)} içinde ${name} yanıtlarının ${fmtPct(er)} kadarı sunucu hatası (5xx).${who}`);
+    }
     const rt = num(b.rtime);
     if (rt != null && rt > 800) add("warn", name, `${name} yavaş: sunucular ortalama ${fmtMs(rt)} içinde yanıt veriyor.`);
   }
@@ -802,6 +873,7 @@ function StatusHero({ findings, model, onJump }) {
 }
 
 function PulseStrip({ model, rates, info }) {
+  const { wrates, label } = useContext(WinCtx);
   const live = Object.keys(rates).length > 0;
   const fes = model.frontends;
   const sum = (a) => a.reduce((x, y) => x + (y || 0), 0);
@@ -809,7 +881,7 @@ function PulseStrip({ model, rates, info }) {
   const totReq = sum(fes.map((f) => num(f.req_tot) ?? num(f.stot)));
   const scur = sum(fes.map((f) => num(f.scur)));
   const maxconn = num(info.Maxconn);
-  const err = errRatio(fes, rates);
+  const err = errRatio(fes, wrates);
   const servers = model.backends.flatMap((b) => b.servers);
   const healthy = servers.filter((s) => HEALTHY.has(kindOf(s.status))).length;
   const others = {};
@@ -821,7 +893,7 @@ function PulseStrip({ model, rates, info }) {
   const items = [
     { k: "_reqps", value: fmtRate(reqps), sub: `Toplam ${fmtNum(totReq)} istek` },
     { k: "scur", value: fmtNum(scur), sub: maxconn ? `Genel sınırın ${fmtPct(scur / maxconn)} kadarı` : "Tüm frontend'lerde" },
-    { k: "_err5", value: fmtPct(err), sub: live ? "Son ölçümde" : "Açıldığından beri", color: err > 0.02 ? C.warn : null },
+    { k: "_err5", value: fmtPct(err), sub: cap(label), color: err > 0.02 ? C.warn : null },
     { k: "_traffic", ...traffic },
     { k: "_healthy", value: `${healthy} / ${servers.length}`, sub: othersText || "Hepsi çalışıyor", color: healthy < servers.length ? C.warn : null },
     { k: "_uptime", value: fmtDur(num(info.Uptime_sec)), sub: info.Nbthread ? `${info.Nbthread} iş parçacığı` : "" },
@@ -840,6 +912,7 @@ function PulseStrip({ model, rates, info }) {
 }
 
 function TrafficCharts({ points }) {
+  const { label, minutes } = useContext(WinCtx);
   if (points.length < 2) {
     return (
       <Panel title="Zaman içindeki trafik" note="Grafikler birkaç saniye içinde dolmaya başlar. Ajan son 1 saati hafızada tutar.">
@@ -848,7 +921,7 @@ function TrafficCharts({ points }) {
     );
   }
   const history = points.map((p) => ({
-    t: new Date(p.t).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    t: new Date(p.t).toLocaleTimeString("tr-TR", minutes > 5 ? { hour: "2-digit", minute: "2-digit" } : { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
     "2xx": Math.round(p.c2 * 10) / 10, "3xx": Math.round(p.c3 * 10) / 10, "4xx": Math.round(p.c4 * 10) / 10, "5xx": Math.round(p.c5 * 10) / 10,
     Gelen: Math.round((p.in * 8) / 1e5) / 10, Giden: Math.round((p.out * 8) / 1e5) / 10,
   }));
@@ -867,7 +940,7 @@ function TrafficCharts({ points }) {
   const codeSeries = [["2xx", "Başarılı", C.ok], ["3xx", "Yönlendirme", C.info], ["4xx", "İstemci hatası", C.warn], ["5xx", "Sunucu hatası", C.bad]];
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <Panel title="Saniyedeki istek, yanıt türüne göre" note="Son 10 dakika. En üstteki kırmızı şerit ne kadar kalınsa o kadar çok sunucu hatası var.">
+      <Panel title="Saniyedeki istek, yanıt türüne göre" note={`${cap(label)}. En üstteki kırmızı şerit ne kadar kalınsa o kadar çok sunucu hatası var.`}>
         <ResponsiveContainer width="100%" height={210}>
           <AreaChart data={history} margin={{ top: 6, right: 6, left: -14, bottom: 0 }}>
             <CartesianGrid stroke={C.line} vertical={false} />
@@ -881,7 +954,7 @@ function TrafficCharts({ points }) {
         </ResponsiveContainer>
         <Legend items={codeSeries.map(([, n, c]) => [n, c])} />
       </Panel>
-      <Panel title="Trafik" note="İstemcilere giden ve onlardan gelen veri, megabit/saniye.">
+      <Panel title="Trafik" note={`${cap(label)}. İstemcilere giden ve onlardan gelen veri, megabit/saniye.`}>
         <ResponsiveContainer width="100%" height={210}>
           <AreaChart data={history} margin={{ top: 6, right: 6, left: -14, bottom: 0 }}>
             <CartesianGrid stroke={C.line} vertical={false} />
@@ -898,6 +971,23 @@ function TrafficCharts({ points }) {
   );
 }
 
+function RangePicker({ minutes, setMinutes }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 mt-8 mb-3">
+      <p className="text-sm" style={{ color: C.muted }}>Grafikler, 5xx oranları, yanıt türleri ve log bölümü bu zaman aralığını kullanır.</p>
+      <div className="flex gap-1" role="group" aria-label="Zaman aralığı">
+        {RANGES.map(([m, t]) => (
+          <button key={m} type="button" onClick={() => setMinutes(m)} aria-pressed={minutes === m}
+            className="rounded-md px-3 py-1.5 text-sm"
+            style={minutes === m ? { background: C.panel2, color: C.text, border: `1px solid ${C.info}` } : { color: C.muted, border: `1px solid ${C.line}` }}>
+            {t}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function backendScore(b, rates) {
   const kinds = b.servers.map((s) => kindOf(s.status));
   const dead = kinds.length > 0 && !kinds.some((k) => REACHABLE.has(k));
@@ -906,6 +996,7 @@ function backendScore(b, rates) {
 }
 
 function BackendList({ model, rates, expanded, onToggle, onFields }) {
+  const { wrates } = useContext(WinCtx);
   if (!model.backends.length) return <p style={{ color: C.faint }}>HAProxy'de backend yok.</p>;
   const sorted = [...model.backends].sort((a, b) => backendScore(b, rates) - backendScore(a, rates));
   return (
@@ -925,7 +1016,7 @@ function BackendList({ model, rates, expanded, onToggle, onFields }) {
         const healthy = kinds.filter((k) => HEALTHY.has(k)).length;
         const allNoCheck = sv.length > 0 && kinds.every((k) => k === "nocheck");
         const dead = sv.length > 0 && !kinds.some((k) => REACHABLE.has(k));
-        const err = errRatio([b], rates);
+        const err = errRatio([b], wrates);
         const rt = num(b.rtime);
         const q = num(b.qcur) || 0;
         return (
@@ -959,7 +1050,7 @@ function BackendList({ model, rates, expanded, onToggle, onFields }) {
   );
 }
 
-function LogSection({ logs, minutes, setMinutes }) {
+function LogSection({ logs, minutes }) {
   if (!logs) return null;
   if (!logs.enabled) {
     return (
@@ -979,20 +1070,11 @@ function LogSection({ logs, minutes, setMinutes }) {
         <div>
           <h2 className="text-xl font-semibold" style={{ letterSpacing: "-0.01em" }}>Log'dan gelenler</h2>
           <p className="text-sm mt-1" style={{ color: C.muted }}>
-            Son {minutes} dakikada {fmtNum(total)} istek.
+            {minutes >= 60 ? "Son 1 saatte" : `Son ${minutes} dakikada`} {fmtNum(total)} istek.
             {ago != null ? ` En son satır ${fmtDur(Math.max(0, ago))} önce.` : " Henüz satır okunmadı."}
             {" "}Sorgu parametreleri (?...) saklanmaz.
             {logs.source ? <span style={{ color: C.faint }}> Kaynak: {logs.source.replace(/^file:/, "").replace(/^journal:/, "journald, ")}.</span> : null}
           </p>
-        </div>
-        <div className="flex gap-1" role="group" aria-label="Zaman aralığı">
-          {[5, 15, 60].map((m) => (
-            <button key={m} type="button" onClick={() => setMinutes(m)} aria-pressed={minutes === m}
-              className="rounded-md px-3 py-1.5 text-sm"
-              style={minutes === m ? { background: C.panel2, color: C.text, border: `1px solid ${C.info}` } : { color: C.muted, border: `1px solid ${C.line}` }}>
-              {m} dk
-            </button>
-          ))}
         </div>
       </div>
       {logs.error && (
@@ -1109,7 +1191,7 @@ export default function App() {
   const [state, setState] = useState(null);
   const [fetchErr, setFetchErr] = useState(null);
   const [logs, setLogs] = useState(null);
-  const [minutes, setMinutes] = useState(5);
+  const [minutes, setMinutes] = useState(60);
   const [running, setRunning] = useState(true);
   const [expanded, setExpanded] = useState(() => new Set());
   const [fieldsRow, setFieldsRow] = useState(null);
@@ -1119,7 +1201,7 @@ export default function App() {
     let alive = true;
     const load = async () => {
       try {
-        const r = await fetch("/api/state", { cache: "no-store" });
+        const r = await fetch(`/api/state?minutes=${minutes}`, { cache: "no-store" });
         const j = await r.json();
         if (alive) { setState(j); setFetchErr(null); }
       } catch (e) {
@@ -1129,7 +1211,7 @@ export default function App() {
     load();
     const id = setInterval(load, TICK_SEC * 1000);
     return () => { alive = false; clearInterval(id); };
-  }, [running]);
+  }, [running, minutes]);
 
   useEffect(() => {
     if (!running) return undefined;
@@ -1150,8 +1232,11 @@ export default function App() {
   const prev = state?.prev;
   const model = useMemo(() => buildModel(cur?.rows || []), [cur]);
   const rates = useMemo(() => (cur && prev ? computeRates(prev.rows, cur.rows, (cur.at - prev.at) / 1000) : {}), [cur, prev]);
-  const findings = useMemo(() => buildFindings(model, rates, logs), [model, rates, logs]);
-  const points = useMemo(() => (state?.history || []).slice(-300), [state]);
+  const wrates = useMemo(() => windowToRates(state?.window), [state]);
+  const label = winLabel(state?.window, minutes);
+  const win = useMemo(() => ({ wrates, label, minutes }), [wrates, label, minutes]);
+  const findings = useMemo(() => buildFindings(model, rates, logs, wrates, label), [model, rates, logs, wrates, label]);
+  const points = state?.history || [];
 
   const toggle = (name) => setExpanded((s) => {
     const n = new Set(s);
@@ -1171,6 +1256,7 @@ export default function App() {
   const problem = fetchErr || (state && !state.ok ? `HAProxy'den veri alınamıyor: ${state.error || "bilinmeyen hata"}` : null);
 
   return (
+    <WinCtx.Provider value={win}>
     <div className="hl-root" style={{ background: C.bg, color: C.text, minHeight: "100vh" }}>
       <style>{CSS}</style>
       <div className="max-w-6xl mx-auto px-4 py-6 md:px-8 md:py-8">
@@ -1192,12 +1278,13 @@ export default function App() {
           <>
             <StatusHero findings={findings} model={model} onJump={jump} />
             <PulseStrip model={model} rates={rates} info={cur.info} />
-            <div className="mt-4"><TrafficCharts points={points} /></div>
+            <RangePicker minutes={minutes} setMinutes={setMinutes} />
+            <TrafficCharts points={points} />
 
-            <SectionTitle title="Backend'ler" sub="Sorunlu olanlar ve en yoğunlar üstte. Satıra tıkla, sunucuları gör; sunucu adına tıklarsan HAProxy'nin verdiği tüm alanlar açılır." />
+            <SectionTitle title="Backend'ler" sub={`Sorunlu olanlar ve en yoğunlar üstte. İstek/sn şu anki değer; 5xx oranı ${label} için. Satıra tıkla, sunucuları gör; sunucu adına tıklarsan HAProxy'nin verdiği tüm alanlar açılır.`} />
             <BackendList model={model} rates={rates} expanded={expanded} onToggle={toggle} onFields={setFieldsRow} />
 
-            <LogSection logs={logs} minutes={minutes} setMinutes={setMinutes} />
+            <LogSection logs={logs} minutes={minutes} />
 
             <SectionTitle title="Frontend'ler" sub="Kullanıcıların bağlandığı giriş noktaları." />
             <FrontendTable model={model} rates={rates} onFields={setFieldsRow} />
@@ -1213,5 +1300,6 @@ export default function App() {
       </div>
       {fieldsRow && <FieldsModal row={fieldsRow} onClose={() => setFieldsRow(null)} />}
     </div>
+    </WinCtx.Provider>
   );
 }

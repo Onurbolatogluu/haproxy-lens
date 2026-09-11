@@ -6,7 +6,8 @@ Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur
 
 - Sade bir durum özeti: "api içindeki srv3, 12 dakikadır çalışmıyor. Sebep: bağlantı zaman aşımı."
 - Backend'ler ve sunucular: durum, sağlık kontrolünün anlamı, bağlantı doluluğu, yanıt süresi, hatalar.
-- Canlı grafikler: saniyedeki istek (yanıt türüne göre) ve trafik.
+- Canlı grafikler: saniyedeki istek (yanıt türüne göre) ve trafik; zaman aralığı 5 dk, 15 dk ya da 1 saat seçilebilir.
+- 5xx hatalarının en çok hangi sunucudan döndüğü; hatalar sunuculara eşit dağılmışsa sorunun ortak bir yerde olabileceği uyarısı.
 - Log'dan: en çok istenen adresler, engellenen (403) ve hiçbir backend'e eşleşmeyen (503) istekler, en çok istek atan IP'ler.
 - Her terimin sade Türkçe açıklaması ve her satır için HAProxy'nin verdiği tüm alanlar.
 
@@ -138,7 +139,7 @@ Başka hiçbir dosyaya yazmaz. Servis, socket'e ve log'a erişmek için gereken 
 - **Alan adı:** Varsayılan `httplog` biçimi Host bilgisini içermez. Bu yüzden 403 ve 503 alan isteklerde sadece path görünür.
 - **Gerçek IP:** Cloudflare arkasından gelen isteklerde log'daki IP Cloudflare'e aittir; panel bu IP'leri "Cloudflare" diye etiketler.
 - **Özel log biçimi:** Özel `log-format` kullanan sunucularda log analizi kendiliğinden kapanır; stats paneli tam çalışır.
-- **Geçmiş:** Grafik verisi 1 saat hafızada tutulur; servis yeniden başlarsa sıfırlanır.
+- **Geçmiş:** Grafik ve 5xx verisi 1 saat hafızada tutulur; ajan ya da HAProxy yeniden başlarsa sıfırdan dolmaya başlar. O sırada panel, aralığın gerçekte kaç dakikayı kapsadığını yazar.
 - **Tek sunucu:** Her kurulum sadece kendi sunucusunu gösterir.
 - **Şifre ve HTTPS yok:** Erişim sadece ağ adresine göre sınırlanır. İzinli ağdaki herkes paneli görebilir; gerekirse `ALLOW` ile yönetim ağına daralt.
 

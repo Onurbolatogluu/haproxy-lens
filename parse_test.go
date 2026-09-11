@@ -4,7 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"testing"
+	"time"
 )
 
 func TestParseLogLine(t *testing.T) {
@@ -136,5 +138,41 @@ func TestParseStat(t *testing.T) {
 func TestOnlyReadOnlyCommands(t *testing.T) {
 	if _, err := query("/yok.sock", "disable server be_web/web1"); err == nil || err.Error() != `izin verilmeyen komut: "disable server be_web/web1"` {
 		t.Fatalf("izin listesi dışındaki komut engellenmedi: %v", err)
+	}
+}
+
+func TestWindowAndDownsample(t *testing.T) {
+	p := NewStatsPoller("", 2*time.Second, 1800)
+	row := func(req, e5 string) map[string]string {
+		return map[string]string{"pxname": "be", "svname": "s1", "type": "2", "req_tot": req, "hrsp_5xx": e5, "hrsp_2xx": "0"}
+	}
+	snap := func(at int64, up, req, e5 string) *Snapshot {
+		return &Snapshot{At: at, Info: map[string]string{"Uptime_sec": up}, Rows: []map[string]string{row(req, e5)}}
+	}
+	// 20 dakika boyunca her 10 saniyede 100 istek, 5'i 5xx
+	for i := int64(0); i <= 120; i++ {
+		p.store(snap(i*10_000, strconv.FormatInt(1000+i*10, 10), strconv.FormatInt(i*100, 10), strconv.FormatInt(i*5, 10)))
+	}
+	st := p.State(5)
+	w := st.Window.Rows["be|s1"]
+	if st.Window.Seconds != 300 || w.N != 3000 || w.Codes[4] != 150 {
+		t.Fatalf("5 dk penceresi hatalı: %+v %+v", st.Window, w)
+	}
+	// Ajan 20 dk önce başladı; 60 dk istenince kapsanan süre 20 dk olmalı
+	if st := p.State(60); st.Window.Seconds != 1200 {
+		t.Fatalf("kapsanan süre %v", st.Window.Seconds)
+	}
+	// HAProxy yeniden başlarsa (uptime küçülür) pencere sıfırdan başlar, eksi değer çıkmaz
+	p.store(snap(1_210_000, "5", "10", "1"))
+	if w := p.State(60).Window.Rows["be|s1"]; w.N != 0 || w.Codes[4] != 0 {
+		t.Fatalf("yeniden başlatma sonrası: %+v", w)
+	}
+	pts := make([]Point, 1800)
+	for i := range pts {
+		pts[i] = Point{T: int64(i), C5: 2}
+	}
+	ds := downsample(pts, 360)
+	if len(ds) != 360 || ds[0].C5 != 2 || ds[len(ds)-1].T != 1799 {
+		t.Fatalf("seyreltme: %d nokta, %+v", len(ds), ds[len(ds)-1])
 	}
 }
