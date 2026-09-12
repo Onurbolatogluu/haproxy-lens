@@ -177,40 +177,82 @@ func TestWindowAndDownsample(t *testing.T) {
 	}
 }
 
-func TestErrorPathsFromLog(t *testing.T) {
+func TestCodePathsFromLog(t *testing.T) {
 	a := NewLogAnalyzer("file:/yok", "")
-	mk := func(be, path string, status int) logRecord {
-		return logRecord{At: time.Now(), Client: "1.2.3.4", Frontend: "fe", Backend: be, Server: "s1", Status: status, Method: "GET", Path: path, Kind: KindServed}
+	mk := func(be, path string, status int, kind string) logRecord {
+		srv := "s1"
+		if kind != KindServed {
+			srv = "<NOSRV>"
+		}
+		return logRecord{At: time.Now(), Client: "1.2.3.4", Frontend: "fe", Backend: be, Server: srv,
+			Status: status, Method: "GET", Path: path, RawPath: path, Kind: kind}
 	}
-	for i := 0; i < 50; i++ {
-		a.add(mk("be_api", "/api/orders", 200))
+	add := func(n int, r logRecord) {
+		for i := 0; i < n; i++ {
+			a.add(r)
+		}
 	}
-	for i := 0; i < 12; i++ {
-		a.add(mk("be_api", "/api/orders", 502))
-	}
-	for i := 0; i < 3; i++ {
-		a.add(mk("be_api", "/api/orders", 503))
-	}
-	for i := 0; i < 8; i++ {
-		a.add(mk("be_web", "/gizli", 404))
-	}
-	for i := 0; i < 4; i++ {
-		a.add(mk("be_web", "/gizli", 403))
-	}
+	add(50, mk("be_api", "/api/orders", 200, KindServed))
+	add(12, mk("be_api", "/api/orders", 502, KindServed))
+	add(3, mk("be_api", "/api/orders", 503, KindServed))
+	add(8, mk("be_web", "/gizli", 404, KindServed))
+	add(4, mk("be_web", "/gizli", 403, KindServed))
+	// HAProxy'nin kendi ürettiği http->https yönlendirmesi: hiçbir sunucuya gitmez
+	add(900, mk("fe", "/", 301, KindRedirect))
+
 	rep := a.Report(60)
-	if len(rep.ErrorPaths) != 2 {
-		t.Fatalf("hata yolu sayısı %d", len(rep.ErrorPaths))
+	if rep.Classes != [4]int64{50, 900, 12, 15} {
+		t.Fatalf("sınıf toplamları: %v", rep.Classes)
 	}
-	top := rep.ErrorPaths[0] // en çok hatalı: /api/orders (15)
-	if top.Path != "/api/orders" || top.Errs != 15 || top.Class != "5xx" {
-		t.Fatalf("ilk hata yolu: %+v", top)
+	get := func(path string) *CodePathRow {
+		for i := range rep.CodePaths {
+			if rep.CodePaths[i].Path == path {
+				return &rep.CodePaths[i]
+			}
+		}
+		return nil
 	}
-	if top.Codes[0].Code != 502 || top.Codes[0].N != 12 {
-		t.Fatalf("en çok kod: %+v", top.Codes)
+	// Yönlendirme satırı listede olmalı (eskiden hiçbir yerde görünmüyordu)
+	red := get("/")
+	if red == nil || red.S3 != 900 || red.Kind != KindRedirect || red.Codes[0].Code != 301 {
+		t.Fatalf("yönlendirme satırı: %+v", red)
 	}
-	web := rep.ErrorPaths[1]
-	if web.Class != "4xx" || web.Codes[0].Code != 404 || web.Codes[0].N != 8 {
-		t.Fatalf("4xx yolu: %+v", web)
+	if red.Detail == nil || red.Detail.Total != 900 {
+		t.Fatalf("yönlendirme ayrıntısı yok: %+v", red.Detail)
+	}
+	api := get("/api/orders")
+	if api == nil || api.S5 != 15 || api.N != 65 || api.Codes[0].Code != 502 || api.Codes[0].N != 12 {
+		t.Fatalf("5xx satırı: %+v", api)
+	}
+	web := get("/gizli")
+	if web == nil || web.S4 != 12 {
+		t.Fatalf("4xx satırı: %+v", web)
+	}
+	// "En çok istenen adresler" artık yönlendirmeleri de içerir
+	if len(rep.Paths) != 3 {
+		t.Fatalf("yol sayısı: %d", len(rep.Paths))
+	}
+}
+
+func TestTopPerClass(t *testing.T) {
+	// Çok sayıda 3xx, az sayıdaki 5xx satırını listeden düşürmemeli
+	var rows []CodePathRow
+	for i := 0; i < 40; i++ {
+		rows = append(rows, CodePathRow{Path: "/y" + strconv.Itoa(i), S3: int64(1000 - i)})
+	}
+	rows = append(rows, CodePathRow{Path: "/nadir-hata", S5: 2})
+	out := topPerClass(rows, 20)
+	var bulundu bool
+	for _, r := range out {
+		if r.Path == "/nadir-hata" {
+			bulundu = true
+		}
+	}
+	if !bulundu {
+		t.Fatalf("az sayıdaki 5xx satırı listeye girmedi (%d satır)", len(out))
+	}
+	if len(out) != 21 {
+		t.Fatalf("beklenen 21 satır, gelen %d", len(out))
 	}
 }
 

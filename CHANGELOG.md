@@ -4,6 +4,23 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.8.0
+
+- Log bölümündeki "Hata alan adresler" paneli "Hangi adres ne döndürüyor" oldu: **3xx, 4xx ve 5xx** için ayrı sekmeler. Her sekmede o sınıfı en çok döndüren adresler, tam kod dökümü (301, 302, 304, 403, 500, 502...) ve açılır ayrıntı var.
+- Yönlendirmeler artık görünüyor. HAProxy'nin kendi ürettiği http→https atlamaları hiçbir adres listesine girmiyordu; şimdi "HAProxy yönlendirdi" etiketiyle listeleniyorlar. Bir backend'in 3xx oranı yüksekse hangi adresten geldiği doğrudan görülebiliyor.
+- Her satırın yanında türü yazıyor: HAProxy yönlendirdi, engellendi, backend eşleşmedi, çalışan sunucu yok.
+- Sekmelerin üstünde seçili aralıktaki 3xx/4xx/5xx toplamları duruyor.
+- "En çok istenen adresler" artık sadece sunucuya ulaşanları değil, yönlendirilen ve engellenen istekleri de içeriyor.
+- Bir sınıfın çok sayıda satırı, diğer sınıfın az sayıdaki satırını listeden düşürmüyor: her sınıfın kendi en yoğun 20 adresi ayrı seçiliyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -q https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/{haproxy-lens-linux-amd64.tar.gz,SHA256SUMS} && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.7.2
 
 - Bir backend'i ya da log satırını açıkken sayfa kendiliğinden kayıyordu: listeler her yenilemede yeniden sıralanıyor, açtığın satır başka yere gidiyordu. Artık bir satır açıkken sıra donuyor, yeni gelenler sona ekleniyor.

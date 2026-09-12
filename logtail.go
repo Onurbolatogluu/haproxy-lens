@@ -186,8 +186,17 @@ type blockKey struct{ Kind, Method, Path string }
 
 type pathAgg struct {
 	N, S2, S3, S4, S5, SumTa, NTa int64
-	Codes                         map[int]int64 // spesifik kod (404, 502...) -> sayı; sadece 4xx/5xx
-	Err                           *errDetail    // hata alan isteklerin ayrıntısı
+	Codes                         map[int]int64 // spesifik kod (301, 404, 502...) -> sayı; 3xx ve üstü
+	Kind                          string        // bu yoldaki kayıtların türü; karışıksa ""
+	Err                           *errDetail    // 2xx dışındaki isteklerin ayrıntısı
+}
+
+func (pa *pathAgg) addKind(k string) {
+	if pa.N == 0 {
+		pa.Kind = k
+	} else if pa.Kind != k {
+		pa.Kind = "" // aynı yol hem yanıtlanmış hem engellenmiş olabilir
+	}
 }
 
 type blockAgg struct {
@@ -258,7 +267,7 @@ func (pa *pathAgg) addCodeN(code int, n int64) {
 }
 
 func (pa *pathAgg) addCode(code int) {
-	if code < 400 || code == 0 {
+	if code < 300 || code == 0 {
 		return
 	}
 	if pa.Codes == nil {
@@ -535,7 +544,9 @@ func (a *LogAnalyzer) add(r logRecord) {
 		b.withHost++
 	}
 	blocked := r.Kind == KindDenied || r.Kind == KindNoMatch || r.Kind == KindNoServer
-	if r.Kind == KindServed || r.Kind == KindNoServer {
+	{
+		// Her tür kayıt yol listesine girer: sunucuya ulaşanlar, yönlendirmeler, engellenenler.
+		// Böylece "hangi adres 3xx/4xx/5xx dönüyor" sorusu eksiksiz cevaplanabiliyor.
 		k := pathKey{r.Backend, r.Method, r.Path}
 		pa := b.paths[k]
 		if pa == nil {
@@ -548,12 +559,14 @@ func (a *LogAnalyzer) add(r logRecord) {
 				b.paths[k] = pa
 			}
 		}
+		pa.addKind(r.Kind)
 		pa.N++
 		switch r.Status / 100 {
 		case 2:
 			pa.S2++
 		case 3:
 			pa.S3++
+			pa.addCode(r.Status)
 		case 4:
 			pa.S4++
 			pa.addCode(r.Status)
@@ -565,7 +578,7 @@ func (a *LogAnalyzer) add(r logRecord) {
 			pa.SumTa += int64(r.Ta)
 			pa.NTa++
 		}
-		if r.Status >= 400 {
+		if r.Status >= 300 {
 			if pa.Err = b.detail(pa.Err); pa.Err != nil {
 				pa.Err.add(r)
 			}
@@ -742,13 +755,17 @@ type CodeCount struct {
 	Code int   `json:"code"`
 	N    int64 `json:"n"`
 }
-type ErrorPathRow struct {
+
+// Bir yolun yanıt sınıflarına göre dökümü; panelde 3xx/4xx/5xx sekmeleriyle süzülür
+type CodePathRow struct {
 	Backend string      `json:"backend"`
 	Method  string      `json:"method"`
 	Path    string      `json:"path"`
-	N       int64       `json:"n"`     // bu yoldaki toplam istek
-	Errs    int64       `json:"errs"`  // 4xx+5xx toplamı
-	Class   string      `json:"class"` // "4xx", "5xx" ya da "karışık"
+	Kind    string      `json:"kind"` // served, redirect, denied, nomatch, noserver, proxy ya da "" (karışık)
+	N       int64       `json:"n"`    // bu yoldaki toplam istek
+	S3      int64       `json:"s3"`
+	S4      int64       `json:"s4"`
+	S5      int64       `json:"s5"`
 	Codes   []CodeCount `json:"codes"` // en çok görülen kodlar, çoktan aza
 	Detail  *Detail     `json:"detail,omitempty"`
 }
@@ -771,6 +788,34 @@ type Detail struct {
 	Origins   []NameCount `json:"origins"`   // "https://alan.com"; "" = alan adı log'da yok
 	Samples   []NameCount `json:"samples"`   // gerçek yollar (sorgusuz)
 	IPs       []ClientRow `json:"ips"`
+}
+
+func topPerClass(rows []CodePathRow, per int) []CodePathRow {
+	seen := map[int]bool{}
+	var out []CodePathRow
+	for _, get := range []func(CodePathRow) int64{
+		func(r CodePathRow) int64 { return r.S5 },
+		func(r CodePathRow) int64 { return r.S4 },
+		func(r CodePathRow) int64 { return r.S3 },
+	} {
+		idx := make([]int, 0, len(rows))
+		for i, r := range rows {
+			if get(r) > 0 {
+				idx = append(idx, i)
+			}
+		}
+		sort.Slice(idx, func(a, b int) bool { return get(rows[idx[a]]) > get(rows[idx[b]]) })
+		if len(idx) > per {
+			idx = idx[:per]
+		}
+		for _, i := range idx {
+			if !seen[i] {
+				seen[i] = true
+				out = append(out, rows[i])
+			}
+		}
+	}
+	return out
 }
 
 func topN(m map[string]int64, n int) []NameCount {
@@ -817,21 +862,22 @@ type ClientRow struct {
 	Cloudflare bool   `json:"cloudflare"`
 }
 type LogReport struct {
-	Enabled    bool             `json:"enabled"`
-	Searching  bool             `json:"searching,omitempty"` // log kaynağı henüz bulunamadı, aranıyor
-	Source     string           `json:"source,omitempty"`
-	Error      string           `json:"error,omitempty"`
-	Minutes    int              `json:"minutes"`
-	Lines      int64            `json:"lines"`
-	Parsed     int64            `json:"parsed"`
-	LastAt     int64            `json:"lastAt"`
-	Kinds      map[string]int64 `json:"kinds"`
-	Paths      []PathRow        `json:"paths"`
-	ErrorPaths []ErrorPathRow   `json:"errorPaths"`
-	Blocked    []BlockRow       `json:"blocked"`
-	Clients    []ClientRow      `json:"clients"`
-	CFKnown    bool             `json:"cfKnown"`
-	HostLines  int64            `json:"hostLines"` // aralıkta alan adı bulunan satır sayısı
+	Enabled   bool             `json:"enabled"`
+	Searching bool             `json:"searching,omitempty"` // log kaynağı henüz bulunamadı, aranıyor
+	Source    string           `json:"source,omitempty"`
+	Error     string           `json:"error,omitempty"`
+	Minutes   int              `json:"minutes"`
+	Lines     int64            `json:"lines"`
+	Parsed    int64            `json:"parsed"`
+	LastAt    int64            `json:"lastAt"`
+	Kinds     map[string]int64 `json:"kinds"`
+	Paths     []PathRow        `json:"paths"`
+	CodePaths []CodePathRow    `json:"codePaths"`
+	Classes   [4]int64         `json:"classes"` // 2xx, 3xx, 4xx, 5xx toplamları
+	Blocked   []BlockRow       `json:"blocked"`
+	Clients   []ClientRow      `json:"clients"`
+	CFKnown   bool             `json:"cfKnown"`
+	HostLines int64            `json:"hostLines"` // aralıkta alan adı bulunan satır sayısı
 }
 
 func (a *LogAnalyzer) Report(minutes int) LogReport {
@@ -862,8 +908,10 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 		for k, v := range b.paths {
 			t := paths[k]
 			if t == nil {
-				t = &pathAgg{}
+				t = &pathAgg{Kind: v.Kind}
 				paths[k] = t
+			} else if t.Kind != v.Kind {
+				t.Kind = "" // farklı kovalarda farklı tür: karışık
 			}
 			t.N += v.N
 			t.S2 += v.S2
@@ -917,33 +965,29 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 	if len(rep.Paths) > 40 {
 		rep.Paths = rep.Paths[:40]
 	}
+	var codeRows []CodePathRow
 	for k, v := range paths {
-		errs := v.S4 + v.S5
-		if errs == 0 {
+		rep.Classes[0] += v.S2
+		rep.Classes[1] += v.S3
+		rep.Classes[2] += v.S4
+		rep.Classes[3] += v.S5
+		if v.S3+v.S4+v.S5 == 0 {
 			continue
 		}
-		row := ErrorPathRow{Backend: k.Backend, Method: k.Method, Path: k.Path, N: v.N, Errs: errs, Detail: a.buildDetail(v.Err)}
-		switch {
-		case v.S4 > 0 && v.S5 > 0:
-			row.Class = "karışık"
-		case v.S5 > 0:
-			row.Class = "5xx"
-		default:
-			row.Class = "4xx"
-		}
+		row := CodePathRow{Backend: k.Backend, Method: k.Method, Path: k.Path, Kind: v.Kind,
+			N: v.N, S3: v.S3, S4: v.S4, S5: v.S5, Detail: a.buildDetail(v.Err)}
 		for code, n := range v.Codes {
 			row.Codes = append(row.Codes, CodeCount{Code: code, N: n})
 		}
 		sort.Slice(row.Codes, func(i, j int) bool { return row.Codes[i].N > row.Codes[j].N })
-		if len(row.Codes) > 5 {
-			row.Codes = row.Codes[:5]
+		if len(row.Codes) > 6 {
+			row.Codes = row.Codes[:6]
 		}
-		rep.ErrorPaths = append(rep.ErrorPaths, row)
+		codeRows = append(codeRows, row)
 	}
-	sort.Slice(rep.ErrorPaths, func(i, j int) bool { return rep.ErrorPaths[i].Errs > rep.ErrorPaths[j].Errs })
-	if len(rep.ErrorPaths) > 30 {
-		rep.ErrorPaths = rep.ErrorPaths[:30]
-	}
+	// Her sınıfın (3xx, 4xx, 5xx) kendi en yoğun 20 yolu listeye girer; böylece çok sayıda
+	// yönlendirme, az sayıdaki sunucu hatasını listeden düşürmez.
+	rep.CodePaths = topPerClass(codeRows, 20)
 	for k, v := range blocked {
 		rep.Blocked = append(rep.Blocked, BlockRow{Kind: k.Kind, Method: k.Method, Path: k.Path, N: v.N, Detail: a.buildDetail(v.Det)})
 	}

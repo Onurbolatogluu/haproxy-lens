@@ -168,6 +168,11 @@ const KIND = {
   proxy: ["HAProxy yanıtladı", C.faint, "Hatalı istek, zaman aşımı ya da istemcinin bağlantıyı kesmesi gibi durumlar."],
 };
 const KIND_ORDER = ["served", "denied", "nomatch", "noserver", "redirect", "proxy"];
+// Yol satırının yanında görünen kısa etiket ("served" için etiket yok, olağan durum)
+const KIND_TAG = {
+  redirect: "HAProxy yönlendirdi", denied: "engellendi", nomatch: "backend eşleşmedi",
+  noserver: "çalışan sunucu yok", proxy: "HAProxy yanıtladı", "": "karışık",
+};
 
 
 // ---------------- Biçimlendirme ----------------
@@ -414,6 +419,8 @@ function SectionTitle({ title, sub }) {
 const CODE_PARTS = [["Başarılı", 1, C.ok], ["Yönlendirme", 2, C.info], ["İstemci hatası", 3, C.warn], ["Sunucu hatası", 4, C.bad]];
 // HTTP kodunun kısa açıklaması (log'daki hata yollarında gösterilir)
 const CODE_TEXT = {
+  301: "kalıcı yönlendirme", 302: "geçici yönlendirme", 303: "başka adrese", 304: "değişmemiş (önbellek)",
+  307: "geçici yönlendirme", 308: "kalıcı yönlendirme",
   400: "hatalı istek", 401: "yetki gerekli", 403: "erişim yok", 404: "bulunamadı", 405: "yöntem izinli değil",
   408: "istek zaman aşımı", 409: "çakışma", 410: "kaldırıldı", 413: "istek çok büyük", 415: "desteklenmeyen tür",
   429: "çok fazla istek", 431: "başlık çok büyük",
@@ -421,7 +428,7 @@ const CODE_TEXT = {
   503: "servis yok (sunucu meşgul ya da kapalı)", 504: "geçit zaman aşımı (backend yavaş)", 507: "yetersiz alan",
   0: "diğer",
 };
-const codeColor = (code) => (code >= 500 || code === 0 ? C.bad : code === 429 ? C.warn : C.info);
+const codeColor = (code) => (code >= 500 || code === 0 ? C.bad : code >= 400 ? C.warn : C.info);
 function CodeChip({ code, n }) {
   return (
     <span className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs tnum" style={{ background: C.panel2, border: `1px solid ${C.line}` }} title={CODE_TEXT[code] || ""}>
@@ -1290,6 +1297,82 @@ function BackendList({ model, rates, expanded, onToggle, onFields }) {
   );
 }
 
+// Hangi adres hangi yanıt kodunu döndürüyor: 3xx / 4xx / 5xx sekmeleri.
+// Yönlendirmeler de burada; HAProxy'nin kendi ürettiği http->https atlaması dahil.
+const CLASSES = [
+  { id: 3, key: "s3", ad: "Yönlendirme (3xx)", kisa: "3xx", col: C.info },
+  { id: 4, key: "s4", ad: "İstemci hatası (4xx)", kisa: "4xx", col: C.warn },
+  { id: 5, key: "s5", ad: "Sunucu hatası (5xx)", kisa: "5xx", col: C.bad },
+];
+
+function CodePathsPanel({ logs, openRows, toggleRow, frozen }) {
+  const rows = logs.codePaths || [];
+  const toplam = { s3: 0, s4: 0, s5: 0 };
+  for (const r of rows) { toplam.s3 += r.s3; toplam.s4 += r.s4; toplam.s5 += r.s5; }
+  // Varsayılan sekme: sunucu hatası varsa o, yoksa istemci hatası, o da yoksa yönlendirme
+  const ilk = toplam.s5 > 0 ? 5 : toplam.s4 > 0 ? 4 : 3;
+  const [sec, setSec] = useState(null);
+  const aktif = CLASSES.find((c) => c.id === (sec ?? ilk)) || CLASSES[2];
+  const liste = rows.filter((r) => r[aktif.key] > 0);
+  const desired = [...liste].sort((a, b) => b[aktif.key] - a[aktif.key]).map((r) => `${r.backend}|${r.method}|${r.path}`);
+  const sirali = useStableOrder(liste, (r) => `${r.backend}|${r.method}|${r.path}`, desired, frozen);
+  const kodFiltre = (c) => Math.floor(c.code / 100) === aktif.id || (c.code === 0 && aktif.id === 5);
+  return (
+    <Panel title="Hangi adres ne döndürüyor"
+      note="2xx dışındaki yanıtlar, sınıfına göre. Satıra tıklayınca tam adres (alan adı log'da varsa), gerçek yollar ve IP'ler açılır.">
+      <div className="flex flex-wrap gap-1 mb-3" role="group" aria-label="Yanıt sınıfı">
+        {CLASSES.map((c) => {
+          const n = toplam[c.key];
+          const on = c.id === aktif.id;
+          return (
+            <button key={c.id} type="button" onClick={() => setSec(c.id)} aria-pressed={on}
+              className="rounded-md px-3 py-1.5 text-sm inline-flex items-center gap-2"
+              style={on ? { background: C.panel2, color: C.text, border: `1px solid ${c.col}` } : { color: C.muted, border: `1px solid ${C.line}` }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: c.col }} />
+              {c.ad}
+              <span className="tnum nw" style={{ color: on ? C.text : C.faint }}>{fmtNum(n)}</span>
+            </button>
+          );
+        })}
+      </div>
+      {sirali.length === 0 ? (
+        <p className="text-sm" style={{ color: C.faint }}>Bu aralıkta {aktif.ad.toLocaleLowerCase("tr-TR")} dönen adres yok.</p>
+      ) : (
+        <div className="text-sm">
+          {sirali.slice(0, 20).map((e, i) => {
+            const key = `c|${aktif.id}|${e.backend}|${e.method}|${e.path}`;
+            const n = e[aktif.key];
+            const oran = e.n > 0 ? n / e.n : 0;
+            const etiket = KIND_TAG[e.kind];
+            return (
+              <ExpandRow key={key} first={i === 0} open={openRows.has(key)} onToggle={() => toggleRow(key)}
+                head={
+                  <>
+                    <span className="flex items-baseline justify-between gap-3">
+                      <span className="brk">
+                        <span style={{ color: C.faint }}>{e.method} </span>{e.path}
+                        <span className="text-xs ml-2" style={{ color: C.faint }}>{etiket ? `${e.backend} · ${etiket}` : e.backend}</span>
+                      </span>
+                      <span className="tnum nw" style={{ color: aktif.col }}>
+                        {fmtNum(n)} {aktif.kisa}
+                        <span className="text-xs ml-1" style={{ color: C.faint }}>/ {fmtNum(e.n)} ({fmtPct(oran)})</span>
+                      </span>
+                    </span>
+                    <span className="flex flex-wrap gap-1.5 mt-1.5">
+                      {(e.codes || []).filter(kodFiltre).map((c) => <CodeChip key={c.code} code={c.code} n={c.n} />)}
+                    </span>
+                  </>
+                }>
+                <ReqDetail d={e.detail} path={e.path} />
+              </ExpandRow>
+            );
+          })}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 function LogSection({ logs, minutes }) {
   const [openRows, setOpenRows] = useState(() => new Set());
   const toggleRow = (key) => setOpenRows((cur) => {
@@ -1301,7 +1384,6 @@ function LogSection({ logs, minutes }) {
   const pathKey = (x) => `${x.backend}|${x.method}|${x.path}`;
   const blockKey = (x) => `${x.kind}|${x.method}|${x.path}`;
   const paths = useStableOrder(logs?.paths || [], pathKey, (logs?.paths || []).map(pathKey), frozen);
-  const errorPaths = useStableOrder(logs?.errorPaths || [], pathKey, (logs?.errorPaths || []).map(pathKey), frozen);
   const blocked = useStableOrder(logs?.blocked || [], blockKey, (logs?.blocked || []).map(blockKey), frozen);
   const clients = useStableOrder(logs?.clients || [], (c) => c.ip, (logs?.clients || []).map((c) => c.ip), frozen);
   if (!logs) return null;
@@ -1366,7 +1448,7 @@ function LogSection({ logs, minutes }) {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2 mt-4">
-        <Panel title="En çok istenen adresler" note="Sunucuya ulaşan istekler. Sayı içeren yol parçaları {id} olarak birleştirildi.">
+        <Panel title="En çok istenen adresler" note="Tüm istekler: sunucuya ulaşanlar, yönlendirilenler ve engellenenler. Sayı içeren yol parçaları {id} olarak birleştirildi.">
           {(logs.paths || []).length === 0 ? <p className="text-sm" style={{ color: C.faint }}>Bu aralıkta kayıt yok.</p> : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
@@ -1428,39 +1510,7 @@ function LogSection({ logs, minutes }) {
       </div>
 
       <div className="mt-4">
-        <Panel title="Hata alan adresler"
-          note="Sunucuya ulaşıp 4xx ya da 5xx dönen istekler; en çok hata alanlar üstte. Rozetler hangi kodun kaç kez döndüğünü gösterir. Satıra tıklayınca tam adres (alan adı log'da varsa), gerçek yollar ve IP'ler açılır.">
-          {(logs.errorPaths || []).length === 0 ? <p className="text-sm" style={{ color: C.faint }}>Bu aralıkta hata alan adres yok.</p> : (
-            <div className="text-sm">
-              {errorPaths.slice(0, 20).map((e, i) => {
-                const key = `e|${e.backend}|${e.method}|${e.path}`;
-                const oran = e.n > 0 ? e.errs / e.n : 0;
-                return (
-                  <ExpandRow key={key} first={i === 0} open={openRows.has(key)} onToggle={() => toggleRow(key)}
-                    head={
-                      <>
-                        <span className="flex items-baseline justify-between gap-3">
-                          <span className="brk">
-                            <span style={{ color: C.faint }}>{e.method} </span>{e.path}
-                            <span className="text-xs ml-2" style={{ color: C.faint }}>{e.backend}</span>
-                          </span>
-                          <span className="tnum whitespace-nowrap" style={{ color: e.class === "5xx" ? C.bad : e.class === "4xx" ? C.warn : C.text }}>
-                            {fmtNum(e.errs)} hata
-                            <span className="text-xs ml-1" style={{ color: C.faint }}>/ {fmtNum(e.n)} ({fmtPct(oran)})</span>
-                          </span>
-                        </span>
-                        <span className="flex flex-wrap gap-1.5 mt-1.5">
-                          {(e.codes || []).map((c) => <CodeChip key={c.code} code={c.code} n={c.n} />)}
-                        </span>
-                      </>
-                    }>
-                    <ReqDetail d={e.detail} path={e.path} />
-                  </ExpandRow>
-                );
-              })}
-            </div>
-          )}
-        </Panel>
+        <CodePathsPanel logs={logs} openRows={openRows} toggleRow={toggleRow} frozen={frozen} />
       </div>
 
       <div className="mt-4">
