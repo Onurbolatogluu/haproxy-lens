@@ -13,17 +13,17 @@ sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
 ### Kurulum ve güncelleme
 
-Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
 
-    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    cd /root && rm -rf lens-kurulum && mkdir lens-kurulum && cd lens-kurulum
+    BASE=https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download
+    wget -q $BASE/haproxy-lens-linux-amd64.tar.gz $BASE/SHA256SUMS
     sha256sum -c --ignore-missing SHA256SUMS
     tar xzf haproxy-lens-linux-amd64.tar.gz
     cd haproxy-lens
     ./install.sh
 
-ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Komutlar her seferinde boş bir `lens-kurulum` klasörü açar; böylece eski indirmeler karışmaz. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
 
 ## 0.7.1
 
@@ -38,17 +38,17 @@ ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce
 
 ### Kurulum ve güncelleme
 
-Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
 
-    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    cd /root && rm -rf lens-kurulum && mkdir lens-kurulum && cd lens-kurulum
+    BASE=https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download
+    wget -q $BASE/haproxy-lens-linux-amd64.tar.gz $BASE/SHA256SUMS
     sha256sum -c --ignore-missing SHA256SUMS
     tar xzf haproxy-lens-linux-amd64.tar.gz
     cd haproxy-lens
     ./install.sh
 
-ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Komutlar her seferinde boş bir `lens-kurulum` klasörü açar; böylece eski indirmeler karışmaz. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
 
 ## 0.7.0
 
@@ -62,17 +62,17 @@ ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce
 
 ### Kurulum ve güncelleme
 
-Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
 
-    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    cd /root && rm -rf lens-kurulum && mkdir lens-kurulum && cd lens-kurulum
+    BASE=https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download
+    wget -q $BASE/haproxy-lens-linux-amd64.tar.gz $BASE/SHA256SUMS
     sha256sum -c --ignore-missing SHA256SUMS
     tar xzf haproxy-lens-linux-amd64.tar.gz
     cd haproxy-lens
     ./install.sh
 
-ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Komutlar her seferinde boş bir `lens-kurulum` klasörü açar; böylece eski indirmeler karışmaz. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
 
 ## 0.6.0
 
@@ -84,17 +84,17 @@ ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce
 
 ### Kurulum ve güncelleme
 
-Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
 
-    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    cd /root && rm -rf lens-kurulum && mkdir lens-kurulum && cd lens-kurulum
+    BASE=https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download
+    wget -q $BASE/haproxy-lens-linux-amd64.tar.gz $BASE/SHA256SUMS
     sha256sum -c --ignore-missing SHA256SUMS
     tar xzf haproxy-lens-linux-amd64.tar.gz
     cd haproxy-lens
     ./install.sh
 
-ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Komutlar her seferinde boş bir `lens-kurulum` klasörü açar; böylece eski indirmeler karışmaz. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
 
 ## 0.5.0
 
@@ -105,17 +105,17 @@ ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce
 
 ### Kurulum ve güncelleme
 
-Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
 
-    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    cd /root && rm -rf lens-kurulum && mkdir lens-kurulum && cd lens-kurulum
+    BASE=https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download
+    wget -q $BASE/haproxy-lens-linux-amd64.tar.gz $BASE/SHA256SUMS
     sha256sum -c --ignore-missing SHA256SUMS
     tar xzf haproxy-lens-linux-amd64.tar.gz
     cd haproxy-lens
     ./install.sh
 
-ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Komutlar her seferinde boş bir `lens-kurulum` klasörü açar; böylece eski indirmeler karışmaz. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
 
 ## 0.4.0
 
@@ -127,17 +127,17 @@ ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce
 
 ### Kurulum ve güncelleme
 
-Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
 
-    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    cd /root && rm -rf lens-kurulum && mkdir lens-kurulum && cd lens-kurulum
+    BASE=https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download
+    wget -q $BASE/haproxy-lens-linux-amd64.tar.gz $BASE/SHA256SUMS
     sha256sum -c --ignore-missing SHA256SUMS
     tar xzf haproxy-lens-linux-amd64.tar.gz
     cd haproxy-lens
     ./install.sh
 
-ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Komutlar her seferinde boş bir `lens-kurulum` klasörü açar; böylece eski indirmeler karışmaz. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
 
 ## 0.3.0
 
@@ -150,17 +150,17 @@ ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce
 
 ### Kurulum ve güncelleme
 
-Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
 
-    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    cd /root && rm -rf lens-kurulum && mkdir lens-kurulum && cd lens-kurulum
+    BASE=https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download
+    wget -q $BASE/haproxy-lens-linux-amd64.tar.gz $BASE/SHA256SUMS
     sha256sum -c --ignore-missing SHA256SUMS
     tar xzf haproxy-lens-linux-amd64.tar.gz
     cd haproxy-lens
     ./install.sh
 
-ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Komutlar her seferinde boş bir `lens-kurulum` klasörü açar; böylece eski indirmeler karışmaz. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
 
 ## 0.2.0 (2026-09-10)
 
@@ -174,17 +174,17 @@ ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce
 
 ### Kurulum ve güncelleme
 
-Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
 
-    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    cd /root && rm -rf lens-kurulum && mkdir lens-kurulum && cd lens-kurulum
+    BASE=https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download
+    wget -q $BASE/haproxy-lens-linux-amd64.tar.gz $BASE/SHA256SUMS
     sha256sum -c --ignore-missing SHA256SUMS
     tar xzf haproxy-lens-linux-amd64.tar.gz
     cd haproxy-lens
     ./install.sh
 
-ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Komutlar her seferinde boş bir `lens-kurulum` klasörü açar; böylece eski indirmeler karışmaz. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
 
 ## 0.1.0 (2026-09-10)
 
@@ -192,14 +192,14 @@ ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce
 
 ### Kurulum ve güncelleme
 
-Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
 
-    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
-    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    cd /root && rm -rf lens-kurulum && mkdir lens-kurulum && cd lens-kurulum
+    BASE=https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download
+    wget -q $BASE/haproxy-lens-linux-amd64.tar.gz $BASE/SHA256SUMS
     sha256sum -c --ignore-missing SHA256SUMS
     tar xzf haproxy-lens-linux-amd64.tar.gz
     cd haproxy-lens
     ./install.sh
 
-ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Komutlar her seferinde boş bir `lens-kurulum` klasörü açar; böylece eski indirmeler karışmaz. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).

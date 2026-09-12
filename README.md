@@ -33,15 +33,15 @@ Tüm komutlar HAProxy sunucusunda, root olarak.
 ### 1. İndir
 
 ```bash
-cd /root
-wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
-wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+cd /root && rm -rf lens-kurulum && mkdir lens-kurulum && cd lens-kurulum
+BASE=https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download
+wget -q $BASE/haproxy-lens-linux-amd64.tar.gz $BASE/SHA256SUMS
 sha256sum -c --ignore-missing SHA256SUMS
 tar xzf haproxy-lens-linux-amd64.tar.gz
 cd haproxy-lens
 ```
 
-`sha256sum` satırı `haproxy-lens-linux-amd64.tar.gz: OK` demeli. ARM sunucularda (`uname -m` çıktısı `aarch64` ise) dosya adındaki `amd64` yerine `arm64` yaz.
+`sha256sum` satırı `haproxy-lens-linux-amd64.tar.gz: OK` demeli. `no file was verified` derse indirme klasöründe eski dosyalar kalmış demektir; komutlar her seferinde boş bir `lens-kurulum` klasörü açtığı için baştan çalıştırmak yeterlidir. ARM sunucularda (`uname -m` çıktısı `aarch64` ise) dosya adındaki `amd64` yerine `arm64` yaz.
 
 ### 2. Kontrol et (hiçbir şey kurmaz)
 
