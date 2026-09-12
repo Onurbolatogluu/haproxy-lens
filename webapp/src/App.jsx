@@ -391,7 +391,7 @@ function Panel({ title, note, badge, children }) {
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
           <h3 className="text-base font-semibold">{title}</h3>
-          {note && <p className="text-xs mt-1 leading-relaxed" style={{ color: C.muted, maxWidth: "60ch" }}>{note}</p>}
+          {note && <p className="text-xs mt-1 leading-relaxed" style={{ color: C.muted }}>{note}</p>}
         </div>
         {badge && (
           <span className="text-xs rounded px-2 py-0.5 whitespace-nowrap" style={{ border: `1px dashed ${C.warn}`, color: C.warn }}>{badge}</span>
@@ -794,19 +794,20 @@ function RankRow({ label, sub, value, share, color }) {
 }
 
 function TopBackends({ model, rates }) {
-  const live = model.backends.some((b) => rates[keyOf(b)]);
+  const { wrates, label } = useContext(WinCtx);
+  const win = Object.keys(wrates).length > 0;
   const items = model.backends
-    .map((b) => ({ name: b.pxname, rps: rpsOf(b, rates) || 0, tot: num(b.req_tot) ?? num(b.stot) ?? 0 }))
-    .sort((a, b) => (live ? b.rps - a.rps : b.tot - a.tot));
-  const total = items.reduce((a, b) => a + (live ? b.rps : b.tot), 0) || 1;
+    .map((b) => ({ name: b.pxname, n: wrates[keyOf(b)]?.n ?? 0, rps: rpsOf(b, rates) || 0, tot: num(b.req_tot) ?? num(b.stot) ?? 0 }))
+    .sort((a, b) => (win ? b.n - a.n : b.tot - a.tot) || a.name.localeCompare(b.name, "tr"));
+  const total = items.reduce((a, b) => a + (win ? b.n : b.tot), 0) || 1;
   return (
-    <Panel title="En çok istek alan backend'ler" note={live ? "Şu anki saniyelik isteğe göre sıralı." : "HAProxy açıldığından beri toplam isteğe göre sıralı."}>
+    <Panel title="En çok istek alan backend'ler" note={win ? `${cap(label)} gelen isteğe göre sıralı.` : "HAProxy açıldığından beri toplam isteğe göre sıralı."}>
       <ul>
         {items.map((it) => {
-          const v = live ? it.rps : it.tot;
+          const v = win ? it.n : it.tot;
           return (
             <RankRow key={it.name} label={it.name} sub={`toplam ${fmtNum(it.tot)}`}
-              value={live ? `${fmtRate(it.rps)}/sn, ${fmtPct(v / total)}` : fmtPct(v / total)} share={v / total} color={C.info} />
+              value={win ? `${fmtNum(it.n)} istek, ${fmtPct(v / total)}` : fmtPct(v / total)} share={v / total} color={C.info} />
           );
         })}
       </ul>
@@ -909,8 +910,10 @@ function buildFindings(model, rates, logs, wrates = {}, label = "") {
       else if (k === "recovering") add("warn", name, `${s.svname} (${name}) tekrar ayağa kalkıyor; kontroller geçmeye başladı ama henüz trafik almıyor.`);
       else if (k === "maint") add("info", name, `${s.svname} (${name}) ${since} süredir bakım modunda. Elle devre dışı bırakılmış, trafik almıyor.`);
       else if (k === "drain") add("info", name, `${s.svname} (${name}) boşaltılıyor: yeni kullanıcı almıyor, mevcut bağlantıları bitiriyor.`);
-      const ec = rates[keyOf(s)]?.econ;
-      if (ec > 0) add(k === "nocheck" ? "bad" : "warn", name, `${s.svname} (${name}) sunucusuna şu an bağlanılamıyor (saniyede ${fmtRate(ec)} başarısız deneme).${k === "nocheck" ? " Sağlık kontrolü olmadığı için HAProxy onu devre dışı bırakmıyor, istekler ona gitmeye devam ediyor." : ""}`);
+      // Aralık toplamı kullanılıyor: saniyelik değer her yenilemede bulguyu görünüp kaybeder,
+      // bu da listenin boyunu değiştirip sayfayı oynatırdı.
+      const ec = wrates[keyOf(s)]?.econ || 0;
+      if (ec > 0) add(k === "nocheck" ? "bad" : "warn", name, `${s.svname} (${name}) sunucusuna bağlanılamıyor: ${label ? `${label} içinde` : "son ölçümde"} ${fmtNum(ec)} başarısız bağlantı denemesi.${k === "nocheck" ? " Sağlık kontrolü olmadığı için HAProxy onu devre dışı bırakmıyor, istekler ona gitmeye devam ediyor." : ""}`);
       const cd = num(s.chkdown);
       if (cd >= 5) add("warn", name, `${s.svname} (${name}) HAProxy açıldığından beri ${cd} kez düşüp kalktı. Kararsız çalışıyor olabilir.`);
     }
@@ -1200,17 +1203,42 @@ function RangePicker({ minutes, setMinutes }) {
   );
 }
 
-function backendScore(b, rates) {
+// Listeler 2-5 saniyede bir yenilendiği için sıralama da sürekli değişiyordu; okurken
+// satırlar yer değiştirip sayfa kayıyordu. Bu kanca sırayı hatırlar: bir satır açıkken
+// (kullanıcı incelerken) sıra hiç değişmez, yeni gelenler sona eklenir.
+function mergeOrder(prev, present, desired, frozen) {
+  if (!frozen) return desired;
+  const kept = prev.filter((k) => present.has(k));
+  const seen = new Set(kept);
+  return [...kept, ...desired.filter((k) => !seen.has(k))];
+}
+
+function useStableOrder(items, keyOf, desired, frozen) {
+  const ref = useRef([]);
+  const byKey = new Map(items.map((it) => [keyOf(it), it]));
+  const order = mergeOrder(ref.current, new Set(byKey.keys()), desired, frozen);
+  ref.current = order;
+  return order.map((k) => byKey.get(k)).filter(Boolean);
+}
+
+// Sıralama ölçütü seçili aralıktaki istek sayısı: saniyelik değerin aksine yavaş değişir,
+// bu yüzden sıra kendiliğinden de oynamaz.
+function backendScore(b, wrates) {
   const kinds = b.servers.map((s) => kindOf(s.status));
   const dead = kinds.length > 0 && !kinds.some((k) => REACHABLE.has(k));
-  const bad = kinds.some((k) => k === "down" || k === "failing" || k === "recovering") || b.servers.some((s) => rates[keyOf(s)]?.econ > 0);
-  return (dead ? 2e9 : 0) + (bad ? 1e9 : 0) + (rpsOf(b, rates) || 0);
+  const bad = kinds.some((k) => k === "down" || k === "failing" || k === "recovering") ||
+    b.servers.some((s) => (wrates[keyOf(s)]?.econ || 0) > 0); // aralık toplamı: saniyelik değerin aksine oynamaz
+  const n = wrates[keyOf(b)]?.n ?? num(b.req_tot) ?? num(b.stot) ?? 0;
+  return (dead ? 2e9 : 0) + (bad ? 1e9 : 0) + n;
 }
 
 function BackendList({ model, rates, expanded, onToggle, onFields }) {
   const { wrates } = useContext(WinCtx);
   if (!model.backends.length) return <p style={{ color: C.faint }}>HAProxy'de backend yok.</p>;
-  const sorted = [...model.backends].sort((a, b) => backendScore(b, rates) - backendScore(a, rates));
+  const desired = [...model.backends]
+    .sort((a, b) => backendScore(b, wrates) - backendScore(a, wrates) || a.pxname.localeCompare(b.pxname, "tr"))
+    .map((b) => b.pxname);
+  const sorted = useStableOrder(model.backends, (b) => b.pxname, desired, expanded.size > 0);
   return (
     <div className="rounded-lg" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
       <div className="be-head px-4 py-2 text-xs" style={{ color: C.muted }}>
@@ -1269,6 +1297,13 @@ function LogSection({ logs, minutes }) {
     if (n.has(key)) n.delete(key); else n.add(key);
     return n;
   });
+  const frozen = openRows.size > 0;
+  const pathKey = (x) => `${x.backend}|${x.method}|${x.path}`;
+  const blockKey = (x) => `${x.kind}|${x.method}|${x.path}`;
+  const paths = useStableOrder(logs?.paths || [], pathKey, (logs?.paths || []).map(pathKey), frozen);
+  const errorPaths = useStableOrder(logs?.errorPaths || [], pathKey, (logs?.errorPaths || []).map(pathKey), frozen);
+  const blocked = useStableOrder(logs?.blocked || [], blockKey, (logs?.blocked || []).map(blockKey), frozen);
+  const clients = useStableOrder(logs?.clients || [], (c) => c.ip, (logs?.clients || []).map((c) => c.ip), frozen);
   if (!logs) return null;
   if (!logs.enabled) {
     return (
@@ -1344,7 +1379,7 @@ function LogSection({ logs, minutes }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {logs.paths.slice(0, 20).map((p, i) => {
+                  {paths.slice(0, 20).map((p, i) => {
                     const e5 = p.n ? p.s5 / p.n : 0;
                     return (
                       <tr key={i} style={{ borderTop: `1px solid ${C.line}` }}>
@@ -1368,7 +1403,7 @@ function LogSection({ logs, minutes }) {
           note="403 alanlar ve hiçbir backend'e yönlendirilemeyip 503 alanlar. Satıra tıklayınca tam adres (alan adı log'da varsa), gerçek yollar ve isteği gönderen IP'ler açılır.">
           {(logs.blocked || []).length === 0 ? <p className="text-sm" style={{ color: C.faint }}>Bu aralıkta engellenen ya da karşılıksız istek yok.</p> : (
             <div className="text-sm">
-              {logs.blocked.slice(0, 20).map((b, i) => {
+              {blocked.slice(0, 20).map((b, i) => {
                 const key = `b|${b.kind}|${b.method}|${b.path}`;
                 return (
                   <ExpandRow key={key} first={i === 0} open={openRows.has(key)} onToggle={() => toggleRow(key)}
@@ -1397,7 +1432,7 @@ function LogSection({ logs, minutes }) {
           note="Sunucuya ulaşıp 4xx ya da 5xx dönen istekler; en çok hata alanlar üstte. Rozetler hangi kodun kaç kez döndüğünü gösterir. Satıra tıklayınca tam adres (alan adı log'da varsa), gerçek yollar ve IP'ler açılır.">
           {(logs.errorPaths || []).length === 0 ? <p className="text-sm" style={{ color: C.faint }}>Bu aralıkta hata alan adres yok.</p> : (
             <div className="text-sm">
-              {logs.errorPaths.slice(0, 20).map((e, i) => {
+              {errorPaths.slice(0, 20).map((e, i) => {
                 const key = `e|${e.backend}|${e.method}|${e.path}`;
                 const oran = e.n > 0 ? e.errs / e.n : 0;
                 return (
@@ -1433,7 +1468,7 @@ function LogSection({ logs, minutes }) {
           note="Log'daki IP'ler. Cloudflare üzerinden gelen isteklerde bu IP Cloudflare'e aittir ve etiketlenir; doğrudan gelenlerde kullanıcının kendi IP'sidir.">
           {(logs.clients || []).length === 0 ? <p className="text-sm" style={{ color: C.faint }}>Bu aralıkta kayıt yok.</p> : (
             <ul className="grid gap-x-8 md:grid-cols-2">
-              {logs.clients.slice(0, 20).map((c) => (
+              {clients.slice(0, 20).map((c) => (
                 <li key={c.ip} className="flex items-baseline justify-between gap-3 py-1.5 text-sm" style={{ borderTop: `1px solid ${C.line}` }}>
                   <span className="tnum">{c.ip}{c.cloudflare && <span className="text-xs ml-2" style={{ color: C.faint }}>Cloudflare</span>}</span>
                   <span className="tnum whitespace-nowrap">
@@ -1570,7 +1605,7 @@ export default function App() {
 
             <div className="mt-12"><TopBackends model={model} rates={rates} /></div>
 
-            <p className="mt-10 pb-4 text-xs leading-relaxed" style={{ color: C.faint, maxWidth: "80ch" }}>
+            <p className="mt-10 pb-4 text-xs leading-relaxed" style={{ color: C.faint }}>
               Bu panel HAProxy'ye yalnızca "show info" ve "show stat" komutlarını gönderir ve log dosyasını sadece okur.
               Bir terimin ne demek olduğunu görmek için yanındaki bilgi simgesine gel.
             </p>

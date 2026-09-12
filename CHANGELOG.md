@@ -4,6 +4,27 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.7.2
+
+- Bir backend'i ya da log satırını açıkken sayfa kendiliğinden kayıyordu: listeler her yenilemede yeniden sıralanıyor, açtığın satır başka yere gidiyordu. Artık bir satır açıkken sıra donuyor, yeni gelenler sona ekleniyor.
+- Sıralama ölçütü de kararlı hâle geldi: backend listesi ve "En çok istek alan backend'ler" artık saniyelik değere değil, seçili aralıktaki istek sayısına göre sıralanıyor. Böylece hiçbir satır açık olmasa da sıra kendiliğinden oynamıyor.
+- Durum özetindeki bağlantı hatası bulgusu anlık ölçüme bakıyordu; her yenilemede görünüp kaybolarak altındaki her şeyi oynatıyordu. Artık seçili aralığın toplamına bakıyor.
+- Panel açıklamaları sağda boş yer varken alt satıra geçiyordu (60 karakter sınırı kaldırıldı); artık panelin tamamını kullanıyorlar.
+
+### Kurulum ve güncelleme
+
+Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    sha256sum -c --ignore-missing SHA256SUMS
+    tar xzf haproxy-lens-linux-amd64.tar.gz
+    cd haproxy-lens
+    ./install.sh
+
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.7.1
 
 - Arayüzde baştan sona düzen denetimi yapıldı ve şunlar düzeltildi:
