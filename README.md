@@ -30,20 +30,26 @@ Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur
 
 Tüm komutlar HAProxy sunucusunda, root olarak.
 
-### 1. İndir
+### 1. İndir ve kur
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar. Adımlar `&&` ile bağlı olduğu için biri hata verirse sonrakiler çalışmaz.
 
 ```bash
-cd /root && rm -rf lens-kurulum && mkdir lens-kurulum && cd lens-kurulum
-BASE=https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download
-wget -q $BASE/haproxy-lens-linux-amd64.tar.gz $BASE/SHA256SUMS
-sha256sum -c --ignore-missing SHA256SUMS
-tar xzf haproxy-lens-linux-amd64.tar.gz
-cd haproxy-lens
+cd /root && rm -rf lens && mkdir lens && cd lens && wget -q https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/{haproxy-lens-linux-amd64.tar.gz,SHA256SUMS} && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
 ```
 
-`sha256sum` satırı `haproxy-lens-linux-amd64.tar.gz: OK` demeli. `no file was verified` derse indirme klasöründe eski dosyalar kalmış demektir; komutlar her seferinde boş bir `lens-kurulum` klasörü açtığı için baştan çalıştırmak yeterlidir. ARM sunucularda (`uname -m` çıktısı `aarch64` ise) dosya adındaki `amd64` yerine `arm64` yaz.
+Doğrulama satırı `haproxy-lens-linux-amd64.tar.gz: OK` demeli. ARM sunucularda (`uname -m` çıktısı `aarch64` ise) `amd64` yerine `arm64` yazın.
 
-### 2. Kontrol et (hiçbir şey kurmaz)
+Kurulum önce bir rapor, sonra yapılacakları gösterir ve onay ister. Sonunda şu iki satırı görmelisin:
+
+```
+Doğrulama: HAProxy config dosyaları değişmedi (1 dosya, sha256 aynı).
+Doğrulama: HAProxy yeniden başlatılmadı ve reload edilmedi (süreç numaraları aynı).
+```
+
+### 2. Kurmadan önce sadece kontrol etmek istersen
+
+Yukarıdaki satırın sonundaki `./install.sh` yerine `./install.sh --check` yaz. Hiçbir şey kurulmaz, sadece rapor verir:
 
 ```bash
 ./install.sh --check
@@ -57,20 +63,9 @@ Rapor, config'te bulunan stats socket'leri, log kaynağını ve en altta bir **S
 | `UYUMLU (sadece stats)` | Stats paneli tam çalışır, log analizi kapalı olur. Sebebi raporda yazar. |
 | `KURULAMAZ` | Çalışan ve erişilebilir bir stats socket yok. Hiçbir şey kurulmaz. |
 
-### 3. Kur
+### 3. Kurulum seçenekleri
 
-```bash
-./install.sh
-```
-
-Önce aynı raporu, sonra yapılacakları gösterir ve onay ister. Sonunda şu iki satırı görmelisin:
-
-```
-Doğrulama: HAProxy config dosyaları değişmedi (1 dosya, sha256 aynı).
-Doğrulama: HAProxy yeniden başlatılmadı ve reload edilmedi (süreç numaraları aynı).
-```
-
-Seçenekler:
+Satırın sonundaki `./install.sh` yerine kullanabilirsin:
 
 | Komut | Ne yapar |
 |---|---|
@@ -103,7 +98,7 @@ Sunucuda güvenlik duvarı açıksa (ufw, firewalld) panelin portuna kendi ağı
 
 ## Güncelleme
 
-Yeni paketi aynı şekilde indirip `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar.
+Kurulumdaki tek satırın aynısını çalıştırmak yeterli: her seferinde en son sürümü indirir, betik de önceki kurulumu görüp üzerine yazar. Adres, erişim listesi ve log ayarların korunur.
 
 ## Kaldırma
 
@@ -115,10 +110,14 @@ Servisi, program dosyasını ve `haproxy-lens` sistem kullanıcısını siler, g
 
 ## Sunucunun internete çıkışı yoksa
 
-Paketi kendi bilgisayarına indir, sunucuya kopyala, sonra 1. adımdaki `tar` satırından devam et:
+Paketi kendi bilgisayarına indir, sunucuya kopyala, sonra açıp kur:
 
 ```bash
-scp haproxy-lens-linux-amd64.tar.gz SHA256SUMS root@SUNUCU_ADRESI:/root/
+scp haproxy-lens-linux-amd64.tar.gz root@SUNUCU_ADRESI:/root/
+```
+
+```bash
+cd /root && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
 ```
 
 ## Yapılandırma notları
