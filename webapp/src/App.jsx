@@ -15,6 +15,10 @@ const TICK_SEC = 2;
 const CSS = `
 .hl-root{font-family:${FONT}}
 .tnum{font-variant-numeric:tabular-nums}
+/* Yol, alan adı gibi boşluksuz uzun metinler kutudan taşmasın (sadece gerektiğinde kırılır) */
+.brk{overflow-wrap:anywhere;min-width:0}
+/* Sayı + birim ("218 ms", "1,5 sn") alt satıra bölünmesin */
+.nw{white-space:nowrap}
 .hl-root button:focus-visible{outline:2px solid ${C.info};outline-offset:2px}
 .hl-row:hover{background:${C.panel2}}
 .be-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 20px}
@@ -173,12 +177,15 @@ const trDec = (x, d = 1) => x.toFixed(d).replace(".", ",");
 const fmtNum = (v) => (v == null ? "—" : nf.format(Math.round(v)));
 const fmtRate = (v) => (v == null ? "—" : v < 10 ? trDec(v) : nf.format(Math.round(v)));
 const fmtPct = (x) => (x == null ? "—" : `%${trDec(x * 100)}`);
+// Sayı ile birimi bölünmeyen boşlukla (U+00A0) birleştirir; cümle içinde de tabloda da
+// "218" ve "ms" ayrı satırlara düşmez.
+const NB = "\u00A0";
 function fmtBytes(b) {
   if (b == null) return "—";
   const u = ["B", "KB", "MB", "GB", "TB", "PB"];
   let i = 0;
   while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
-  return `${i > 0 && b < 10 ? trDec(b) : Math.round(b)} ${u[i]}`;
+  return `${i > 0 && b < 10 ? trDec(b) : Math.round(b)}${NB}${u[i]}`;
 }
 
 function fmtBits(bytesPerSec) {
@@ -187,20 +194,20 @@ function fmtBits(bytesPerSec) {
   const u = ["bit/sn", "Kbit/sn", "Mbit/sn", "Gbit/sn"];
   let i = 0;
   while (v >= 1000 && i < u.length - 1) { v /= 1000; i++; }
-  return `${v < 10 ? trDec(v) : Math.round(v)} ${u[i]}`;
+  return `${v < 10 ? trDec(v) : Math.round(v)}${NB}${u[i]}`;
 }
 
 function fmtDur(sec) {
   if (sec == null || sec < 0) return "—";
   sec = Math.floor(sec);
   const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
-  if (d) return h ? `${d} gün ${h} saat` : `${d} gün`;
-  if (h) return m ? `${h} saat ${m} dk` : `${h} saat`;
-  if (m) return s ? `${m} dk ${s} sn` : `${m} dk`;
-  return `${s} sn`;
+  if (d) return h ? `${d}${NB}gün ${h}${NB}saat` : `${d}${NB}gün`;
+  if (h) return m ? `${h}${NB}saat ${m}${NB}dk` : `${h}${NB}saat`;
+  if (m) return s ? `${m}${NB}dk ${s}${NB}sn` : `${m}${NB}dk`;
+  return `${s}${NB}sn`;
 }
 
-const fmtMs = (ms) => (ms == null ? "—" : ms >= 1000 ? `${trDec(ms / 1000)} sn` : `${Math.round(ms)} ms`);
+const fmtMs = (ms) => (ms == null ? "—" : ms >= 1000 ? `${trDec(ms / 1000)}${NB}sn` : `${Math.round(ms)}${NB}ms`);
 
 function kindOf(status) {
   if (!status) return "none";
@@ -241,7 +248,7 @@ function fmtField(k, v, row) {
 }
 
 // ---------------- Zaman aralığı ----------------
-const RANGES = [[5, "5 dk"], [15, "15 dk"], [60, "1 saat"]];
+const RANGES = [[5, `5${NB}dk`], [15, `15${NB}dk`], [60, `1${NB}saat`]];
 // Seçili aralığın satır bazındaki sayaç farkları; errRatio/codeCounts ile aynı biçimde
 const WinCtx = createContext({ wrates: {}, label: "açıldığından beri", minutes: 60 });
 
@@ -253,7 +260,7 @@ function windowToRates(win) {
 function winLabel(win, minutes) {
   if (!win) return "açıldığından beri";
   if (win.seconds < minutes * 60 - 20) return `son ${fmtDur(win.seconds)}`;
-  return minutes >= 60 ? "son 1 saat" : `son ${minutes} dakika`;
+  return minutes >= 60 ? `son 1${NB}saat` : `son ${minutes}${NB}dakika`;
 }
 const cap = (t) => t.charAt(0).toLocaleUpperCase("tr-TR") + t.slice(1);
 
@@ -316,8 +323,14 @@ function Term({ k, children }) {
   if (!g) return <span>{children}</span>;
   const show = () => {
     const r = ref.current.getBoundingClientRect();
-    const w = 260;
-    setPos({ top: r.bottom + 6, left: Math.min(Math.max(8, r.left), window.innerWidth - w - 8), w });
+    const w = Math.min(260, window.innerWidth - 16);
+    const h = 150; // yaklaşık yükseklik; altta yer yoksa yukarı açılır
+    const below = window.innerHeight - r.bottom > h;
+    setPos({
+      top: below ? r.bottom + 6 : Math.max(8, r.top - h - 6),
+      left: Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - w - 8)),
+      w,
+    });
   };
   const hide = () => setPos(null);
   return (
@@ -364,7 +377,7 @@ function Meter({ value, max }) {
   const col = p > 0.8 ? C.bad : p > 0.6 ? C.warn : C.ok;
   return (
     <div style={{ minWidth: 96 }}>
-      <div className="tnum">{fmtNum(value)} <span style={{ color: C.faint }}>/ {fmtNum(max)}</span></div>
+      <div className="tnum nw">{fmtNum(value)} <span style={{ color: C.faint }}>/ {fmtNum(max)}</span></div>
       <div style={{ height: 4, background: C.line, borderRadius: 2, marginTop: 4 }}>
         <div style={{ width: `${Math.max(2, p * 100)}%`, height: 4, background: col, borderRadius: 2 }} />
       </div>
@@ -435,14 +448,17 @@ function ReqDetail({ d, path }) {
       <div>
         <Head>Tam adres</Head>
         {d.hostKnown === 0 ? (
-          <p className="text-xs leading-relaxed" style={{ color: C.faint }}>
-            Bu LB'nin log biçiminde alan adı yok, bu yüzden isteğin hangi alan adına geldiği bilinmiyor. Yol: <span style={{ color: C.text }}>{path}</span>
-          </p>
+          <>
+            <p className="text-xs leading-relaxed" style={{ color: C.faint }}>
+              Bu LB'nin log biçiminde alan adı yok, bu yüzden isteğin hangi alan adına geldiği bilinmiyor.
+            </p>
+            <p className="brk mt-1" style={{ color: C.text }}>{path}</p>
+          </>
         ) : (
           <ul className="space-y-1">
             {d.origins.filter((o) => o.name).map((o) => (
               <li key={o.name} className="flex items-baseline justify-between gap-3">
-                <span className="tnum" style={{ wordBreak: "break-all", color: C.text }}>{o.name === "(diğer)" ? "(diğer alan adları)" : `${o.name}${pathFor(o.name)}`}</span>
+                <span className="tnum brk" style={{ color: C.text }}>{o.name === "(diğer)" ? "(diğer alan adları)" : `${o.name}${pathFor(o.name)}`}</span>
                 <span className="tnum whitespace-nowrap" style={{ color: C.muted }}>×{fmtNum(o.n)}</span>
               </li>
             ))}
@@ -460,7 +476,7 @@ function ReqDetail({ d, path }) {
           <ul className="space-y-1">
             {samples.map((x) => (
               <li key={x.name} className="flex items-baseline justify-between gap-3">
-                <span style={{ wordBreak: "break-all", color: x.name === "(diğer)" ? C.faint : C.text }}>{x.name === "(diğer)" ? "(diğer yollar)" : x.name}</span>
+                <span className="brk" style={{ color: x.name === "(diğer)" ? C.faint : C.text }}>{x.name === "(diğer)" ? "(diğer yollar)" : x.name}</span>
                 <span className="tnum whitespace-nowrap" style={{ color: C.muted }}>×{fmtNum(x.n)}</span>
               </li>
             ))}
@@ -472,8 +488,8 @@ function ReqDetail({ d, path }) {
         <ul className="grid gap-x-6 md:grid-cols-2">
           {(d.ips || []).map((c) => (
             <li key={c.ip} className="flex items-baseline justify-between gap-3 py-0.5">
-              <span className="tnum" style={{ color: c.ip === "(diğer)" ? C.faint : C.text }}>{c.ip === "(diğer)" ? "(diğer IP'ler)" : c.ip}{c.cloudflare && <span className="text-xs ml-2" style={{ color: C.faint }}>Cloudflare</span>}</span>
-              <span className="tnum" style={{ color: C.muted }}>×{fmtNum(c.n)}</span>
+              <span className="tnum brk" style={{ color: c.ip === "(diğer)" ? C.faint : C.text }}>{c.ip === "(diğer)" ? "(diğer IP'ler)" : c.ip}{c.cloudflare && <span className="text-xs ml-2" style={{ color: C.faint }}>Cloudflare</span>}</span>
+              <span className="tnum nw" style={{ color: C.muted }}>×{fmtNum(c.n)}</span>
             </li>
           ))}
         </ul>
@@ -558,9 +574,9 @@ function ServerTable({ servers, rates, onFields }) {
   const max4 = maxOf(3), max5 = maxOf(4);
   const errCell = (s, i, mx, warnCol) => {
     const v = codeOf(s, i), t = tot(s);
-    if (v == null) return <td className={`${td} text-right tnum`}>—</td>;
+    if (v == null) return <td className={`${td} text-right tnum nw`}>—</td>;
     return (
-      <td className={`${td} text-right tnum`} title={label}>
+      <td className={`${td} text-right tnum nw`} title={label}>
         <div style={{ color: v > 0 && v === mx ? warnCol : C.text }}>{fmtNum(v)}</div>
         {t > 0 && v > 0 && <div className="text-xs mt-0.5" style={{ color: C.faint }}>{fmtPct(v / t)}</div>}
       </td>
@@ -613,16 +629,16 @@ function ServerTable({ servers, rates, onFields }) {
                     <div className="text-xs mt-0.5" style={{ color: C.faint }}>{s.check_status}{dur != null ? `, ${fmtMs(dur)}` : ""}</div>
                   )}
                 </td>
-                <td className={`${td} text-right tnum`}>{fmtNum(num(s.weight))}</td>
+                <td className={`${td} text-right tnum nw`}>{fmtNum(num(s.weight))}</td>
                 <td className={td}><Meter value={num(s.scur) || 0} max={num(s.slim)} /></td>
-                <td className={`${td} text-right tnum`}>{fmtRate(rpsOf(s, rates))}</td>
+                <td className={`${td} text-right tnum nw`}>{fmtRate(rpsOf(s, rates))}</td>
                 {errCell(s, 3, max4, C.warn)}
                 {errCell(s, 4, max5, C.bad)}
-                <td className={`${td} text-right tnum`}>{fmtMs(num(s.rtime))}</td>
-                <td className={`${td} text-right tnum`} style={{ color: econ > 0 ? C.warn : C.text }}>{fmtNum(econ)}</td>
-                <td className={`${td} text-right tnum`}>{fmtNum(num(s.eresp))}</td>
-                <td className={`${td} text-right tnum`}>{fmtNum(num(s.chkdown))}</td>
-                <td className={`${td} text-right tnum`}>{downtime === 0 ? "Hiç" : fmtDur(downtime)}</td>
+                <td className={`${td} text-right tnum nw`}>{fmtMs(num(s.rtime))}</td>
+                <td className={`${td} text-right tnum nw`} style={{ color: econ > 0 ? C.warn : C.text }}>{fmtNum(econ)}</td>
+                <td className={`${td} text-right tnum nw`}>{fmtNum(num(s.eresp))}</td>
+                <td className={`${td} text-right tnum nw`}>{fmtNum(num(s.chkdown))}</td>
+                <td className={`${td} text-right tnum nw`}>{downtime === 0 ? "Hiç" : fmtDur(downtime)}</td>
               </tr>
             );
           })}
@@ -632,38 +648,58 @@ function ServerTable({ servers, rates, onFields }) {
   );
 }
 
-// idx: 4 = 5xx (sunucu hatası), 3 = 4xx (istemci hatası)
-function ErrorSummary({ b, idx }) {
-  const { wrates, label } = useContext(WinCtx);
+// Backend'in 4xx ve 5xx özeti. Sıfır olanlar tek satırda toplanır, ortak yönlendirme
+// cümlesi bir kez yazılır; böylece iki kutu aynı cümleyi tekrar etmez.
+function errorStats(b, wrates, idx) {
   const wb = wrates[keyOf(b)];
-  if (!wb || !b.servers.length) return null;
-  const isSrv = idx === 4;
-  const adi = isSrv ? "sunucu hatası (5xx)" : "istemci hatası (4xx)";
-  const beN = wb.codes[idx];
   const per = b.servers.map((s) => {
     const w = wrates[keyOf(s)];
     return { s, e: w?.codes?.[idx] || 0, tot: w ? w.codes.reduce((a, x) => a + x, 0) : 0 };
   });
   const sum = per.reduce((a, x) => a + x.e, 0);
-  const box = { background: C.panel2 };
-  if (beN === 0 && sum === 0) {
-    return <p className="rounded-md px-4 py-2.5 mb-3 text-sm" style={{ ...box, color: C.muted }}>{cap(label)} içinde bu backend'den hiç {adi} dönmedi.</p>;
-  }
-  const col = isSrv ? C.bad : C.warn;
-  const top = [...per].sort((a, c) => c.e - a.e)[0];
-  const busy = per.filter((x) => x.tot >= 20);
+  return { beN: wb ? wb.codes[idx] : 0, per, sum, total: Math.max(wb ? wb.codes[idx] : 0, sum) };
+}
+
+function ErrorBox({ st, idx, label }) {
+  const isSrv = idx === 4;
+  const adi = isSrv ? "sunucu hatası (5xx)" : "istemci hatası (4xx)";
+  const top = [...st.per].sort((a, c) => c.e - a.e)[0];
+  const busy = st.per.filter((x) => x.tot >= 20);
   const ratios = busy.map((x) => x.e / x.tot);
   const even = busy.length >= 2 && Math.min(...ratios) > 0 && Math.max(...ratios) / Math.min(...ratios) < 1.5;
-  const fromProxy = beN - sum;
+  const fromProxy = st.beN - st.sum;
   return (
-    <p className="rounded-md px-4 py-3 mb-3 text-sm leading-relaxed" style={{ ...box, boxShadow: `inset 3px 0 0 ${col}` }}>
-      {cap(label)} içinde bu backend'den {fmtNum(Math.max(beN, sum))} {adi} döndü.
-      {top.e > 0 && sum > 0 && <> En çok <b>{top.s.svname}</b> sunucusundan: {fmtNum(top.e)} tane, sunuculardan dönenlerin {fmtPct(top.e / sum)} kadarı.</>}
+    <p className="rounded-md px-4 py-3 text-sm leading-relaxed" style={{ background: C.panel2, boxShadow: `inset 3px 0 0 ${isSrv ? C.bad : C.warn}` }}>
+      {cap(label)} içinde bu backend'den {fmtNum(st.total)} {adi} döndü.
+      {top && top.e > 0 && st.sum > 0 && <> En çok <b className="brk">{top.s.svname}</b> sunucusundan: {fmtNum(top.e)} tane, sunuculardan dönenlerin {fmtPct(top.e / st.sum)} kadarı.</>}
       {isSrv && even && <> Hata oranları sunucular arasında birbirine yakın; sorun büyük ihtimalle tek bir sunucuda değil, hepsinin kullandığı ortak bir yerde (uygulama, veritabanı, dış servis).</>}
-      {isSrv && fromProxy > Math.max(5, beN * 0.1) && <> {fmtNum(fromProxy)} tanesi hiçbir sunucuya ulaşmadan HAProxy tarafından üretildi (ör. çalışan sunucu yokken 503).</>}
+      {isSrv && fromProxy > Math.max(5, st.beN * 0.1) && <> {fmtNum(fromProxy)} tanesi hiçbir sunucuya ulaşmadan HAProxy tarafından üretildi (ör. çalışan sunucu yokken 503).</>}
       {!isSrv && <> 4xx genelde istemci kaynaklıdır (404 bulunamadı, 401/403 yetki, 429 çok istek); her zaman sunucu sorunu değildir.</>}
-      {" "}Hangi adreslerin hata aldığını aşağıdaki <b>Log'dan gelenler</b> bölümünde görebilirsin.
     </p>
+  );
+}
+
+function ErrorSummaries({ b }) {
+  const { wrates, label } = useContext(WinCtx);
+  if (!wrates[keyOf(b)] || !b.servers.length) return null;
+  const s5 = errorStats(b, wrates, 4);
+  const s4 = errorStats(b, wrates, 3);
+  const bos = [s5.total === 0 && "sunucu hatası (5xx)", s4.total === 0 && "istemci hatası (4xx)"].filter(Boolean);
+  return (
+    <div className="space-y-2 mb-5">
+      {s5.total > 0 && <ErrorBox st={s5} idx={4} label={label} />}
+      {s4.total > 0 && <ErrorBox st={s4} idx={3} label={label} />}
+      {bos.length > 0 && (
+        <p className="rounded-md px-4 py-2.5 text-sm" style={{ background: C.panel2, color: C.muted }}>
+          {cap(label)} içinde bu backend'den hiç {bos.join(" ve ")} dönmedi.
+        </p>
+      )}
+      {(s5.total > 0 || s4.total > 0) && (
+        <p className="text-xs" style={{ color: C.faint }}>
+          Hangi adreslerin hata aldığını aşağıdaki "Log'dan gelenler" bölümünde görebilirsin.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -674,8 +710,8 @@ function BackendDetail({ b, rates, onFields }) {
       <dl className="grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-4 text-sm mb-5">
         <Fact k="algo">{b.algo ? ALGO[algoKey] || b.algo : "—"}</Fact>
         <Fact k="req_tot">{fmtNum(num(b.req_tot) ?? num(b.stot))}</Fact>
-        <Fact k="scur">{fmtNum(num(b.scur))} <span style={{ color: C.faint }}>(en fazla {fmtNum(num(b.smax))})</span></Fact>
-        <Fact k="bout">{fmtBytes(num(b.bout))} <span style={{ color: C.faint }}>({fmtBytes(num(b.bin))} gelen)</span></Fact>
+        <Fact k="scur"><span className="nw">{fmtNum(num(b.scur))}</span> <span className="nw" style={{ color: C.faint }}>(en fazla {fmtNum(num(b.smax))})</span></Fact>
+        <Fact k="bout"><span className="nw">{fmtBytes(num(b.bout))}</span> <span className="nw" style={{ color: C.faint }}>({fmtBytes(num(b.bin))} gelen)</span></Fact>
         <Fact k="qtime">{fmtMs(num(b.qtime))}</Fact>
         <Fact k="ctime">{fmtMs(num(b.ctime))}</Fact>
         <Fact k="rtime">{fmtMs(num(b.rtime))}</Fact>
@@ -686,8 +722,7 @@ function BackendDetail({ b, rates, onFields }) {
         <Fact k="cli_abrt">{fmtNum(num(b.cli_abrt))}</Fact>
       </dl>
       <CodeBar row={b} />
-      <ErrorSummary b={b} idx={4} />
-      <ErrorSummary b={b} idx={3} />
+      <ErrorSummaries b={b} />
       <ServerTable servers={b.servers} rates={rates} onFields={onFields} />
       <button type="button" className="mt-4 text-sm" style={{ color: C.info }} onClick={() => onFields(b)}>
         Bu backend'in tüm alanlarını göster
@@ -727,10 +762,10 @@ function FrontendTable({ model, rates, onFields }) {
               </td>
               <td className={td}><StatusBadge status={f.status} /></td>
               <td className={td}><Meter value={num(f.scur) || 0} max={num(f.slim)} /></td>
-              <td className={`${td} text-right tnum`}>{fmtRate(rpsOf(f, rates))}</td>
-              <td className={`${td} text-right tnum`}>{fmtNum(num(f.req_tot) ?? num(f.stot))}</td>
-              <td className={`${td} text-right tnum`}>{fmtNum(num(f.dreq))}</td>
-              <td className={`${td} text-right tnum`}>{fmtNum(num(f.ereq))}</td>
+              <td className={`${td} text-right tnum nw`}>{fmtRate(rpsOf(f, rates))}</td>
+              <td className={`${td} text-right tnum nw`}>{fmtNum(num(f.req_tot) ?? num(f.stot))}</td>
+              <td className={`${td} text-right tnum nw`}>{fmtNum(num(f.dreq))}</td>
+              <td className={`${td} text-right tnum nw`}>{fmtNum(num(f.ereq))}</td>
               <td className={`${td} text-right tnum whitespace-nowrap`}>{fmtBytes(num(f.bout))} / {fmtBytes(num(f.bin))}</td>
               <td className={td} style={{ minWidth: 120 }}><CodeBar row={f} compact /></td>
             </tr>
@@ -745,7 +780,7 @@ function RankRow({ label, sub, value, share, color }) {
   return (
     <li className="py-2">
       <div className="flex items-baseline justify-between gap-3 text-sm">
-        <span className="truncate" style={{ minWidth: 0 }}>
+        <span className="truncate" style={{ minWidth: 0 }} title={label}>
           <span className="font-medium">{label}</span>
           {sub && <span className="text-xs ml-2" style={{ color: C.faint }}>{sub}</span>}
         </span>
@@ -794,7 +829,7 @@ function FieldsModal({ row, onClose }) {
       <div className="w-full max-w-3xl rounded-lg my-8" style={{ background: C.panel, border: `1px solid ${C.line}` }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-4 px-5 py-4" style={{ borderBottom: `1px solid ${C.line}` }}>
           <div>
-            <div className="text-lg font-semibold">{row.pxname} / {row.svname}</div>
+            <div className="text-lg font-semibold brk">{row.pxname} / {row.svname}</div>
             <div className="text-sm mt-0.5" style={{ color: C.muted }}>HAProxy'nin bu satır için verdiği {entries.length} alanın tamamı, sade açıklamalarıyla.</div>
           </div>
           <button ref={closeRef} type="button" onClick={onClose} aria-label="Kapat" style={{ color: C.muted }}><X size={20} /></button>
@@ -818,8 +853,8 @@ function FieldsModal({ row, onClose }) {
                       <div>{g ? g[0] : k}</div>
                       {g && <div className="text-xs mt-0.5" style={{ color: C.faint }}>{g[1]}</div>}
                     </td>
-                    <td className="py-2 pr-4 align-top tnum">{fmtField(k, v, row)}</td>
-                    <td className="py-2 pr-4 align-top tnum" style={{ color: C.muted }}>{v === "" ? "boş" : String(v)}</td>
+                    <td className="py-2 pr-4 align-top tnum brk" style={{ maxWidth: 220 }}>{fmtField(k, v, row)}</td>
+                    <td className="py-2 pr-4 align-top tnum brk" style={{ maxWidth: 220, color: C.muted }}>{v === "" ? "boş" : String(v)}</td>
                     <td className="py-2 pr-5 align-top text-xs" style={{ color: C.faint }}>{k}</td>
                   </tr>
                 );
@@ -902,15 +937,15 @@ function buildFindings(model, rates, logs, wrates = {}, label = "") {
     else if (sl && sc / sl > 0.8) add("warn", `fe:${f.pxname}`, `${f.pxname} bağlantı sınırının ${fmtPct(sc / sl)} kadarını kullanıyor (${fmtNum(sc)} / ${fmtNum(sl)}).`);
   }
   if (logs?.enabled && logs.kinds) {
-    const m = logs.minutes;
+    const sure = label ? `${cap(label)} içinde` : `Son ${logs.minutes}${NB}dakikada`;
     const top = (kind) => (logs.blocked || []).find((x) => x.kind === kind);
     const nm = logs.kinds.nomatch || 0;
     if (nm > 0) {
       const t = top("nomatch");
-      add("warn", "logs", `Son ${m} dakikada ${fmtNum(nm)} istek hiçbir backend'e eşleşmediği için 503 aldı.${t ? ` En çok: ${t.method} ${t.path} (${fmtNum(t.n)}).` : ""}`);
+      add("warn", "logs", `${sure} ${fmtNum(nm)} istek hiçbir backend'e eşleşmediği için 503 aldı.${t ? ` En çok: ${t.method} ${t.path} (${fmtNum(t.n)}).` : ""}`);
     }
     const ns = logs.kinds.noserver || 0;
-    if (ns > 0) add("bad", "logs", `Son ${m} dakikada ${fmtNum(ns)} istek, seçilen backend'de çalışan sunucu olmadığı için 503 aldı.`);
+    if (ns > 0) add("bad", "logs", `${sure} ${fmtNum(ns)} istek, seçilen backend'de çalışan sunucu olmadığı için 503 aldı.`);
   }
   // Sağlık kontrolü olmayan sunucular artık "Yapılandırma notları" bölümünde (config'ten, backend adlarıyla)
   void nocheck; void total;
@@ -965,16 +1000,16 @@ function ConfigNotes({ cfg }) {
       {isOpen && (
         <div className="px-4 pb-4 space-y-3">
           {notes.map((n, i) => (
-            <div key={i} className="rounded-md px-3 py-2.5" style={{ background: C.panel2, boxShadow: `inset 3px 0 0 ${n.level === "warn" ? C.warn : C.info}` }}>
-              <div className="text-sm font-medium">
+            <div key={i} className="rounded-md px-4 py-3" style={{ background: C.panel2, boxShadow: `inset 3px 0 0 ${n.level === "warn" ? C.warn : C.info}` }}>
+              <div className="text-sm font-medium brk">
                 {n.title}
                 {n.where && <span className="text-xs ml-2 font-normal" style={{ color: C.faint }}>{n.where}</span>}
               </div>
-              <p className="text-sm mt-1 leading-relaxed" style={{ color: C.muted }}>{n.text}</p>
+              <p className="text-sm mt-1 leading-relaxed brk" style={{ color: C.muted }}>{n.text}</p>
               {n.fix && (
                 <div className="mt-2 text-xs flex flex-wrap items-center gap-2">
                   <span style={{ color: C.faint }}>Eklenebilecek satır:</span>
-                  <code className="rounded px-2 py-0.5" style={{ ...mono, background: C.bg, border: `1px solid ${C.line}`, color: C.text }}>{n.fix}</code>
+                  <code className="rounded px-2 py-0.5 brk" style={{ ...mono, background: C.bg, border: `1px solid ${C.line}`, color: C.text }}>{n.fix}</code>
                 </div>
               )}
               {(n.samples || []).length > 0 && (
@@ -1028,13 +1063,13 @@ function StatusHero({ findings, model, onJump }) {
         {nocheck ? `, ${nocheck} sunucunun durumu bilinmiyor (sağlık kontrolü yok)` : ""}.
       </p>
       {findings.length > 0 && (
-        <ul className="mt-6 space-y-2" style={{ maxWidth: 900 }}>
+        <ul className="mt-6 space-y-2">
           {visible.map((f, i) => (
             <li key={`${f.target}-${i}`}>
-              <button type="button" onClick={() => f.target && onJump(f.target)} className="hl-row w-full text-left flex gap-3 items-stretch rounded-md px-3 py-2.5"
-                style={{ background: C.panel, cursor: f.target ? "pointer" : "default" }}>
+              <button type="button" onClick={() => f.target && onJump(f.target)} className="hl-row w-full text-left flex gap-3 items-stretch rounded-md px-4 py-3"
+                style={{ background: C.panel, border: `1px solid ${C.line}`, cursor: f.target ? "pointer" : "default" }}>
                 <span style={{ width: 3, borderRadius: 2, background: LEVEL_COLOR[f.level], flexShrink: 0 }} />
-                <span className="text-sm leading-relaxed">{f.text}</span>
+                <span className="text-sm leading-relaxed brk">{f.text}</span>
               </button>
             </li>
           ))}
@@ -1258,7 +1293,7 @@ function LogSection({ logs, minutes }) {
         <div>
           <h2 className="text-xl font-semibold" style={{ letterSpacing: "-0.01em" }}>Log'dan gelenler</h2>
           <p className="text-sm mt-1" style={{ color: C.muted }}>
-            {minutes >= 60 ? "Son 1 saatte" : `Son ${minutes} dakikada`} {fmtNum(total)} istek.
+            {minutes >= 60 ? `Son 1${NB}saatte` : `Son ${minutes}${NB}dakikada`} {fmtNum(total)} istek.
             {ago != null ? ` En son satır ${fmtDur(Math.max(0, ago))} önce.` : " Henüz satır okunmadı."}
             {" "}Sorgu parametreleri (?...) saklanmaz.
             {logs.source ? <span style={{ color: C.faint }}> Kaynak: {logs.source.replace(/^file:/, "").replace(/^journal:/, "journald, ")}.</span> : null}
@@ -1313,13 +1348,13 @@ function LogSection({ logs, minutes }) {
                     const e5 = p.n ? p.s5 / p.n : 0;
                     return (
                       <tr key={i} style={{ borderTop: `1px solid ${C.line}` }}>
-                        <td className="py-2 pr-3 align-top" style={{ maxWidth: 360, wordBreak: "break-all" }}>
+                        <td className="py-2 pr-3 align-top brk" style={{ maxWidth: 360 }}>
                           <span style={{ color: C.faint }}>{p.method} </span>{p.path}
                           <div className="text-xs" style={{ color: C.faint }}>{p.backend}</div>
                         </td>
-                        <td className="py-2 pr-3 text-right tnum align-top">{fmtNum(p.n)}<div className="text-xs" style={{ color: C.faint }}>{perMin(p.n)}</div></td>
-                        <td className="py-2 pr-3 text-right tnum align-top" style={{ color: e5 > 0.02 ? C.warn : C.text }}>{p.s5 ? fmtPct(e5) : "—"}</td>
-                        <td className="py-2 text-right tnum align-top">{p.avgMs ? fmtMs(p.avgMs) : "—"}</td>
+                        <td className="py-2 pr-3 text-right tnum nw align-top">{fmtNum(p.n)}<div className="text-xs" style={{ color: C.faint }}>{perMin(p.n)}</div></td>
+                        <td className="py-2 pr-3 text-right tnum nw align-top" style={{ color: e5 > 0.02 ? C.warn : C.text }}>{p.s5 ? fmtPct(e5) : "—"}</td>
+                        <td className="py-2 text-right tnum nw align-top">{p.avgMs ? fmtMs(p.avgMs) : "—"}</td>
                       </tr>
                     );
                   })}
@@ -1339,7 +1374,7 @@ function LogSection({ logs, minutes }) {
                   <ExpandRow key={key} first={i === 0} open={openRows.has(key)} onToggle={() => toggleRow(key)}
                     head={
                       <span className="flex items-baseline justify-between gap-3">
-                        <span style={{ minWidth: 0, wordBreak: "break-all" }}><span style={{ color: C.faint }}>{b.method} </span>{b.path}</span>
+                        <span className="brk"><span style={{ color: C.faint }}>{b.method} </span>{b.path}</span>
                         <span className="flex items-baseline gap-3 whitespace-nowrap">
                           <span className="inline-flex items-center gap-2 text-xs" style={{ color: C.muted }}>
                             <span style={{ width: 8, height: 8, borderRadius: 2, background: KIND[b.kind]?.[1] }} />{KIND[b.kind]?.[0] || b.kind}
@@ -1370,7 +1405,7 @@ function LogSection({ logs, minutes }) {
                     head={
                       <>
                         <span className="flex items-baseline justify-between gap-3">
-                          <span style={{ minWidth: 0, wordBreak: "break-all" }}>
+                          <span className="brk">
                             <span style={{ color: C.faint }}>{e.method} </span>{e.path}
                             <span className="text-xs ml-2" style={{ color: C.faint }}>{e.backend}</span>
                           </span>

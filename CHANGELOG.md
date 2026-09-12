@@ -4,6 +4,31 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.7.1
+
+- Arayüzde baştan sona düzen denetimi yapıldı ve şunlar düzeltildi:
+  - Uzun yollar ve alan adları kutudan taşıyordu (hata ayrıntısında, notlarda, tablolarda ve "tüm alanlar" penceresinde). Artık gerektiğinde satır sonunda kırılıyorlar.
+  - Sayı ile birimi ayrı satırlara düşebiliyordu ("218" / "ms"). Biçimlendiriciler artık bölünmeyen boşluk kullanıyor; bu hem tabloda hem cümle içinde geçerli.
+  - Durum özetindeki bulgular 900 piksele sıkışıyordu, altındaki "Yapılandırma notları" tam genişlikteydi; ikisi artık aynı genişlikte, aynı iç boşlukta ve aynı çerçevede.
+  - Backend ayrıntısındaki 4xx ve 5xx kutuları aynı yönlendirme cümlesini iki kez yazıyordu; artık bir kez yazılıyor ve hatasız türler tek satırda toplanıyor.
+  - Terim ipucu balonu sayfanın altında ekran dışına taşıyordu; yer yoksa yukarı açılıyor, dar ekranda daralıyor.
+  - Log kaynaklı bulgular "Son 60 dakikada" derken panelin geri kalanı "son 1 saat" diyordu; ifade birleştirildi.
+  - Kısaltılan backend adlarının tam hâli artık tooltip olarak görünüyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda en son sürümü indirip aynı klasörde `./install.sh` çalıştırmak yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf haproxy-lens haproxy-lens-linux-amd64.tar.gz* SHA256SUMS*
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz
+    wget https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS
+    sha256sum -c --ignore-missing SHA256SUMS
+    tar xzf haproxy-lens-linux-amd64.tar.gz
+    cd haproxy-lens
+    ./install.sh
+
+ARM sunucularda dosya adındaki `amd64` yerine `arm64` kullanın. Kurmadan önce kontrol etmek için `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.7.0
 
 - Ajan artık her ortama kendini uyduruyor ve çalışırken izliyor: HAProxy config'i ya da süreçleri değişince (reload) en geç 30 saniyede yeniden okuyor; yeniden kurulum gerekmiyor.
