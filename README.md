@@ -72,7 +72,7 @@ Satırın sonundaki `./install.sh` yerine kullanabilirsin:
 |---|---|
 | `./install.sh -y` | Onay sormadan kurar |
 | `PORT=8415 ./install.sh` | Farklı port kullanır |
-| `ALLOW=10.234.0.0/16 ./install.sh` | Panele sadece bu ağ(lar)dan erişilebilir; virgülle birden fazla ağ ya da tek IP verilebilir |
+| `ALLOW=10.20.0.0/16 ./install.sh` | Panele sadece bu ağ(lar)dan erişilebilir; virgülle birden fazla ağ ya da tek IP verilebilir |
 | `LISTEN=10.0.0.5 ./install.sh` | Panelin adresini elle verir |
 | `LISTEN=127.0.0.1 ./install.sh` | Paneli sadece sunucunun içinden açar (SSH tüneliyle kullanılır) |
 | `LOG=/yol/haproxy.log ./install.sh` | Log kaynağını elle sabitler (varsayılan: ajan kendisi bulur ve izler) |

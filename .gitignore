@@ -1,5 +1,5 @@
-# Node
-webapp/node_modules/
+# Node (klasör ya da kısayol olabilir; sondaki eğik çizgi kısayolu yakalamıyordu)
+webapp/node_modules
 
 # Derlenmiş arayüz (CI ve build.sh üretir)
 web/dist/*

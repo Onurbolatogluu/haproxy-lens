@@ -1011,7 +1011,7 @@ function ConfigNotes({ cfg }) {
         {checked && <span className="text-xs" style={{ color: C.faint }}>Config en son {checked}'de kontrol edildi; değişiklikler kendiliğinden algılanır.</span>}
       </button>
       {isOpen && (
-        <div className="px-4 pb-4 space-y-3">
+        <div className="px-4 pt-2 pb-4 space-y-3">
           {notes.map((n, i) => (
             <div key={i} className="rounded-md px-4 py-3" style={{ background: C.panel2, boxShadow: `inset 3px 0 0 ${n.level === "warn" ? C.warn : C.info}` }}>
               <div className="text-sm font-medium brk">
@@ -1496,15 +1496,16 @@ function LogSection({ logs, minutes }) {
         <Panel title="En çok istenen adresler" note="Tüm istekler: sunucuya ulaşanlar, yönlendirilenler ve engellenenler. Sayı içeren yol parçaları {id} olarak birleştirildi.">
           {(logs.paths || []).length === 0 ? <p className="text-sm" style={{ color: C.faint }}>Bu aralıkta kayıt yok.</p> : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm" style={{ borderCollapse: "collapse", minWidth: 520 }}>
+              {/* Sınıf sütunları küçük punto ve dar boşlukla: altı sütun yarım genişlikteki panele sığsın */}
+              <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
                 <thead>
                   <tr className="text-xs" style={{ color: C.muted }}>
                     <th className="py-2 pr-3 font-normal text-left">Adres</th>
-                    <th className="py-2 pr-3 font-normal text-right">İstek</th>
-                    <th className="py-2 pr-3 font-normal text-right">2xx</th>
-                    <th className="py-2 pr-3 font-normal text-right">3xx</th>
-                    <th className="py-2 pr-3 font-normal text-right">4xx</th>
-                    <th className="py-2 pr-3 font-normal text-right">5xx</th>
+                    <th className="py-2 pr-2 font-normal text-right">İstek</th>
+                    <th className="py-2 pr-2 font-normal text-right">2xx</th>
+                    <th className="py-2 pr-2 font-normal text-right">3xx</th>
+                    <th className="py-2 pr-2 font-normal text-right">4xx</th>
+                    <th className="py-2 pr-2 font-normal text-right">5xx</th>
                     <th className="py-2 font-normal text-right">Ort. süre</th>
                   </tr>
                 </thead>
@@ -1513,19 +1514,19 @@ function LogSection({ logs, minutes }) {
                     const e5 = p.n ? p.s5 / p.n : 0;
                     return (
                       <tr key={i} style={{ borderTop: `1px solid ${C.line}` }}>
-                        <td className="py-2 pr-3 align-top brk" style={{ maxWidth: 360 }}>
+                        <td className="py-2 pr-3 align-top brk">
                           <span style={{ color: C.faint }}>{p.method} </span>{p.path}
                           <div className="text-xs" style={{ color: C.faint }}>{p.backend}</div>
                         </td>
-                        <td className="py-2 pr-3 text-right tnum nw align-top">{fmtNum(p.n)}<div className="text-xs" style={{ color: C.faint }}>{perMin(p.n)}</div></td>
-                        <td className="py-2 pr-3 text-right tnum nw align-top" style={{ color: p.s2 ? C.ok : C.faint }}>{p.s2 ? fmtNum(p.s2) : "—"}</td>
-                        <td className="py-2 pr-3 text-right tnum nw align-top" style={{ color: p.s3 ? C.info : C.faint }}>{p.s3 ? fmtNum(p.s3) : "—"}</td>
-                        <td className="py-2 pr-3 text-right tnum nw align-top" style={{ color: p.s4 ? C.warn : C.faint }}>{p.s4 ? fmtNum(p.s4) : "—"}</td>
-                        <td className="py-2 pr-3 text-right tnum nw align-top" style={{ color: p.s5 ? C.bad : C.faint }}>
+                        <td className="py-2 pr-2 text-right tnum nw align-top">{fmtNum(p.n)}<div className="text-xs" style={{ color: C.faint }}>{perMin(p.n)}</div></td>
+                        <td className="py-2 pr-2 text-right text-xs tnum nw align-top" style={{ color: p.s2 ? C.ok : C.faint }}>{p.s2 ? fmtNum(p.s2) : "—"}</td>
+                        <td className="py-2 pr-2 text-right text-xs tnum nw align-top" style={{ color: p.s3 ? C.info : C.faint }}>{p.s3 ? fmtNum(p.s3) : "—"}</td>
+                        <td className="py-2 pr-2 text-right text-xs tnum nw align-top" style={{ color: p.s4 ? C.warn : C.faint }}>{p.s4 ? fmtNum(p.s4) : "—"}</td>
+                        <td className="py-2 pr-2 text-right text-xs tnum nw align-top" style={{ color: p.s5 ? C.bad : C.faint }}>
                           {p.s5 ? fmtNum(p.s5) : "—"}
-                          {p.s5 > 0 && <div className="text-xs" style={{ color: C.faint }}>{fmtPct(e5)}</div>}
+                          {p.s5 > 0 && <div style={{ color: C.faint }}>{fmtPct(e5)}</div>}
                         </td>
-                        <td className="py-2 text-right tnum nw align-top">{p.avgMs ? fmtMs(p.avgMs) : "—"}</td>
+                        <td className="py-2 text-right text-xs tnum nw align-top">{p.avgMs ? fmtMs(p.avgMs) : "—"}</td>
                       </tr>
                     );
                   })}

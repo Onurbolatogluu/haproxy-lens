@@ -268,7 +268,7 @@ func TestHostFromLog(t *testing.T) {
 		{"HTTP/2 tam adres", pre + `fe~ be/s1` + mid + `{} "GET https://api.ornek.com/v1/siparis/42?x=1 HTTP/2.0"`, "api.ornek.com", "/v1/siparis/42", true},
 		{"option httpslog SNI", pre + `fe~ be/s1` + mid + `{} "GET /x HTTP/1.1" 0/0/0/0/0 app.ornek.com/TLSv1.3/TLS_AES_256_GCM_SHA384`, "app.ornek.com", "/x", true},
 		{"koşullu yakalama bu satırda boş", pre + `fe~ fe/<NOSRV>` + mid + `{} "GET /login HTTP/1.1"`, "", "/login", true},
-		{"istek IP ile yapılmış", pre + `fe fe/<NOSRV>` + mid + `{10.234.20.35:8405} "GET / HTTP/1.1"`, "10.234.20.35:8405", "/", false},
+		{"istek IP ile yapılmış", pre + `fe fe/<NOSRV>` + mid + `{192.168.10.20:8405} "GET / HTTP/1.1"`, "192.168.10.20:8405", "/", false},
 		{"iki IP yakalaması (X-Forwarded-For gibi) alan adı sayılmaz", pre + `fe be/s1` + mid + `{198.51.100.1|198.51.100.2} "GET / HTTP/1.1"`, "", "/", false},
 		{"sonraki alandaki Referer URL'si hedef sayılmaz", pre + `fe be/s1` + mid + `{} "GET / HTTP/1.1" https://google.com/arama`, "", "/", false},
 		{"yakalama bloğu hiç yok", pre + `fe be/s1` + mid + `"GET /eski HTTP/1.1"`, "", "/eski", false},

@@ -63,7 +63,7 @@ func TestChooseListen(t *testing.T) {
 		{"ağ ayarı bulunamazsa birincil adres", addrs, map[string]bool{}, map[string]bool{}, "10.10.0.5"},
 		{"VIP ilk sırada olsa bile atlanır", []ifAddr{{IP: "10.10.0.100", Prefix: 24}, {IP: "10.10.0.5", Prefix: 24}}, map[string]bool{"10.10.0.100": true}, map[string]bool{}, "10.10.0.5"},
 		{"keepalived ayarı okunamasa da /32 VIP seçilmez", []ifAddr{{IP: "10.10.0.200", Prefix: 32}, {IP: "10.10.0.5", Prefix: 24}}, map[string]bool{}, map[string]bool{}, "10.10.0.5"},
-		{"herkese açık IP seçilmez", []ifAddr{{IP: "88.255.1.10", Prefix: 24}}, map[string]bool{}, map[string]bool{"88.255.1.10": true}, ""},
+		{"herkese açık IP seçilmez", []ifAddr{{IP: "198.51.100.10", Prefix: 24}}, map[string]bool{}, map[string]bool{"198.51.100.10": true}, ""},
 		{"sadece VIP varsa hiçbiri", []ifAddr{{IP: "10.10.0.100", Prefix: 24}}, map[string]bool{"10.10.0.100": true}, map[string]bool{}, ""},
 	}
 	for _, c := range cases {
@@ -83,12 +83,12 @@ func TestAllowOnly(t *testing.T) {
 	}
 	h := allowOnly(nets, net.ParseIP("172.20.0.5"), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	cases := map[string]int{
-		"10.10.3.4:5000":   200, // izinli ağ
-		"192.168.1.7:5000": 200, // tek IP
-		"192.168.1.8:5000": 403,
-		"88.255.1.10:5000": 403, // internet
-		"127.0.0.1:5000":   200, // sunucunun kendisi
-		"172.20.0.5:5000":  200, // panelin kendi adresi (sunucudan gelen istek)
+		"10.10.3.4:5000":     200, // izinli ağ
+		"192.168.1.7:5000":   200, // tek IP
+		"192.168.1.8:5000":   403,
+		"198.51.100.10:5000": 403, // internet
+		"127.0.0.1:5000":     200, // sunucunun kendisi
+		"172.20.0.5:5000":    200, // panelin kendi adresi (sunucudan gelen istek)
 	}
 	for remote, want := range cases {
 		r := httptest.NewRequest("GET", "/api/state", nil)
