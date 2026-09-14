@@ -4,6 +4,21 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.8.6
+
+- "Saniyedeki istek" grafiği yanıltıcıydı: alanlar üst üste yığıldığı için en üstteki kırmızı çizgi 5xx değerini değil toplam isteği gösteriyordu, ipucu ise yalnızca tek tek değerleri yazıyordu. Artık ipucu her türün değerini, payını ve en altta **toplamı** gösteriyor; böylece çizginin neden orada olduğu belli oluyor.
+- Yığılma görsel olarak da belirginleşti: bantlar daha dolu, çizgiler daha ince. Grafik açıklaması da ne anlama geldiğini yazıyor.
+- Trafik grafiğinin açıklamasına, o grafikte alanların yığılmadığı, iki ölçümün üst üste çizildiği eklendi.
+- 15 dakikadan uzun aralıklarda noktalar ortalanarak seyreltildiği için birkaç saniyelik tepe noktaları düşük görünebiliyor; grafik bunu artık açıkça yazıyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.8.5
 
 - "En çok istenen adresler" tablosu yarım genişlikteki panele sığmıyordu, adres sütunu kesiliyordu. Yanıt sınıfı sütunları küçük punto ve dar boşlukla yeniden düzenlendi; tablonun en az genişlik kısıtı kaldırıldı.

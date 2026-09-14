@@ -1136,8 +1136,41 @@ function PulseStrip({ model, rates, info }) {
   );
 }
 
+// Yığılmış alan grafiğinde bir çizginin yüksekliği o türün değeri değil, altındakilerle
+// birlikte toplamıdır. İpucu bu yüzden hem tek tek değerleri hem toplamı yazar.
+function ChartTip({ active, payload, label, birim, toplamGoster }) {
+  if (!active || !payload || payload.length === 0) return null;
+  const satir = [...payload].reverse(); // yığının üstten alta sırası
+  const sum = satir.reduce((a, r) => a + (Number(r.value) || 0), 0);
+  return (
+    <div style={{ background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 6, padding: "8px 10px", fontSize: 12, color: C.text }}>
+      <div style={{ color: C.muted, marginBottom: 4 }}>{label}</div>
+      {satir.map((r) => (
+        <div key={r.name} className="flex items-baseline justify-between gap-4">
+          <span className="inline-flex items-center gap-2">
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: r.color }} />{r.name}
+          </span>
+          <span className="tnum nw">
+            {birim(r.value)}
+            {toplamGoster && sum > 0 && <span style={{ color: C.faint }}> ({fmtPct(r.value / sum)})</span>}
+          </span>
+        </div>
+      ))}
+      {toplamGoster && (
+        <div className="flex items-baseline justify-between gap-4 mt-1 pt-1" style={{ borderTop: `1px solid ${C.line}` }}>
+          <span style={{ color: C.muted }}>Toplam</span>
+          <span className="tnum nw">{birim(sum)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TrafficCharts({ points }) {
   const { label, minutes } = useContext(WinCtx);
+  // Ajan en fazla 360 nokta gönderir; daha uzun aralıklarda noktalar ortalanarak seyreltilir.
+  const seyrek = minutes * 30 > 360;
+  const seyrekNot = seyrek ? " Bu aralıkta noktalar ortalanarak seyreltilir; birkaç saniyelik tepe noktaları olduğundan düşük görünebilir." : "";
   if (points.length < 2) {
     return (
       <Panel title="Zaman içindeki trafik" note="Grafikler birkaç saniye içinde dolmaya başlar. Ajan son 1 saati hafızada tutar.">
@@ -1151,10 +1184,6 @@ function TrafficCharts({ points }) {
     Gelen: Math.round((p.in * 8) / 1e5) / 10, Giden: Math.round((p.out * 8) / 1e5) / 10,
   }));
   const tick = { fill: C.faint, fontSize: 11 };
-  const tip = {
-    contentStyle: { background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 6, color: C.text, fontSize: 12 },
-    labelStyle: { color: C.muted },
-  };
   const Legend = ({ items }) => (
     <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs" style={{ color: C.muted }}>
       {items.map(([n, col]) => (
@@ -1165,27 +1194,28 @@ function TrafficCharts({ points }) {
   const codeSeries = [["2xx", "Başarılı", C.ok], ["3xx", "Yönlendirme", C.info], ["4xx", "İstemci hatası", C.warn], ["5xx", "Sunucu hatası", C.bad]];
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <Panel title="Saniyedeki istek, yanıt türüne göre" note={`${cap(label)}. En üstteki kırmızı şerit ne kadar kalınsa o kadar çok sunucu hatası var.`}>
+      <Panel title="Saniyedeki istek, yanıt türüne göre"
+        note={`${cap(label)}. Alanlar üst üste yığılıdır: bir rengin kalınlığı o türün değeridir, en üstteki çizgi ise toplam istektir. Üzerine gelince her türün değeri ve toplam yazar.${seyrekNot}`}>
         <ResponsiveContainer width="100%" height={210}>
           <AreaChart data={history} margin={{ top: 6, right: 6, left: -14, bottom: 0 }}>
             <CartesianGrid stroke={C.line} vertical={false} />
             <XAxis dataKey="t" tick={tick} tickLine={false} axisLine={false} minTickGap={48} />
             <YAxis tick={tick} tickLine={false} axisLine={false} width={48} />
-            <Tooltip {...tip} formatter={(v, name) => [`${fmtRate(v)} istek/sn`, name]} />
+            <Tooltip cursor={{ stroke: C.faint }} content={<ChartTip birim={(v) => `${fmtRate(v)} istek/sn`} toplamGoster />} />
             {codeSeries.map(([key, name, col]) => (
-              <Area key={key} type="monotone" dataKey={key} name={name} stackId="1" stroke={col} fill={col} fillOpacity={0.22} isAnimationActive={false} dot={false} />
+              <Area key={key} type="monotone" dataKey={key} name={name} stackId="1" stroke={col} strokeWidth={1} fill={col} fillOpacity={0.55} isAnimationActive={false} dot={false} />
             ))}
           </AreaChart>
         </ResponsiveContainer>
         <Legend items={codeSeries.map(([, n, c]) => [n, c])} />
       </Panel>
-      <Panel title="Trafik" note={`${cap(label)}. İstemcilere giden ve onlardan gelen veri, megabit/saniye.`}>
+      <Panel title="Trafik" note={`${cap(label)}. İstemcilere giden ve onlardan gelen veri, megabit/saniye. Bu grafikte alanlar yığılmaz, iki ölçüm üst üste çizilir.${seyrekNot}`}>
         <ResponsiveContainer width="100%" height={210}>
           <AreaChart data={history} margin={{ top: 6, right: 6, left: -14, bottom: 0 }}>
             <CartesianGrid stroke={C.line} vertical={false} />
             <XAxis dataKey="t" tick={tick} tickLine={false} axisLine={false} minTickGap={48} />
             <YAxis tick={tick} tickLine={false} axisLine={false} width={48} />
-            <Tooltip {...tip} formatter={(v, name) => [`${trDec(v)} Mbit/sn`, name]} />
+            <Tooltip cursor={{ stroke: C.faint }} content={<ChartTip birim={(v) => `${trDec(v)} Mbit/sn`} />} />
             <Area type="monotone" dataKey="Giden" stroke={C.info} fill={C.info} fillOpacity={0.2} isAnimationActive={false} dot={false} />
             <Area type="monotone" dataKey="Gelen" stroke={C.maint} fill={C.maint} fillOpacity={0.2} isAnimationActive={false} dot={false} />
           </AreaChart>
