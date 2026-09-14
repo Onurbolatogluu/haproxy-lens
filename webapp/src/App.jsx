@@ -962,12 +962,15 @@ function buildFindings(model, rates, logs, wrates = {}, label = "") {
   return out.sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
 }
 
-function Header({ info, running, onToggleRun, ok, lastAt }) {
+function Header({ info, running, onToggleRun, ok, lastAt, agentVersion }) {
   const up = num(info?.Uptime_sec);
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 pb-5" style={{ borderBottom: `1px solid ${C.line}` }}>
       <div>
-        <div className="text-lg font-semibold">haproxy-lens{info?.node ? ` ${info.node}` : ""}</div>
+        <div className="text-lg font-semibold">
+          haproxy-lens{info?.node ? ` ${info.node}` : ""}
+          {agentVersion && <span className="text-sm font-normal ml-2" style={{ color: C.faint }}>sürüm {agentVersion}</span>}
+        </div>
         <div className="text-sm mt-0.5" style={{ color: C.muted }}>
           HAProxy {info?.Version || ""}
           {up != null ? `, ${fmtDur(up)} süredir açık` : ""}
@@ -1623,7 +1626,7 @@ export default function App() {
     <div className="hl-root" style={{ background: C.bg, color: C.text, minHeight: "100vh" }}>
       <style>{CSS}</style>
       <div className="max-w-6xl mx-auto px-4 py-6 md:px-8 md:py-8">
-        <Header info={cur?.info} running={running} onToggleRun={() => setRunning((r) => !r)} ok={!problem} lastAt={cur?.at} />
+        <Header info={cur?.info} running={running} onToggleRun={() => setRunning((r) => !r)} ok={!problem} lastAt={cur?.at} agentVersion={cfg?.version} />
         {problem && (
           <div className="mt-6 rounded-md px-4 py-3 text-sm leading-relaxed" style={{ background: C.panel, boxShadow: `inset 3px 0 0 ${C.bad}` }}>
             <div>{problem}</div>

@@ -60,8 +60,6 @@ type detection struct {
 	Notes       []Note
 }
 
-var reTCPLogMsg = regexp.MustCompile(`^\S+:\d+ \[[^\]]+\] \S+ \S+/\S+ -?\d+/-?\d+/\+?-?\d+ \+?\d+ \S{2} `)
-var reTrafficStart = regexp.MustCompile(`^\S+:\d+ \[\d{2}/\w{3}/\d{4}:`)
 var reVarLogPath = regexp.MustCompile(`-?(/var/log/[^\s;"'()]+)`)
 
 func runDetect(forceSocket, forceLog string) *detection {

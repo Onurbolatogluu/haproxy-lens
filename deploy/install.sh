@@ -8,6 +8,7 @@
 #   PORT=8415 ./install.sh Panel için farklı port
 #   LISTEN=10.0.0.5 ./install.sh     Panelin adresini elle ver (127.0.0.1 = sadece SSH tüneliyle)
 #   ALLOW=10.0.0.0/24 ./install.sh   Panele erişebilecek ağlar (varsayılan: özel ağlar)
+#   LOG=/yol/haproxy.log ./install.sh  Log kaynağını elle sabitle (varsayılan: ajan kendisi bulur)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -159,7 +160,7 @@ if command -v curl >/dev/null; then
     sleep 1
   done
   if [ "$OK" -eq 1 ]; then
-    echo "Ajan çalışıyor ve HAProxy'den veri okuyor."
+    echo "$(/usr/local/bin/haproxy-lens -version) çalışıyor ve HAProxy'den veri okuyor."
   else
     echo "Servis kuruldu ama henüz veri gelmedi. Kontrol: journalctl -u haproxy-lens -n 20"
   fi

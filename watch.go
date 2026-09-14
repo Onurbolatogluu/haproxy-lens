@@ -190,6 +190,7 @@ type FEInfo struct {
 }
 
 type ConfigInfo struct {
+	Version   string   `json:"version"`
 	Files     []string `json:"files"`
 	CheckedAt int64    `json:"checkedAt"`
 	ChangedAt int64    `json:"changedAt"`
@@ -202,7 +203,7 @@ type ConfigInfo struct {
 func (e *Env) Info() ConfigInfo {
 	e.mu.Lock()
 	hc, logNote := e.cfg, e.logNote
-	info := ConfigInfo{CheckedAt: e.checkedAt.UnixMilli(), ChangedAt: e.changedAt.UnixMilli(), Socket: e.stats.Socket()}
+	info := ConfigInfo{Version: version, CheckedAt: e.checkedAt.UnixMilli(), ChangedAt: e.changedAt.UnixMilli(), Socket: e.stats.Socket()}
 	e.mu.Unlock()
 	obs := logObservation{}
 	if e.logs != nil {

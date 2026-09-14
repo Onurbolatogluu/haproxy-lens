@@ -4,6 +4,26 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.8.1
+
+- Ajanın sürümü artık panelde, en üstte adın yanında yazıyor ve `/api/config` ile veriliyor. Kurulum da bittiğinde hangi sürümün çalıştığını söylüyor. Onlarca LB'de hangisinin güncel olduğu böylece görülebiliyor.
+- README baştan sona gözden geçirildi:
+  - Geliştirme bölümündeki dosya tablosu eksikti; `config.go`, `logformat.go`, `notes.go`, `watch.go` ve `cloudflare.go` yoktu.
+  - "Bilinen sınırlar" içindeki alan adı maddesi eskiydi (sadece 403/503 diyordu, artık 3xx dahil tüm sınıflar için geçerli).
+  - Servisin `systemd-journal` grubuyla da çalıştığı yazmıyordu.
+  - `./install.sh --check` raporunun dört bölümü olduğu (config, log, yapılandırma notları, panel adresi) eksik anlatılmıştı.
+  - `install.sh` başlığında `LOG=` seçeneği yazmıyordu.
+- Yeni "Sorun giderme" bölümü: servis durumu, günlükler, panelin adresini bulma, erişim reddi, güvenlik duvarı ve ayar değiştirme.
+- Kullanılmayan iki düzenli ifade `detect.go`'dan kaldırıldı (log biçimi ayrıştırıcıya geçtiğinde artıkları kalmıştı).
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -q https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/{haproxy-lens-linux-amd64.tar.gz,SHA256SUMS} && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.8.0
 
 - Log bölümündeki "Hata alan adresler" paneli "Hangi adres ne döndürüyor" oldu: **3xx, 4xx ve 5xx** için ayrı sekmeler. Her sekmede o sınıfı en çok döndüren adresler, tam kod dökümü (301, 302, 304, 403, 500, 502...) ve açılır ayrıntı var.

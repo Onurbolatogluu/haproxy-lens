@@ -55,7 +55,7 @@ Yukarıdaki satırın sonundaki `./install.sh` yerine `./install.sh --check` yaz
 ./install.sh --check
 ```
 
-Rapor, config'te bulunan stats socket'leri, log kaynağını ve en altta bir **SONUÇ** satırını gösterir:
+Rapor dört bölümden oluşur: bulunan config dosyaları ve stats socket'leri, log kaynağı (ve o LB'de alan adının log'da olup olmadığı), yapılandırma notları, panelin açılacağı adres. En altta bir **SONUÇ** satırı olur:
 
 | Sonuç | Anlamı |
 |---|---|
@@ -146,7 +146,7 @@ Ajan config'e hiçbir şey yazmaz. Önerilen bir satırı eklemek senin kararın
 | Servis | `/etc/systemd/system/haproxy-lens.service` |
 | Sistem kullanıcısı | `haproxy-lens` (giriş yapamaz) |
 
-Başka hiçbir dosyaya yazmaz. Servis, socket'e ve log'a erişmek için gereken gruplarla (`haproxy`, `adm` gibi) çalışır; kullanıcı bu gruplara kalıcı olarak eklenmez.
+Başka hiçbir dosyaya yazmaz. Servis, stats socket'ine ve log'a erişebilmek için gereken gruplarla çalışır: socket'in grubu (genelde `haproxy`), syslog dosyaları için `adm` ve journald için `systemd-journal` (sunucuda varsa). Böylece log'un yeri sonradan değişse de yeniden kurulum gerekmez. Kullanıcı bu gruplara kalıcı olarak eklenmez; gruplar yalnızca servis çalışırken geçerlidir.
 
 ## Neleri destekler
 
@@ -173,12 +173,27 @@ Alan adını görmek istediğin bir LB'de bunu sen eklemeye karar verirsen en ba
 
 ## Bilinen sınırlar
 
-- **Alan adı:** Varsayılan `httplog` biçimi Host bilgisini içermez. Bu yüzden 403 ve 503 alan isteklerde sadece path görünür.
+- **Alan adı:** Varsayılan `httplog` biçimi Host bilgisini içermez; o LB'de hiçbir kaynaktan alan adı bulunamazsa (yukarıdaki tabloya bakın) 3xx, 4xx ve 5xx dönen isteklerde sadece yol ve IP görünür.
 - **Gerçek IP:** Cloudflare arkasından gelen isteklerde log'daki IP Cloudflare'e aittir; panel bu IP'leri "Cloudflare" diye etiketler.
 - **Log biçimi tahmini değil:** Ajan satırları config'teki log tanımına göre okur. Config'te olmayan bir biçimle gelen satırlar (ör. başka bir sunucudan aynı dosyaya yazılanlar) okunamaz ve "Yapılandırma notları"nda örnekleriyle görünür.
-- **Geçmiş:** Grafik ve 5xx verisi 1 saat hafızada tutulur; ajan ya da HAProxy yeniden başlarsa sıfırdan dolmaya başlar. O sırada panel, aralığın gerçekte kaç dakikayı kapsadığını yazar.
+- **Geçmiş:** Grafikler ve yanıt kodu sayımları 1 saat hafızada tutulur; ajan ya da HAProxy yeniden başlarsa sıfırdan dolmaya başlar. O sırada panel, aralığın gerçekte kaç dakikayı kapsadığını yazar. Kalıcı bir veritabanı yok.
 - **Tek sunucu:** Her kurulum sadece kendi sunucusunu gösterir.
 - **Şifre ve HTTPS yok:** Erişim sadece ağ adresine göre sınırlanır. İzinli ağdaki herkes paneli görebilir; gerekirse `ALLOW` ile yönetim ağına daralt.
+
+## Sorun giderme
+
+| Durum | Ne yapmalı |
+|---|---|
+| Panel açılmıyor | `systemctl status haproxy-lens` |
+| Servis çalışıyor ama panelde veri yok | `journalctl -u haproxy-lens -n 50` — en sık sebep servis kullanıcısının stats socket'ine erişememesi |
+| Panelin adresini unuttun | `systemctl show haproxy-lens -p ExecStart` ya da `ss -ltnp \| grep haproxy-lens` |
+| Hangi sürüm kurulu | `haproxy-lens -version` (panelin en üstünde, adın yanında da yazar) |
+| Tarayıcıda "Bu adresten panele erişim izni yok" | Bulunduğun ağ izinli listede değil: `ALLOW=<ağ>/<önek> ./install.sh` ile tekrar kur |
+| Sayfa hiç açılmıyor, zaman aşımı | Güvenlik duvarı (ufw/firewalld) portu kapatıyor olabilir; kurulum bunu fark ederse uyarır ama kendisi dokunmaz |
+| Log bölümü boş ya da eksik | Panelin üstündeki "Yapılandırma notları" sebebini ve varsa eklenebilecek config satırını yazar |
+| Ayarları değiştirmek istiyorsun | Aynı paketten `ALLOW=... LISTEN=... ./install.sh` çalıştırmak yeterli; servis dosyası yeniden yazılır |
+
+Ajan çalışırken config'i 30 saniyede bir kontrol eder. HAProxy'de yaptığın bir değişiklikten sonra reload ettiysen panelin kendini güncellemesi için bir şey yapmana gerek yok.
 
 ## Nasıl çalışır
 
@@ -203,24 +218,30 @@ Dosyalar:
 
 | Dosya | İçerik |
 |---|---|
-| `haproxy.go` | Stats socket'inden okuma (izin verilen komutlar burada) |
-| `logtail.go` | Log dosyasını / journald'ı izleme ve özetleme |
-| `detect.go` | Kurulum öncesi otomatik tespit (`-detect`) |
-| `main.go` | Parametreler ve web sunucusu |
+| `main.go` | Parametreler, web sunucusu, `/api/*` uçları |
+| `haproxy.go` | Stats socket'inden okuma (izin verilen komutlar burada), zaman aralığı hesabı |
+| `config.go` | haproxy.cfg'yi okuma: bölümler, `defaults` mirası, log hedefleri, Host yakalama |
+| `logformat.go` | `log-format` tanımını ayrıştırıcıya çevirme (httplog, httpslog, tcplog, özel) |
+| `logtail.go` | Log dosyasını / journald'ı izleme, dakikalık özetler, yol ve kod dökümü |
+| `watch.go` | Çalışırken config, log kaynağı ve socket izleme; `/api/config` |
+| `notes.go` | Yapılandırma notları (ne eksik, neyi etkiliyor, hangi satır eklenebilir) |
+| `detect.go` | Kurulum öncesi tespit ve uyumluluk raporu (`-detect`) |
 | `listen.go` | Panelin dinleyeceği IP'nin seçimi (keepalived VIP hariç) |
 | `access.go` | Panele erişebilecek ağların kontrolü |
-| `webapp/` | Panel arayüzü (React) |
+| `cloudflare.go` | Yerleşik Cloudflare IP aralıkları (etiketleme için) |
+| `*_test.go` | Ayrıştırıcı, config uyumu, düzen ve erişim testleri |
+| `webapp/` | Panel arayüzü (React); `build.sh` derleyip programa gömer |
 | `deploy/` | `install.sh` ve `uninstall.sh` |
 
 ## Yeni sürüm yayınlama
 
 1. `CHANGELOG.md` dosyasına yeni sürümü yaz. Bir önceki sürümün "Kurulum ve güncelleme" bölümünü olduğu gibi kopyala; her sürümde aynıdır.
-2. GitHub'da **Releases > Draft a new release**, yeni bir etiket oluştur (ör. `v0.7.1`), başlığa `haproxy-lens 0.7.1` yaz.
+2. GitHub'da **Releases > Draft a new release**, yeni bir etiket oluştur (ör. `v0.8.1`), başlığa `haproxy-lens 0.8.1` yaz.
 3. Açıklama kutusuna `CHANGELOG.md`'deki o sürüm bölümünün tamamını yapıştır (en üstteki sürüm numarası satırı hariç). Kurulum komutları böylece release sayfasında hazır gelir.
 4. **Publish release**'e bas. **Set as a pre-release** işaretli olmamalı, yoksa `latest` adresi o sürümü göstermez.
 5. **Actions** sekmesindeki `release` işi birkaç dakika içinde paketleri derleyip release'e ekler. Sunucularda `wget` çekmeden önce bu işin yeşile dönmesini bekle.
 
-Sürüm numarası: hata düzeltmesinde son hane (0.7.0 → 0.7.1), yeni özellikte ortadaki hane (0.7.0 → 0.8.0) artar.
+Sürüm numarası: hata düzeltmesinde son hane (0.8.0 → 0.8.1), yeni özellikte ortadaki hane (0.8.0 → 0.9.0) artar.
 
 ## Lisans
 
