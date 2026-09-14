@@ -1496,11 +1496,12 @@ function LogSection({ logs, minutes }) {
         <Panel title="En çok istenen adresler" note="Tüm istekler: sunucuya ulaşanlar, yönlendirilenler ve engellenenler. Sayı içeren yol parçaları {id} olarak birleştirildi.">
           {(logs.paths || []).length === 0 ? <p className="text-sm" style={{ color: C.faint }}>Bu aralıkta kayıt yok.</p> : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm" style={{ borderCollapse: "collapse", minWidth: 460 }}>
+              <table className="w-full text-sm" style={{ borderCollapse: "collapse", minWidth: 520 }}>
                 <thead>
                   <tr className="text-xs" style={{ color: C.muted }}>
                     <th className="py-2 pr-3 font-normal text-left">Adres</th>
                     <th className="py-2 pr-3 font-normal text-right">İstek</th>
+                    <th className="py-2 pr-3 font-normal text-right">2xx</th>
                     <th className="py-2 pr-3 font-normal text-right">3xx</th>
                     <th className="py-2 pr-3 font-normal text-right">4xx</th>
                     <th className="py-2 pr-3 font-normal text-right">5xx</th>
@@ -1517,6 +1518,7 @@ function LogSection({ logs, minutes }) {
                           <div className="text-xs" style={{ color: C.faint }}>{p.backend}</div>
                         </td>
                         <td className="py-2 pr-3 text-right tnum nw align-top">{fmtNum(p.n)}<div className="text-xs" style={{ color: C.faint }}>{perMin(p.n)}</div></td>
+                        <td className="py-2 pr-3 text-right tnum nw align-top" style={{ color: p.s2 ? C.ok : C.faint }}>{p.s2 ? fmtNum(p.s2) : "—"}</td>
                         <td className="py-2 pr-3 text-right tnum nw align-top" style={{ color: p.s3 ? C.info : C.faint }}>{p.s3 ? fmtNum(p.s3) : "—"}</td>
                         <td className="py-2 pr-3 text-right tnum nw align-top" style={{ color: p.s4 ? C.warn : C.faint }}>{p.s4 ? fmtNum(p.s4) : "—"}</td>
                         <td className="py-2 pr-3 text-right tnum nw align-top" style={{ color: p.s5 ? C.bad : C.faint }}>
@@ -1642,6 +1644,12 @@ export default function App() {
     const id = setInterval(load, 5000);
     return () => { alive = false; clearInterval(id); };
   }, [running, minutes]);
+
+  // Sekme başlığında sunucu adı: birden fazla LB açıkken hangisinin hangisi olduğu belli olsun
+  useEffect(() => {
+    const node = state?.cur?.info?.node;
+    document.title = node ? `${node} · haproxy-lens` : "haproxy-lens";
+  }, [state]);
 
   const cur = state?.cur;
   const prev = state?.prev;

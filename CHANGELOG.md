@@ -4,6 +4,21 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.8.4
+
+- Panelin kendi simgesi (favicon) eklendi: mercek ve içinden geçen üç akış çizgisi. Açık zeminli olduğu için hem koyu hem açık sekme çubuğunda okunuyor; 16x16'ya kadar test edildi. SVG ve PNG olarak programın içine gömülüyor, ayrı dosya gerekmiyor.
+- Sekme başlığında artık sunucu adı yazıyor (`fenerbahce-lb02 · haproxy-lens`); birden fazla LB'yi aynı anda açtığında hangisinin hangisi olduğu belli oluyor.
+- "En çok istenen adresler" tablosuna 2xx sütunu eklendi; artık bir adresin yanıtlarının dört sınıfa dağılımı tek satırda görünüyor.
+- README'ye marka notu: bu bağımsız bir proje, HAProxy Technologies ile ilgisi yok.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.8.3
 
 - **Kurulum komutu düzeltildi.** İki sorunu vardı: `wget -q` indirme başarısız olduğunda hiçbir şey yazmadan çıkıyordu (komut sessizce bitiyor, klasör boş kalıyordu), ve süslü parantezli adres yazımı yalnızca bash'te açılıyordu. Artık `wget -nv` ile her dosya ve her hata ekrana yazılıyor, adresler açık yazıldığı için komut her kabukta çalışıyor.

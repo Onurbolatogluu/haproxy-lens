@@ -2,7 +2,7 @@
   "name": "haproxy-lens-web",
   "private": true,
   "scripts": {
-    "build": "tailwindcss -c tailwind.config.cjs -i src/input.css -o ../web/dist/app.css --minify && esbuild src/main.jsx --bundle --minify --jsx=automatic --define:process.env.NODE_ENV='\"production\"' --outfile=../web/dist/app.js && cp index.html ../web/dist/index.html"
+    "build": "tailwindcss -c tailwind.config.cjs -i src/input.css -o ../web/dist/app.css --minify && esbuild src/main.jsx --bundle --minify --jsx=automatic --define:process.env.NODE_ENV='\"production\"' --outfile=../web/dist/app.js && cp index.html favicon.svg favicon.png ../web/dist/"
   },
   "dependencies": {
     "lucide-react": "0.383.0",

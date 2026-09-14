@@ -231,7 +231,7 @@ Dosyalar:
 | `access.go` | Panele erişebilecek ağların kontrolü |
 | `cloudflare.go` | Yerleşik Cloudflare IP aralıkları (etiketleme için) |
 | `*_test.go` | Ayrıştırıcı, config uyumu, düzen ve erişim testleri |
-| `webapp/` | Panel arayüzü (React); `build.sh` derleyip programa gömer |
+| `webapp/` | Panel arayüzü (React) ve simge (`favicon.svg`, `favicon.png`); `build.sh` derleyip programa gömer |
 | `deploy/` | `install.sh` ve `uninstall.sh` |
 
 ## Yeni sürüm yayınlama
@@ -244,6 +244,8 @@ Dosyalar:
 
 Sürüm numarası: hata düzeltmesinde son hane (0.8.0 → 0.8.1), yeni özellikte ortadaki hane (0.8.0 → 0.9.0) artar.
 
-## Lisans
+## Lisans ve markalar
 
 MIT. Ayrıntılar için `LICENSE` dosyasına bakın.
+
+Bu bağımsız bir açık kaynak projedir; HAProxy Technologies ile bir ilgisi, ortaklığı ya da onayı yoktur. "HAProxy" adı yalnızca uyumlu olunan yazılımı belirtmek için kullanılır. Projenin simgesi özgündür ve HAProxy'nin logosuyla benzerlik taşımaz.

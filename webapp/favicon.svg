@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="haproxy-lens">
+  <!-- Özgün işaret: mercek (inceleme) ve içinden geçen üç akış çizgisi (yük dağıtımı).
+       Açık zemin bilerek seçildi; hem koyu hem açık sekme çubuğunda okunuyor.
+       16x16'da dağılmasın diye az sayıda ve kalın şekil kullanıldı. -->
+  <rect width="64" height="64" rx="13" fill="#E6EDF3"/>
+  <path d="M44 44 L58 58" stroke="#14202B" stroke-width="11" stroke-linecap="round"/>
+  <circle cx="28" cy="28" r="24" fill="#14202B"/>
+  <g stroke-width="6" stroke-linecap="round">
+    <path d="M11 20 H45" stroke="#6FA8DC"/>
+    <path d="M11 28 H45" stroke="#4FB39A"/>
+    <path d="M11 36 H45" stroke="#6FA8DC"/>
+  </g>
+</svg>
