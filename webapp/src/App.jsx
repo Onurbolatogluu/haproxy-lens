@@ -1308,10 +1308,41 @@ const CLASSES = [
   { id: 5, key: "s5", ad: "Sunucu hatası (5xx)", kisa: "5xx", col: C.bad },
 ];
 
+// Üstteki iki şerit farklı soruları cevaplar: bu şerit "hangi yanıt kodu döndü",
+// diğeri "isteğe ne oldu". Bir 500, HAProxy açısından "sunucu yanıtladı"dır.
+const CLASS_CELLS = [
+  ["Başarılı (2xx)", 0, C.ok],
+  ["Yönlendirme (3xx)", 1, C.info],
+  ["İstemci hatası (4xx)", 2, C.warn],
+  ["Sunucu hatası (5xx)", 3, C.bad],
+];
+
+function ClassStrip({ classes, minutes }) {
+  const c = classes || [0, 0, 0, 0];
+  const toplam = c.reduce((a, b) => a + b, 0);
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-px rounded-lg overflow-hidden" style={{ background: C.line, border: `1px solid ${C.line}` }}>
+      {CLASS_CELLS.map(([ad, i, col]) => (
+        <div key={ad} className="px-4 py-4" style={{ background: C.panel }}>
+          <div className="text-sm inline-flex items-center gap-2" style={{ color: C.muted }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: col }} />{ad}
+          </div>
+          <div className="text-2xl font-semibold tnum mt-1" style={{ color: i === 3 && c[i] > 0 ? C.bad : C.text }}>{fmtNum(c[i])}</div>
+          <div className="text-xs mt-1" style={{ color: C.faint }}>
+            {toplam ? fmtPct(c[i] / toplam) : "—"}, {fmtRate(c[i] / minutes)}/dk
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function CodePathsPanel({ logs, openRows, toggleRow, frozen }) {
   const rows = logs.codePaths || [];
-  const toplam = { s3: 0, s4: 0, s5: 0 };
-  for (const r of rows) { toplam.s3 += r.s3; toplam.s4 += r.s4; toplam.s5 += r.s5; }
+  // Gerçek toplamlar API'den gelir; rows listesi her sınıfın en yoğun 20 adresiyle sınırlıdır,
+  // dolayısıyla sekme sayıları onun üzerinden hesaplanamaz.
+  const cls = logs.classes || [0, 0, 0, 0];
+  const toplam = { s3: cls[1], s4: cls[2], s5: cls[3] };
   // Varsayılan sekme: sunucu hatası varsa o, yoksa istemci hatası, o da yoksa yönlendirme
   const ilk = toplam.s5 > 0 ? 5 : toplam.s4 > 0 ? 4 : 3;
   const [sec, setSec] = useState(null);
@@ -1338,6 +1369,9 @@ function CodePathsPanel({ logs, openRows, toggleRow, frozen }) {
           );
         })}
       </div>
+      {sirali.length > 0 && sirali.length >= 20 && (
+        <p className="text-xs mb-2" style={{ color: C.faint }}>Bu sınıfta en çok görülen 20 adres listeleniyor.</p>
+      )}
       {sirali.length === 0 ? (
         <p className="text-sm" style={{ color: C.faint }}>Bu aralıkta {aktif.ad.toLocaleLowerCase("tr-TR")} dönen adres yok.</p>
       ) : (
@@ -1434,6 +1468,14 @@ function LogSection({ logs, minutes }) {
           Log dosyası okunamıyor: {logs.error}
         </div>
       )}
+      <h3 className="text-sm font-medium mb-2">Hangi yanıt kodu döndü</h3>
+      <ClassStrip classes={logs.classes} minutes={minutes} />
+
+      <h3 className="text-sm font-medium mb-2 mt-6">İsteğe ne oldu</h3>
+      <p className="text-xs mb-2" style={{ color: C.muted }}>
+        Bu şerit isteğin nereye gittiğini anlatır, hangi kodu aldığını değil: sunucu 500 döndürdüyse istek yine
+        "Sunucu yanıtladı" sayılır. Kod dökümü için yukarıdaki şeride ve aşağıdaki "Hangi adres ne döndürüyor" bölümüne bak.
+      </p>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-px rounded-lg overflow-hidden" style={{ background: C.line, border: `1px solid ${C.line}` }}>
         {KIND_ORDER.map((k) => {
           const [label, col, desc] = KIND[k];
@@ -1454,11 +1496,13 @@ function LogSection({ logs, minutes }) {
         <Panel title="En çok istenen adresler" note="Tüm istekler: sunucuya ulaşanlar, yönlendirilenler ve engellenenler. Sayı içeren yol parçaları {id} olarak birleştirildi.">
           {(logs.paths || []).length === 0 ? <p className="text-sm" style={{ color: C.faint }}>Bu aralıkta kayıt yok.</p> : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
+              <table className="w-full text-sm" style={{ borderCollapse: "collapse", minWidth: 460 }}>
                 <thead>
                   <tr className="text-xs" style={{ color: C.muted }}>
                     <th className="py-2 pr-3 font-normal text-left">Adres</th>
                     <th className="py-2 pr-3 font-normal text-right">İstek</th>
+                    <th className="py-2 pr-3 font-normal text-right">3xx</th>
+                    <th className="py-2 pr-3 font-normal text-right">4xx</th>
                     <th className="py-2 pr-3 font-normal text-right">5xx</th>
                     <th className="py-2 font-normal text-right">Ort. süre</th>
                   </tr>
@@ -1473,7 +1517,12 @@ function LogSection({ logs, minutes }) {
                           <div className="text-xs" style={{ color: C.faint }}>{p.backend}</div>
                         </td>
                         <td className="py-2 pr-3 text-right tnum nw align-top">{fmtNum(p.n)}<div className="text-xs" style={{ color: C.faint }}>{perMin(p.n)}</div></td>
-                        <td className="py-2 pr-3 text-right tnum nw align-top" style={{ color: e5 > 0.02 ? C.warn : C.text }}>{p.s5 ? fmtPct(e5) : "—"}</td>
+                        <td className="py-2 pr-3 text-right tnum nw align-top" style={{ color: p.s3 ? C.info : C.faint }}>{p.s3 ? fmtNum(p.s3) : "—"}</td>
+                        <td className="py-2 pr-3 text-right tnum nw align-top" style={{ color: p.s4 ? C.warn : C.faint }}>{p.s4 ? fmtNum(p.s4) : "—"}</td>
+                        <td className="py-2 pr-3 text-right tnum nw align-top" style={{ color: p.s5 ? C.bad : C.faint }}>
+                          {p.s5 ? fmtNum(p.s5) : "—"}
+                          {p.s5 > 0 && <div className="text-xs" style={{ color: C.faint }}>{fmtPct(e5)}</div>}
+                        </td>
                         <td className="py-2 text-right tnum nw align-top">{p.avgMs ? fmtMs(p.avgMs) : "—"}</td>
                       </tr>
                     );

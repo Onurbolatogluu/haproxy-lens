@@ -8,6 +8,7 @@ Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur
 - Backend'ler ve sunucular: durum, sağlık kontrolünün anlamı, bağlantı doluluğu, yanıt süresi, hatalar.
 - Canlı grafikler: saniyedeki istek (yanıt türüne göre) ve trafik; zaman aralığı 5 dk, 15 dk ya da 1 saat seçilebilir.
 - 4xx ve 5xx hatalarının en çok hangi sunucudan döndüğü; hatalar sunuculara eşit dağılmışsa sorunun ortak bir yerde olabileceği uyarısı.
+- Log bölümünde iki ayrı özet: "Hangi yanıt kodu döndü" (2xx/3xx/4xx/5xx) ve "İsteğe ne oldu" (sunucu yanıtladı, engellendi, yönlendirildi...).
 - Log'dan "Hangi adres ne döndürüyor": 3xx, 4xx ve 5xx sekmeleri. Hangi path'in hangi kodu (301, 404, 502...) kaç kez döndürdüğü; HAProxy'nin kendi ürettiği http→https yönlendirmeleri dahil.
 - Hatalı ve engellenen isteklerde satıra tıklayınca açılan ayrıntı: tam adres (alan adı log'da varsa), gerçek yollar ve isteği gönderen IP'ler.
 - Log'dan: en çok istenen adresler, engellenen (403) ve hiçbir backend'e eşleşmeyen (503) istekler, en çok istek atan IP'ler.

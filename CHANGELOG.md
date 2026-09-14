@@ -4,6 +4,21 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.8.2
+
+- Log bölümüne "Hangi yanıt kodu döndü" şeridi eklendi: 2xx, 3xx, 4xx ve 5xx sayıları, oranları ve dakikadaki hızı. Sunucu hataları artık özet düzeyde görünüyor; eskiden yalnızca alt panellere girince fark ediliyordu.
+- Mevcut şeridin başlığı "İsteğe ne oldu" oldu ve altına ne anlattığı yazıldı: bu şerit isteğin nereye gittiğini gösterir, hangi kodu aldığını değil. Sunucu 500 döndürdüyse istek yine "Sunucu yanıtladı" sayılır.
+- **Düzeltme:** "Hangi adres ne döndürüyor" sekmelerindeki 3xx/4xx/5xx sayıları, listelenen en yoğun 20 adresin toplamıydı; gerçek toplamdan düşük görünüyordu. Artık aralığın gerçek toplamını gösteriyor. Liste kırpıldığında bunu ayrıca not düşüyor.
+- "En çok istenen adresler" tablosuna 3xx ve 4xx sütunları eklendi; 5xx sütunu sayıyı ve oranı birlikte gösteriyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -q https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/{haproxy-lens-linux-amd64.tar.gz,SHA256SUMS} && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.8.1
 
 - Ajanın sürümü artık panelde, en üstte adın yanında yazıyor ve `/api/config` ile veriliyor. Kurulum da bittiğinde hangi sürümün çalıştığını söylüyor. Onlarca LB'de hangisinin güncel olduğu böylece görülebiliyor.
