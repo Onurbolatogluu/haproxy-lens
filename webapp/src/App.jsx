@@ -1600,19 +1600,43 @@ function LogSection({ logs, minutes }) {
 
       <div className="mt-4">
         <Panel title="En çok istek atan IP'ler"
-          note="Log'daki IP'ler. Cloudflare üzerinden gelen isteklerde bu IP Cloudflare'e aittir ve etiketlenir; doğrudan gelenlerde kullanıcının kendi IP'sidir.">
+          note="Log'daki IP'ler. Cloudflare üzerinden gelen isteklerde bu IP Cloudflare'e aittir ve etiketlenir; doğrudan gelenlerde kullanıcının kendi IP'sidir. Satıra tıklayınca o IP'nin en çok istediği adresler açılır.">
           {(logs.clients || []).length === 0 ? <p className="text-sm" style={{ color: C.faint }}>Bu aralıkta kayıt yok.</p> : (
-            <ul className="grid gap-x-8 md:grid-cols-2">
-              {clients.slice(0, 20).map((c) => (
-                <li key={c.ip} className="flex items-baseline justify-between gap-3 py-1.5 text-sm" style={{ borderTop: `1px solid ${C.line}` }}>
-                  <span className="tnum">{c.ip}{c.cloudflare && <span className="text-xs ml-2" style={{ color: C.faint }}>Cloudflare</span>}</span>
-                  <span className="tnum whitespace-nowrap">
-                    {fmtNum(c.n)}
-                    {c.blocked ? <span className="text-xs ml-2" style={{ color: C.warn }}>{fmtNum(c.blocked)} engellenen</span> : null}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <div className="grid gap-x-8 md:grid-cols-2 text-sm">
+              {clients.slice(0, 30).map((c, i) => {
+                const key = `ip|${c.ip}`;
+                return (
+                  <ExpandRow key={key} first={i < 2} open={openRows.has(key)} onToggle={() => toggleRow(key)}
+                    head={
+                      <span className="flex items-baseline justify-between gap-3">
+                        <span className="tnum brk">{c.ip}{c.cloudflare && <span className="text-xs ml-2" style={{ color: C.faint }}>Cloudflare</span>}</span>
+                        <span className="tnum nw">
+                          {fmtNum(c.n)}
+                          {c.blocked ? <span className="text-xs ml-2" style={{ color: C.warn }}>{fmtNum(c.blocked)} engellenen</span> : null}
+                        </span>
+                      </span>
+                    }>
+                    {(c.paths || []).length === 0 ? (
+                      <p className="text-xs mt-1" style={{ color: C.faint }}>
+                        Bu IP için adres dökümü tutulmadı (o dakikada çok fazla farklı IP vardı).
+                      </p>
+                    ) : (
+                      <div className="mt-1 rounded-md p-3" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
+                        <div className="text-xs mb-1" style={{ color: C.muted }}>En çok istediği adresler</div>
+                        <ul className="space-y-1">
+                          {c.paths.map((y) => (
+                            <li key={y.name} className="flex items-baseline justify-between gap-3">
+                              <span className="brk">{y.name === "(diğer)" ? "(diğer adresler)" : y.name}</span>
+                              <span className="tnum nw" style={{ color: C.muted }}>×{fmtNum(y.n)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </ExpandRow>
+                );
+              })}
+            </div>
           )}
         </Panel>
       </div>

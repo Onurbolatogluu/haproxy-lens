@@ -11,6 +11,7 @@ Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur
 - Log bölümünde iki ayrı özet: "Hangi yanıt kodu döndü" (2xx/3xx/4xx/5xx) ve "İsteğe ne oldu" (sunucu yanıtladı, engellendi, yönlendirildi...).
 - Log'dan "Hangi adres ne döndürüyor": 3xx, 4xx ve 5xx sekmeleri. Hangi path'in hangi kodu (301, 404, 502...) kaç kez döndürdüğü; HAProxy'nin kendi ürettiği http→https yönlendirmeleri dahil.
 - Hatalı ve engellenen isteklerde satıra tıklayınca açılan ayrıntı: tam adres (alan adı log'da varsa), gerçek yollar ve isteği gönderen IP'ler.
+- "En çok istek atan IP'ler": her IP'nin en çok istediği adresler; bir IP'nin normal kullanıcı mı, tarama botu mu olduğu görülebiliyor.
 - Log'dan: en çok istenen adresler, engellenen (403) ve hiçbir backend'e eşleşmeyen (503) istekler, en çok istek atan IP'ler.
 - Her terimin sade Türkçe açıklaması ve her satır için HAProxy'nin verdiği tüm alanlar.
 

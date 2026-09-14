@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -328,5 +329,62 @@ func TestDetailMemoryCap(t *testing.T) {
 	}
 	if b.kinds[KindDenied] != 2000 {
 		t.Fatalf("sayım eksik: %d", b.kinds[KindDenied])
+	}
+}
+
+func TestClientTopPaths(t *testing.T) {
+	a := NewLogAnalyzer("file:/yok", "")
+	rec := func(ip, path string, status int, kind string) logRecord {
+		srv := "s1"
+		if kind != KindServed {
+			srv = "<NOSRV>"
+		}
+		return logRecord{At: time.Now(), Client: ip, Frontend: "fe", Backend: "be", Server: srv,
+			Status: status, Method: "GET", Path: path, RawPath: path, Kind: kind}
+	}
+	add := func(n int, r logRecord) {
+		for i := 0; i < n; i++ {
+			a.add(r)
+		}
+	}
+	add(300, rec("198.51.100.5", "/api/urun", 200, KindServed))
+	add(120, rec("198.51.100.5", "/api/sepet", 200, KindServed))
+	add(40, rec("198.51.100.5", "/wp-login.php", 403, KindDenied))
+	add(90, rec("203.0.113.9", "/", 200, KindServed))
+
+	rep := a.Report(60)
+	if len(rep.Clients) != 2 || rep.Clients[0].IP != "198.51.100.5" || rep.Clients[0].N != 460 {
+		t.Fatalf("istemciler: %+v", rep.Clients)
+	}
+	c := rep.Clients[0]
+	if c.Blocked != 40 {
+		t.Fatalf("engellenen: %d", c.Blocked)
+	}
+	if len(c.Paths) != 3 || c.Paths[0].Name != "GET /api/urun" || c.Paths[0].N != 300 || c.Paths[1].Name != "GET /api/sepet" {
+		t.Fatalf("adres dökümü: %+v", c.Paths)
+	}
+}
+
+func TestClientDetailMemoryCap(t *testing.T) {
+	a := NewLogAnalyzer("file:/yok", "")
+	now := time.Now()
+	// Çok sayıda farklı IP ve her birinden çok sayıda farklı yol
+	for i := 0; i < 500; i++ {
+		for j := 0; j < 30; j++ {
+			a.add(logRecord{At: now, Client: fmt.Sprintf("198.51.100.%d", i%256), Frontend: "fe", Backend: "be", Server: "s1",
+				Status: 200, Method: "GET", Path: "/y" + strconv.Itoa(j), RawPath: "/y", Kind: KindServed})
+		}
+	}
+	b := a.buckets[now.Unix()/60]
+	if b.clientKeys > maxClientDetail {
+		t.Fatalf("IP ayrıntı sınırı aşıldı: %d", b.clientKeys)
+	}
+	for ip, ca := range b.clients {
+		if ca.Paths != nil && len(ca.Paths) > maxClientPaths+1 {
+			t.Fatalf("%s için %d farklı yol tutulmuş", ip, len(ca.Paths))
+		}
+		if ca.N == 0 {
+			t.Fatalf("%s sayımı boş", ip)
+		}
 	}
 }

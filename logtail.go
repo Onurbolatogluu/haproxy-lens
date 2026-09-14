@@ -280,7 +280,25 @@ func (pa *pathAgg) addCode(code int) {
 	}
 }
 
-type clientAgg struct{ N, Blocked int64 }
+type clientAgg struct {
+	N, Blocked int64
+	Paths      map[string]int64 // "GET /yol" -> sayı; bellek için sınırlı sayıda IP'de tutulur
+}
+
+// Kaç IP için adres dökümü tutulacağı ve IP başına kaç farklı adres saklanacağı.
+// Trafik birkaç IP'de yoğunlaştığı için bu sınırlar pratikte listenin başını etkilemez.
+const (
+	maxClientDetail = 200
+	maxClientPaths  = 12
+)
+
+func addCappedN(m map[string]int64, k string, limit int) {
+	if _, ok := m[k]; ok || len(m) < limit {
+		m[k]++
+	} else {
+		m[otherKey]++
+	}
+}
 
 type bucket struct {
 	kinds      map[string]int64
@@ -289,6 +307,7 @@ type bucket struct {
 	clients    map[string]*clientAgg
 	withHost   int64 // alan adı bulunan satır sayısı
 	detailKeys int   // ayrıntısı tutulan satır sayısı (sınır: maxDetailKeys)
+	clientKeys int   // adres dökümü tutulan IP sayısı (sınır: maxClientDetail)
 }
 
 // Kovada yer varsa yeni bir ayrıntı açar; yoksa nil (sayılar yine tutulur, ayrıntı tutulmaz)
@@ -618,6 +637,17 @@ func (a *LogAnalyzer) add(r logRecord) {
 	if blocked {
 		ca.Blocked++
 	}
+	if ca.Paths == nil && b.clientKeys < maxClientDetail {
+		b.clientKeys++
+		ca.Paths = map[string]int64{}
+	}
+	if ca.Paths != nil {
+		yol := r.Path
+		if r.Method != "" {
+			yol = r.Method + " " + r.Path
+		}
+		addCappedN(ca.Paths, yol, maxClientPaths)
+	}
 }
 
 // Kaynak değiştikçe uygun okuyucuyu başlatır.
@@ -856,10 +886,11 @@ func (a *LogAnalyzer) buildDetail(d *errDetail) *Detail {
 }
 
 type ClientRow struct {
-	IP         string `json:"ip"`
-	N          int64  `json:"n"`
-	Blocked    int64  `json:"blocked"`
-	Cloudflare bool   `json:"cloudflare"`
+	IP         string      `json:"ip"`
+	N          int64       `json:"n"`
+	Blocked    int64       `json:"blocked"`
+	Cloudflare bool        `json:"cloudflare"`
+	Paths      []NameCount `json:"paths,omitempty"` // bu IP'nin en çok istediği adresler
 }
 type LogReport struct {
 	Enabled   bool             `json:"enabled"`
@@ -952,6 +983,14 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 			}
 			t.N += v.N
 			t.Blocked += v.Blocked
+			if v.Paths != nil {
+				if t.Paths == nil {
+					t.Paths = map[string]int64{}
+				}
+				for k, n := range v.Paths {
+					t.Paths[k] += n
+				}
+			}
 		}
 	}
 	for k, v := range paths {
@@ -996,11 +1035,12 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 		rep.Blocked = rep.Blocked[:40]
 	}
 	for k, v := range clients {
-		rep.Clients = append(rep.Clients, ClientRow{IP: k, N: v.N, Blocked: v.Blocked, Cloudflare: a.isCloudflare(k)})
+		rep.Clients = append(rep.Clients, ClientRow{IP: k, N: v.N, Blocked: v.Blocked,
+			Cloudflare: a.isCloudflare(k), Paths: topN(v.Paths, 6)})
 	}
 	sort.Slice(rep.Clients, func(i, j int) bool { return rep.Clients[i].N > rep.Clients[j].N })
-	if len(rep.Clients) > 25 {
-		rep.Clients = rep.Clients[:25]
+	if len(rep.Clients) > 30 {
+		rep.Clients = rep.Clients[:30]
 	}
 	return rep
 }
