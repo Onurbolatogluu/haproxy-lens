@@ -36,10 +36,10 @@ Tüm komutlar HAProxy sunucusunda, root olarak.
 Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar. Adımlar `&&` ile bağlı olduğu için biri hata verirse sonrakiler çalışmaz.
 
 ```bash
-cd /root && rm -rf lens && mkdir lens && cd lens && wget -q https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/{haproxy-lens-linux-amd64.tar.gz,SHA256SUMS} && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
 ```
 
-Doğrulama satırı `haproxy-lens-linux-amd64.tar.gz: OK` demeli. ARM sunucularda (`uname -m` çıktısı `aarch64` ise) `amd64` yerine `arm64` yazın.
+wget her dosya için bir satır yazar, sonra doğrulama `haproxy-lens-linux-amd64.tar.gz: OK` demeli. Hiçbir şey yazılmadan komut biterse sunucunun GitHub'a erişimi yok demektir; aşağıdaki "Sunucunun internete çıkışı yoksa" bölümüne bakın. ARM sunucularda (`uname -m` çıktısı `aarch64` ise) `amd64` yerine `arm64` yazın.
 
 Kurulum önce bir rapor, sonra yapılacakları gösterir ve onay ister. Sonunda şu iki satırı görmelisin:
 
