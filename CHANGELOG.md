@@ -7,7 +7,7 @@ sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 ## 0.8.4
 
 - Panelin kendi simgesi (favicon) eklendi: mercek ve içinden geçen üç akış çizgisi. Açık zeminli olduğu için hem koyu hem açık sekme çubuğunda okunuyor; 16x16'ya kadar test edildi. SVG ve PNG olarak programın içine gömülüyor, ayrı dosya gerekmiyor.
-- Sekme başlığında artık sunucu adı yazıyor (`fenerbahce-lb02 · haproxy-lens`); birden fazla LB'yi aynı anda açtığında hangisinin hangisi olduğu belli oluyor.
+- Sekme başlığında artık sunucu adı yazıyor (`fbe-lb02 · haproxy-lens`); birden fazla LB'yi aynı anda açtığında hangisinin hangisi olduğu belli oluyor.
 - "En çok istenen adresler" tablosuna 2xx sütunu eklendi; artık bir adresin yanıtlarının dört sınıfa dağılımı tek satırda görünüyor.
 - README'ye marka notu: bu bağımsız bir proje, HAProxy Technologies ile ilgisi yok.
 
