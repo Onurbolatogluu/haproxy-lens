@@ -713,14 +713,20 @@ function ErrorSummaries({ b }) {
 // "Bu backend'e hiç trafik gitmemeli" sorusunun cevabı: log'da o backend'e gelen
 // isteklerin adres ve IP dökümü. Stats'taki toplam HAProxy açıldığından beridir,
 // log ise yalnızca seçili aralığı kapsar; ikisi farklı şeyler söyler, panel bunu yazar.
-function BackendTraffic({ b }) {
+function BackendTraffic({ name }) {
   const { logs, label } = useContext(WinCtx);
-  if (!logs?.enabled) return null;
-  const row = (logs.backends || []).find((x) => x.backend === b.pxname);
   const kutu = { background: C.panel2 };
+  if (!logs?.enabled) {
+    return (
+      <p className="rounded-md px-4 py-2.5 text-sm" style={{ ...kutu, color: C.muted }}>
+        Bu sunucuda log analizi kapalı olduğu için adres ve IP dökümü yok. Sebebi aşağıdaki "Log'dan gelenler" bölümünde yazıyor.
+      </p>
+    );
+  }
+  const row = (logs.backends || []).find((x) => x.backend === name);
   if (!row || row.n === 0) {
     return (
-      <p className="rounded-md px-4 py-2.5 mb-5 text-sm" style={{ ...kutu, color: C.muted }}>
+      <p className="rounded-md px-4 py-2.5 text-sm" style={{ ...kutu, color: C.muted }}>
         {cap(label)} içinde bu backend'e log'da hiç istek görünmüyor. Yukarıdaki toplam, HAProxy açıldığından beri birikmiş sayıdır.
       </p>
     );
@@ -748,7 +754,7 @@ function BackendTraffic({ b }) {
     </div>
   );
   return (
-    <div className="rounded-md px-4 py-3 mb-5" style={kutu}>
+    <div className="rounded-md px-4 py-3" style={kutu}>
       <div className="text-sm mb-3">
         {cap(label)} içinde bu backend'e log'da <b>{fmtNum(row.n)}</b> istek geldi
         {sinif.length > 0 && (
@@ -792,7 +798,6 @@ function BackendDetail({ b, rates, onFields }) {
         <Fact k="cli_abrt">{fmtNum(num(b.cli_abrt))}</Fact>
       </dl>
       <CodeBar row={b} />
-      <BackendTraffic b={b} />
       <ErrorSummaries b={b} />
       <ServerTable servers={b.servers} rates={rates} onFields={onFields} />
       <button type="button" className="mt-4 text-sm" style={{ color: C.info }} onClick={() => onFields(b)}>
@@ -847,41 +852,63 @@ function FrontendTable({ model, rates, onFields }) {
   );
 }
 
-function RankRow({ label, sub, value, share, color }) {
+// Sıralı liste satırı: tıklanınca o backend'e gelen adres ve IP dökümü açılır
+function RankRow({ label, sub, value, share, color, open, onToggle, children, first }) {
   return (
-    <li className="py-2">
-      <div className="flex items-baseline justify-between gap-3 text-sm">
-        <span className="truncate" style={{ minWidth: 0 }} title={label}>
-          <span className="font-medium">{label}</span>
-          {sub && <span className="text-xs ml-2" style={{ color: C.faint }}>{sub}</span>}
+    <div style={{ borderTop: first ? "none" : `1px solid ${C.line}` }}>
+      <button type="button" onClick={onToggle} aria-expanded={open} className="hl-row w-full text-left px-1 py-2 rounded">
+        <span className="flex gap-2 items-start">
+          <span className="mt-0.5" style={{ color: C.muted, flexShrink: 0 }}>
+            {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </span>
+          <span className="flex-1" style={{ minWidth: 0 }}>
+            <span className="flex items-baseline justify-between gap-3 text-sm">
+              <span className="truncate" style={{ minWidth: 0 }} title={label}>
+                <span className="font-medium">{label}</span>
+                {sub && <span className="text-xs ml-2" style={{ color: C.faint }}>{sub}</span>}
+              </span>
+              <span className="tnum nw">{value}</span>
+            </span>
+            <span className="block" style={{ height: 4, background: C.line, borderRadius: 2, marginTop: 6 }}>
+              <span className="block" style={{ width: `${Math.max(1.5, share * 100)}%`, height: 4, background: color, borderRadius: 2 }} />
+            </span>
+          </span>
         </span>
-        <span className="tnum whitespace-nowrap">{value}</span>
-      </div>
-      <div style={{ height: 4, background: C.line, borderRadius: 2, marginTop: 6 }}>
-        <div style={{ width: `${Math.max(1.5, share * 100)}%`, height: 4, background: color, borderRadius: 2 }} />
-      </div>
-    </li>
+      </button>
+      {open && <div className="pl-6 pb-3 pt-1">{children}</div>}
+    </div>
   );
 }
 
 function TopBackends({ model, rates }) {
   const { wrates, label } = useContext(WinCtx);
+  const [acik, setAcik] = useState(() => new Set());
+  const toggle = (ad) => setAcik((cur) => {
+    const n = new Set(cur);
+    if (n.has(ad)) n.delete(ad); else n.add(ad);
+    return n;
+  });
   const win = Object.keys(wrates).length > 0;
   const items = model.backends
     .map((b) => ({ name: b.pxname, n: wrates[keyOf(b)]?.n ?? 0, rps: rpsOf(b, rates) || 0, tot: num(b.req_tot) ?? num(b.stot) ?? 0 }))
     .sort((a, b) => (win ? b.n - a.n : b.tot - a.tot) || a.name.localeCompare(b.name, "tr"));
   const total = items.reduce((a, b) => a + (win ? b.n : b.tot), 0) || 1;
+  const sirali = useStableOrder(items, (it) => it.name, items.map((it) => it.name), acik.size > 0);
   return (
-    <Panel title="En çok istek alan backend'ler" note={win ? `${cap(label)} gelen isteğe göre sıralı.` : "HAProxy açıldığından beri toplam isteğe göre sıralı."}>
-      <ul>
-        {items.map((it) => {
+    <Panel title="En çok istek alan backend'ler"
+      note={`${win ? `${cap(label)} gelen isteğe göre sıralı.` : "HAProxy açıldığından beri toplam isteğe göre sıralı."} Satıra tıklayınca o backend'e gelen adresler ve IP'ler açılır. "toplam", HAProxy açıldığından beri birikmiş sayıdır.`}>
+      <div>
+        {sirali.map((it, i) => {
           const v = win ? it.n : it.tot;
           return (
-            <RankRow key={it.name} label={it.name} sub={`toplam ${fmtNum(it.tot)}`}
-              value={win ? `${fmtNum(it.n)} istek, ${fmtPct(v / total)}` : fmtPct(v / total)} share={v / total} color={C.info} />
+            <RankRow key={it.name} first={i === 0} label={it.name} sub={`toplam ${fmtNum(it.tot)}`}
+              value={win ? `${fmtNum(it.n)} istek, ${fmtPct(v / total)}` : fmtPct(v / total)} share={v / total} color={C.info}
+              open={acik.has(it.name)} onToggle={() => toggle(it.name)}>
+              <BackendTraffic name={it.name} />
+            </RankRow>
           );
         })}
-      </ul>
+      </div>
     </Panel>
   );
 }

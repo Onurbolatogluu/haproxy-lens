@@ -4,6 +4,21 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.10.1
+
+- Backend başına adres ve IP dökümü yanlış yerdeydi: backend ayrıntısının içine konmuştu. Artık **"En çok istek alan backend'ler"** panelinde; satıra tıklayınca o backend'e gelen adresler ve IP'ler açılıyor. Böylece "bu backend'e hiç trafik gitmemeli" sorusu listeye bakarken cevaplanıyor.
+- Satır açıkken liste yenilemelerde yeniden sıralanmıyor.
+- Panel açıklamasına "toplam" sütununun HAProxy açıldığından beri birikmiş sayı olduğu, log dökümünün ise yalnızca seçili aralığı kapsadığı eklendi.
+- Log analizi kapalı olan sunucularda açılan satır bunu ve sebebinin nerede yazdığını söylüyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.10.0
 
 - Bir backend'i açınca artık **o backend'e gelen isteklerin dökümü** görünüyor: kaç istek, hangi yanıt sınıfları, en çok istenen 10 adres ve en çok istek atan 10 IP. "Bu backend'e hiç trafik gitmemeli" dediğin bir yere kimin, nereye istek attığı tek bakışta çıkıyor.
