@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, createContext, useContext } from "react";
+import { useState, useEffect, useRef, useMemo, createContext, useContext, Fragment } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { ChevronDown, ChevronRight, Info, X, Pause, Play } from "lucide-react";
 
@@ -1625,7 +1625,7 @@ function LogSection({ logs, minutes }) {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2 mt-4">
-        <Panel title="En çok istenen adresler" note="Tüm istekler: sunucuya ulaşanlar, yönlendirilenler ve engellenenler. Sayı içeren yol parçaları {id} olarak birleştirildi.">
+        <Panel title="En çok istenen adresler" note="Tüm istekler: sunucuya ulaşanlar, yönlendirilenler ve engellenenler. Satıra tıklayınca o adrese en çok istek yapan IP'ler açılır. Sayı içeren yol parçaları {id} olarak birleştirildi.">
           {(logs.paths || []).length === 0 ? <p className="text-sm" style={{ color: C.faint }}>Bu aralıkta kayıt yok.</p> : (
             <div className="overflow-x-auto">
               {/* Sınıf sütunları küçük punto ve dar boşlukla: altı sütun yarım genişlikteki panele sığsın */}
@@ -1644,11 +1644,17 @@ function LogSection({ logs, minutes }) {
                 <tbody>
                   {paths.slice(0, 20).map((p, i) => {
                     const e5 = p.n ? p.s5 / p.n : 0;
+                    const key = `y|${p.backend}|${p.method}|${p.path}`;
+                    const acik = openRows.has(key);
                     return (
-                      <tr key={i} style={{ borderTop: `1px solid ${C.line}` }}>
+                      <Fragment key={key}>
+                      <tr className="hl-row" style={{ borderTop: `1px solid ${C.line}`, cursor: "pointer" }} onClick={() => toggleRow(key)}>
                         <td className="py-2 pr-3 align-top brk">
-                          <span style={{ color: C.faint }}>{p.method} </span>{p.path}
-                          <div className="text-xs" style={{ color: C.faint }}>{p.backend}</div>
+                          <span className="inline-flex items-start gap-1">
+                            <span style={{ color: C.muted, marginTop: 2 }}>{acik ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
+                            <span><span style={{ color: C.faint }}>{p.method} </span>{p.path}</span>
+                          </span>
+                          <div className="text-xs" style={{ color: C.faint, paddingLeft: 18 }}>{p.backend}</div>
                         </td>
                         <td className="py-2 pr-2 text-right tnum nw align-top">{fmtNum(p.n)}<div className="text-xs" style={{ color: C.faint }}>{perMin(p.n)}</div></td>
                         <td className="py-2 pr-2 text-right text-xs tnum nw align-top" style={{ color: p.s2 ? C.ok : C.faint }}>{p.s2 ? fmtNum(p.s2) : "—"}</td>
@@ -1660,6 +1666,44 @@ function LogSection({ logs, minutes }) {
                         </td>
                         <td className="py-2 text-right text-xs tnum nw align-top">{p.avgMs ? fmtMs(p.avgMs) : "—"}</td>
                       </tr>
+                      {acik && (
+                        <tr>
+                          <td colSpan={7} className="pb-3" style={{ paddingLeft: 18 }}>
+                            {(p.ips || []).length === 0 ? (
+                              <p className="text-xs" style={{ color: C.faint }}>
+                                Bu adres için IP dökümü tutulmadı (o dakikada çok fazla farklı adres vardı ya da kayıt seçili aralığın eski kısmından geliyor).
+                              </p>
+                            ) : (
+                              <div className="rounded-md p-3" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
+                                <div className="text-xs mb-2" style={{ color: C.muted }}>
+                                  Bu adrese en çok istek yapan IP'ler (yanıt kodundan bağımsız, en çok {p.ips.length > 1 ? p.ips.length - 1 : 1} IP)
+                                </div>
+                                <ul className="grid gap-x-6 md:grid-cols-2 text-sm">
+                                  {p.ips.map((c) => (
+                                    <li key={c.ip} className="py-1" style={{ borderTop: `1px solid ${C.line}` }}>
+                                      <span className="flex items-baseline justify-between gap-3">
+                                        <span className="tnum brk" style={{ color: c.ip === "(diğer)" ? C.faint : C.text }}>
+                                          {c.ip === "(diğer)" ? "(listeye girmeyen diğer IP'ler)" : c.ip}
+                                          {c.cloudflare && <span className="text-xs ml-2" style={{ color: C.faint }}>Cloudflare</span>}
+                                        </span>
+                                        <span className="tnum nw">{fmtNum(c.n)}</span>
+                                      </span>
+                                      <span className="flex flex-wrap gap-x-3 text-xs" style={{ color: C.faint }}>
+                                        {(c.codes || []).map((n, i) => (n > 0 ? (
+                                          <span key={i} className="nw" style={{ color: CODE_PARTS[i][2] }}>
+                                            {["2xx", "3xx", "4xx", "5xx"][i]} {fmtNum(n)}
+                                          </span>
+                                        ) : null))}
+                                      </span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     );
                   })}
                 </tbody>

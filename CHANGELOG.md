@@ -4,6 +4,23 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.13.0
+
+- **"En çok istenen adresler" satırları artık açılıyor:** o adrese en çok istek yapan **20 IP**, sayılarıyla ve Cloudflare etiketiyle. Her IP'nin yanında o adreste aldığı yanıt kodlarının dağılımı da var (2xx/3xx/4xx/5xx).
+- Döküm yanıt kodundan bağımsız: bir adres yalnızca 2xx da dönse, yalnızca 5xx de dönse IP'ler görünür. Eskiden IP dökümü sadece hata alan adresler için tutuluyordu.
+- Listeye sığmayan IP'ler "(diğer)" satırında toplanıyor; böylece IP'lerin toplamı her zaman adresin toplam isteğine eşit.
+- Sınıra takılınca **ilk görülen değil en çok istek yapan** IP'ler tutuluyor: harita dolduğunda sayıya göre budanıyor, böylece sonradan başlayan yoğun bir IP de listeye girebiliyor.
+- Bellek için sınırlar: dakikada en fazla 400 adresin IP dökümü tutulur. Ölçülen maliyet: varsayılan ayarda 47 MB yerine **49 MB**; README'deki tablo güncellendi.
+- Bu döküm, tam adres/gerçek yol ayrıntısından daha uzun yaşar: `DETAIL` yerine `LISTS` süresi boyunca (varsayılan 6 saat) kalır.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.12.2
 
 - README'ye **"Ne kadar geriye, ne kadar ayrıntı"** bölümü eklendi: verinin yaşlandıkça hangi kademelerden geçtiği (0-1 saat her şey, 1-6 saat listeler, 6-24 saat yalnızca sayılar), her kademeyi hangi parametrenin belirlediği ve nasıl değiştirileceği tek tabloda.

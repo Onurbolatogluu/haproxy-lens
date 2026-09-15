@@ -187,9 +187,10 @@ type blockKey struct{ Kind, Method, Path string }
 
 type pathAgg struct {
 	N, S2, S3, S4, S5, SumTa, NTa int64
-	Codes                         map[int]int64 // spesifik kod (301, 404, 502...) -> sayı; 3xx ve üstü
-	Kind                          string        // bu yoldaki kayıtların türü; karışıksa ""
-	Err                           *errDetail    // 2xx dışındaki isteklerin ayrıntısı
+	Codes                         map[int]int64     // spesifik kod (301, 404, 502...) -> sayı; 3xx ve üstü
+	Kind                          string            // bu yoldaki kayıtların türü; karışıksa ""
+	Err                           *errDetail        // 2xx dışındaki isteklerin ayrıntısı
+	IPs                           map[string]*ipAgg // bu adrese en çok istek yapan IP'ler (her yanıt kodu için)
 }
 
 func (pa *pathAgg) addKind(k string) {
@@ -210,6 +211,8 @@ type blockAgg struct {
 // her listede en fazla maxDetailValues değerin ayrıntısı tutulur; gerisi "(diğer)" olur.
 const (
 	maxDetailKeys   = 300
+	maxPathIPKeys   = 400 // IP dökümü tutulan yol sayısı (dakika başına)
+	maxPathIPs      = 20  // yol başına saklanan farklı IP sayısı
 	maxDetailValues = 6
 	otherKey        = "(diğer)"
 )
@@ -293,6 +296,60 @@ const (
 	maxClientPaths  = 12
 )
 
+// Bir IP'nin bir adrese yaptığı istekler; sayaçlar int32 çünkü dakikalık kova başına
+// bir IP'nin milyarlarca isteği olamaz ve bellek önemli.
+type ipAgg struct {
+	N int64
+	C [4]int32 // 2xx, 3xx, 4xx, 5xx
+}
+
+// Sınıra takılınca ilk görülen IP'leri değil EN ÇOK İSTEK YAPANLARI tutar:
+// harita iki katına çıkınca sayıya göre budanır, elenenler "(diğer)" altında toplanır.
+// Böylece geç başlayan yoğun bir IP de listeye girebilir.
+func addIP(m map[string]*ipAgg, ip string, kod int, limit int) {
+	v := m[ip]
+	if v == nil {
+		if len(m) >= limit*2 {
+			budaIP(m, limit)
+			v = m[ip]
+		}
+		if v == nil {
+			v = &ipAgg{}
+			m[ip] = v
+		}
+	}
+	v.N++
+	if i := kod/100 - 2; i >= 0 && i < 4 {
+		v.C[i]++
+	}
+}
+
+func budaIP(m map[string]*ipAgg, limit int) {
+	tip := make([]string, 0, len(m))
+	for k := range m {
+		if k != otherKey {
+			tip = append(tip, k)
+		}
+	}
+	sort.Slice(tip, func(i, j int) bool { return m[tip[i]].N > m[tip[j]].N })
+	if len(tip) <= limit {
+		return
+	}
+	diger := m[otherKey]
+	if diger == nil {
+		diger = &ipAgg{}
+		m[otherKey] = diger
+	}
+	for _, k := range tip[limit:] {
+		v := m[k]
+		diger.N += v.N
+		for i := range diger.C {
+			diger.C[i] += v.C[i]
+		}
+		delete(m, k)
+	}
+}
+
 func addCappedN(m map[string]int64, k string, limit int) {
 	if _, ok := m[k]; ok || len(m) < limit {
 		m[k]++
@@ -322,6 +379,7 @@ type bucket struct {
 	level      int      // 0 tam ayrıntı, 1 sadeleşmiş, 2 en sade
 	withHost   int64    // alan adı bulunan satır sayısı
 	detailKeys int      // ayrıntısı tutulan satır sayısı (sınır: maxDetailKeys)
+	pathIPKeys int      // IP dökümü tutulan yol sayısı (sınır: maxPathIPKeys)
 	clientKeys int      // adres dökümü tutulan IP sayısı (sınır: maxClientDetail)
 }
 
@@ -606,7 +664,7 @@ const (
 func (b *bucket) sadelestir(hedef int) {
 	if hedef >= 1 {
 		for _, v := range b.paths {
-			v.Err = nil
+			v.Err = nil // tam adres/gerçek yol ayrıntısı düşer; IP dökümü (küçük) kalır
 		}
 		for _, v := range b.blocked {
 			v.Det = nil
@@ -745,9 +803,9 @@ func (a *LogAnalyzer) SetBudget(bayt int64) {
 func (b *bucket) agirlik() int64 {
 	switch b.level {
 	case 0:
-		return int64(len(b.paths))*600 + int64(len(b.blocked))*400 + int64(len(b.clients))*250 + int64(len(b.backends))*200
+		return int64(len(b.paths))*1600 + int64(len(b.blocked))*400 + int64(len(b.clients))*250 + int64(len(b.backends))*200
 	case 1:
-		return int64(len(b.paths))*250 + int64(len(b.blocked))*150 + int64(len(b.clients))*120 + int64(len(b.backends))*200
+		return int64(len(b.paths))*1200 + int64(len(b.blocked))*150 + int64(len(b.clients))*120 + int64(len(b.backends))*200
 	default:
 		return int64(len(b.backends))*200 + 500
 	}
@@ -879,6 +937,14 @@ func (a *LogAnalyzer) add(r logRecord) {
 			if pa.Err = b.detail(pa.Err); pa.Err != nil {
 				pa.Err.add(r)
 			}
+		}
+		// Adrese en çok istek yapan IP'ler; yanıt koduna bakılmaksızın
+		if pa.IPs == nil && b.pathIPKeys < maxPathIPKeys {
+			b.pathIPKeys++
+			pa.IPs = map[string]*ipAgg{}
+		}
+		if pa.IPs != nil {
+			addIP(pa.IPs, r.Client, r.Status, maxPathIPs)
 		}
 	}
 	if blocked {
@@ -1065,15 +1131,16 @@ func (a *LogAnalyzer) setErr(s string) {
 // ---------- Rapor ----------
 
 type PathRow struct {
-	Backend string  `json:"backend"`
-	Method  string  `json:"method"`
-	Path    string  `json:"path"`
-	N       int64   `json:"n"`
-	S2      int64   `json:"s2"`
-	S3      int64   `json:"s3"`
-	S4      int64   `json:"s4"`
-	S5      int64   `json:"s5"`
-	AvgMs   float64 `json:"avgMs"`
+	Backend string      `json:"backend"`
+	Method  string      `json:"method"`
+	Path    string      `json:"path"`
+	N       int64       `json:"n"`
+	S2      int64       `json:"s2"`
+	S3      int64       `json:"s3"`
+	S4      int64       `json:"s4"`
+	S5      int64       `json:"s5"`
+	AvgMs   float64     `json:"avgMs"`
+	IPs     []PathIPRow `json:"ips,omitempty"` // bu adrese en çok istek yapan IP'ler
 }
 
 // Belirli bir kodu (404, 502...) en çok alan yollar
@@ -1157,6 +1224,47 @@ func topPerClass(rows []CodePathRow, per int) []CodePathRow {
 	return out
 }
 
+func topIPs(m map[string]*ipAgg, n int) []struct {
+	ip string
+	v  *ipAgg
+} {
+	out := make([]struct {
+		ip string
+		v  *ipAgg
+	}, 0, len(m))
+	for k, v := range m {
+		out = append(out, struct {
+			ip string
+			v  *ipAgg
+		}{k, v})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if (out[i].ip == otherKey) != (out[j].ip == otherKey) {
+			return out[j].ip == otherKey // "(diğer)" hep sonda
+		}
+		if out[i].v.N != out[j].v.N {
+			return out[i].v.N > out[j].v.N
+		}
+		return out[i].ip < out[j].ip
+	})
+	// Listeye sığmayanlar "(diğer)" satırında toplanır; böylece IP'lerin toplamı
+	// her zaman yolun toplam isteğine eşit olur.
+	if len(out) > n {
+		diger := &ipAgg{}
+		for _, x := range out[n:] {
+			diger.N += x.v.N
+			for i := range diger.C {
+				diger.C[i] += x.v.C[i]
+			}
+		}
+		out = append(out[:n:n], struct {
+			ip string
+			v  *ipAgg
+		}{otherKey, diger})
+	}
+	return out
+}
+
 func topN(m map[string]int64, n int) []NameCount {
 	out := make([]NameCount, 0, len(m))
 	for k, v := range m {
@@ -1192,6 +1300,14 @@ func (a *LogAnalyzer) buildDetail(d *errDetail) *Detail {
 		out.IPs = append(out.IPs, ClientRow{IP: ip.Name, N: ip.N, Cloudflare: a.isCloudflare(ip.Name)})
 	}
 	return out
+}
+
+// Bir adrese istek yapan IP ve o istekler içindeki yanıt kodu dağılımı
+type PathIPRow struct {
+	IP         string   `json:"ip"`
+	N          int64    `json:"n"`
+	Codes      [4]int32 `json:"codes"` // 2xx, 3xx, 4xx, 5xx
+	Cloudflare bool     `json:"cloudflare"`
 }
 
 type ClientRow struct {
@@ -1277,6 +1393,22 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 				}
 				t.Err.merge(v.Err)
 			}
+			if v.IPs != nil {
+				if t.IPs == nil {
+					t.IPs = map[string]*ipAgg{}
+				}
+				for ip, n := range v.IPs {
+					h := t.IPs[ip]
+					if h == nil {
+						h = &ipAgg{}
+						t.IPs[ip] = h
+					}
+					h.N += n.N
+					for i := range h.C {
+						h.C[i] += n.C[i]
+					}
+				}
+			}
 			for code, n := range v.Codes {
 				t.addCodeN(code, n)
 			}
@@ -1317,6 +1449,9 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 		row := PathRow{Backend: k.Backend, Method: k.Method, Path: k.Path, N: v.N, S2: v.S2, S3: v.S3, S4: v.S4, S5: v.S5}
 		if v.NTa > 0 {
 			row.AvgMs = float64(v.SumTa) / float64(v.NTa)
+		}
+		for _, ip := range topIPs(v.IPs, maxPathIPs) {
+			row.IPs = append(row.IPs, PathIPRow{IP: ip.ip, N: ip.v.N, Codes: ip.v.C, Cloudflare: a.isCloudflare(ip.ip)})
 		}
 		rep.Paths = append(rep.Paths, row)
 	}

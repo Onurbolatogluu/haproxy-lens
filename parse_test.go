@@ -575,3 +575,86 @@ func TestBozukKayitDosyasi(t *testing.T) {
 		t.Fatal("bozuk dosyadan veri yüklenmiş")
 	}
 }
+
+func TestYolBasinaIPDokumu(t *testing.T) {
+	a := NewLogAnalyzer("file:/yok", "")
+	kayit := func(ip, yol string, kod int) logRecord {
+		return logRecord{At: time.Now(), Client: ip, Frontend: "fe", Backend: "be_web", Server: "s1",
+			Status: kod, Method: "POST", Path: yol, RawPath: yol, Kind: KindServed}
+	}
+	ekle := func(n int, r logRecord) {
+		for i := 0; i < n; i++ {
+			a.add(r)
+		}
+	}
+	// Başarılı (2xx) bir adres: eskiden hiç IP dökümü tutulmuyordu
+	ekle(900, kayit("162.158.1.1", "/cmsapi/webanalytics/LogHit", 200))
+	ekle(300, kayit("198.51.100.7", "/cmsapi/webanalytics/LogHit", 200))
+	ekle(50, kayit("198.51.100.7", "/cmsapi/webanalytics/LogHit", 404))
+	ekle(20, kayit("203.0.113.9", "/baska", 200))
+
+	rep := a.Report(60)
+	var row *PathRow
+	for i := range rep.Paths {
+		if rep.Paths[i].Path == "/cmsapi/webanalytics/LogHit" {
+			row = &rep.Paths[i]
+		}
+	}
+	if row == nil || row.N != 1250 {
+		t.Fatalf("yol satırı: %+v", row)
+	}
+	if len(row.IPs) != 2 {
+		t.Fatalf("IP dökümü: %+v", row.IPs)
+	}
+	// En çok istek yapan IP başta ve sayı tüm yanıt kodlarını kapsamalı
+	if row.IPs[0].IP != "162.158.1.1" || row.IPs[0].N != 900 || !row.IPs[0].Cloudflare {
+		t.Fatalf("ilk IP: %+v", row.IPs[0])
+	}
+	if row.IPs[0].Codes != [4]int32{900, 0, 0, 0} {
+		t.Fatalf("ilk IP kod dağılımı: %v", row.IPs[0].Codes)
+	}
+	// İkinci IP'nin istekleri hem 2xx hem 4xx
+	if row.IPs[1].IP != "198.51.100.7" || row.IPs[1].N != 350 {
+		t.Fatalf("ikinci IP: %+v", row.IPs[1])
+	}
+	if row.IPs[1].Codes != [4]int32{300, 0, 50, 0} {
+		t.Fatalf("ikinci IP kod dağılımı: %v", row.IPs[1].Codes)
+	}
+}
+
+func TestYolIPSiniri(t *testing.T) {
+	a := NewLogAnalyzer("file:/yok", "")
+	// 30 farklı IP; en çok istek yapan 20'si listelenmeli, gerisi "(diğer)" altında toplanmalı
+	for i := 0; i < 30; i++ {
+		for j := 0; j <= i; j++ {
+			a.add(logRecord{At: time.Now(), Client: fmt.Sprintf("198.51.100.%d", i), Frontend: "fe",
+				Backend: "be", Server: "s1", Status: 200, Method: "GET", Path: "/x", RawPath: "/x", Kind: KindServed})
+		}
+	}
+	rep := a.Report(60)
+	if len(rep.Paths) != 1 {
+		t.Fatalf("yol sayısı: %d", len(rep.Paths))
+	}
+	ips := rep.Paths[0].IPs
+	if len(ips) != maxPathIPs+1 { // 20 IP + "(diğer)"
+		t.Fatalf("listelenen IP sayısı: %d, beklenen %d", len(ips), maxPathIPs+1)
+	}
+	// Listede EN ÇOK istek yapanlar olmalı (ilk görülenler değil)
+	if ips[0].IP != "198.51.100.29" || ips[0].N != 30 {
+		t.Fatalf("en çok istek yapan IP listede değil: %+v", ips[0])
+	}
+	if ips[0].N < ips[1].N {
+		t.Fatalf("sıralama bozuk: %+v", ips[:2])
+	}
+	// Toplam sayım eksiksiz olmalı (listede olmayanlar "(diğer)" altında)
+	var toplam int64
+	for _, c := range ips {
+		toplam += c.N
+	}
+	if toplam != rep.Paths[0].N {
+		t.Fatalf("IP toplamı %d, yol toplamı %d", toplam, rep.Paths[0].N)
+	}
+	if ips[len(ips)-1].IP != otherKey {
+		t.Fatalf("son satır '(diğer)' olmalı: %+v", ips[len(ips)-1])
+	}
+}

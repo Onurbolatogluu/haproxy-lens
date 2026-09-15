@@ -73,17 +73,21 @@ func TestBellekKullanimi(t *testing.T) {
 	if testing.Short() {
 		t.Skip("uzun süren ölçüm")
 	}
-	// Varsayılan kurulum: 24 saat tam ayrıntı. Bütçe (500 MB) ve servis tavanı (768M)
-	// buna göre seçildi; ölçüm bu varsayımı doğrular.
-	tam := bellekOlc(t, 1440, 1440, 1440)
-	t.Logf("24 saat tam ayrıntı (varsayılan kurulum): %d MB", tam)
-	if tam > 600 {
-		t.Fatalf("%d MB, varsayılan bütçenin (500 MB) belirgin üstünde", tam)
+	// Varsayılan kurulum: sayılar 24 saat, listeler 6 saat, tam ayrıntı 1 saat.
+	// Bellek bütçesi 250 MB olduğuna göre varsayılan bunun belirgin altında kalmalı.
+	varsayilan := bellekOlc(t, 1440, detayDakika, listeDakika)
+	t.Logf("24 saat, VARSAYILAN (ayrıntı %d dk, listeler %d dk): %d MB", detayDakika, listeDakika, varsayilan)
+	if varsayilan > 150 {
+		t.Fatalf("varsayılan ayar %d MB kullanıyor; bütçe 250 MB, bu fazla", varsayilan)
 	}
+	// İsteğe bağlı ayarların maliyeti; README'deki tablo bu ölçümlerden geliyor
 	for _, c := range []struct {
 		ad           string
 		detay, liste int
-	}{{"ayrıntı 1 saat, liste 6 saat", 60, 360}, {"ayrıntı 6 saat, liste 24 saat", 360, 1440}} {
+	}{
+		{"DETAIL=6h LISTS=24h", 360, 1440},
+		{"DETAIL=24h LISTS=24h (her şey tam ayrıntı)", 1440, 1440},
+	} {
 		t.Logf("24 saat, %s: %d MB", c.ad, bellekOlc(t, 1440, c.detay, c.liste))
 	}
 }
