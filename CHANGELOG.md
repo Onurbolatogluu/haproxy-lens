@@ -4,6 +4,20 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.12.2
+
+- README'ye **"Ne kadar geriye, ne kadar ayrıntı"** bölümü eklendi: verinin yaşlandıkça hangi kademelerden geçtiği (0-1 saat her şey, 1-6 saat listeler, 6-24 saat yalnızca sayılar), her kademeyi hangi parametrenin belirlediği ve nasıl değiştirileceği tek tabloda.
+- Kurulum seçenekleri tablosu güncellendi: `BUDGET` eksikti, `MEMMAX` varsayılanı yanlış yazıyordu (256M yerine 512M), `DETAIL` ve `LISTS` ayrı satırlara alınıp ne işe yaradıkları açıklandı.
+- Özellik listesindeki zaman aralıkları eskiydi (6 saat ve 24 saat eklenmişti, yazmıyordu).
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.12.1
 
 - **Test düzeltmesi (CI hatası):** Saldırı testi, doldurduğu süreyle aynı genişlikte bir zaman penceresi istiyordu. Test birkaç saniye sürerken dakika sınırı aşılırsa en eski dakika pencerenin dışında kalıyor ve sayım eksik görünüyordu; CI'da tam bu oldu. Pencere artık birkaç dakika geniş tutuluyor. Aynı kırılganlık üç testte daha vardı, hepsi düzeltildi.

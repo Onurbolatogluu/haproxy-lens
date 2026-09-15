@@ -6,7 +6,7 @@ Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur
 
 - Sade bir durum özeti: "api içindeki srv3, 12 dakikadır çalışmıyor. Sebep: bağlantı zaman aşımı."
 - Backend'ler ve sunucular: durum, sağlık kontrolünün anlamı, bağlantı doluluğu, yanıt süresi, hatalar.
-- Canlı grafikler: saniyedeki istek (yanıt türüne göre) ve trafik; zaman aralığı 5 dk, 15 dk ya da 1 saat seçilebilir.
+- Canlı grafikler: saniyedeki istek (yanıt türüne göre) ve trafik; zaman aralığı 5 dk, 15 dk, 1 saat, 6 saat ya da 24 saat seçilebilir.
 - 4xx ve 5xx hatalarının en çok hangi sunucudan döndüğü; hatalar sunuculara eşit dağılmışsa sorunun ortak bir yerde olabileceği uyarısı.
 - Log bölümünde iki ayrı özet: "Hangi yanıt kodu döndü" (2xx/3xx/4xx/5xx) ve "İsteğe ne oldu" (sunucu yanıtladı, engellendi, yönlendirildi...).
 - Log'dan "Hangi adres ne döndürüyor": 3xx, 4xx ve 5xx sekmeleri. Hangi path'in hangi kodu (301, 404, 502...) kaç kez döndürdüğü; HAProxy'nin kendi ürettiği http→https yönlendirmeleri dahil.
@@ -79,9 +79,13 @@ Satırın sonundaki `./install.sh` yerine kullanabilirsin:
 | `LISTEN=10.0.0.5 ./install.sh` | Panelin adresini elle verir |
 | `LISTEN=127.0.0.1 ./install.sh` | Paneli sadece sunucunun içinden açar (SSH tüneliyle kullanılır) |
 | `LOG=/yol/haproxy.log ./install.sh` | Log kaynağını elle sabitler (varsayılan: ajan kendisi bulur ve izler) |
-| `RETENTION=48h ./install.sh` | Geçmişin ne kadar saklanacağı (varsayılan 24 saat, en az 1 saat) |
-| `DETAIL=6h LISTS=24h ./install.sh` | Ayrıntının ve yol/IP listelerinin saklanacağı süre (belleği artırır, aşağıya bakın) |
-| `MEMMAX=512M ./install.sh` | Servisin bellek tavanı (varsayılan 256M) |
+| `RETENTION=48h ./install.sh` | Sayıların ne kadar saklanacağı (varsayılan 24 saat, en az 1 saat) |
+| `DETAIL=6h ./install.sh` | Tam ayrıntının (tam adres, gerçek yollar, IP dökümü) saklanacağı süre (varsayılan 1 saat) |
+| `LISTS=24h ./install.sh` | Yol ve IP listelerinin saklanacağı süre (varsayılan 6 saat) |
+| `BUDGET=500 ./install.sh` | Ayrıntı için bellek bütçesi, MB (varsayılan 250) |
+| `MEMMAX=768M ./install.sh` | Servisin bellek tavanı (varsayılan 512M) |
+
+Son dördü ne kadar geriye ne kadar ayrıntı göreceğini belirler; [aşağıdaki bölüme](#ne-kadar-geriye-ne-kadar-ayrıntı) bakın.
 
 Güncellemede `ALLOW` verilmezse önceki kurulumdaki liste korunur.
 
@@ -185,11 +189,36 @@ Alan adını görmek istediğin bir LB'de bunu sen eklemeye karar verirsen en ba
 - **Gerçek IP:** Cloudflare arkasından gelen isteklerde log'daki IP Cloudflare'e aittir; panel bu IP'leri "Cloudflare" diye etiketler.
 - **Log biçimi tahmini değil:** Ajan satırları config'teki log tanımına göre okur. Config'te olmayan bir biçimle gelen satırlar (ör. başka bir sunucudan aynı dosyaya yazılanlar) okunamaz ve "Yapılandırma notları"nda örnekleriyle görünür.
 - **Geçmiş bellekte tutulur, disk yalnızca yedektir.** Bu yüzden asıl sınır disk değil bellektir; ayrıntı süresini uzatmadan önce aşağıdaki tabloya bakın.
-- **Geçmişin ayrıntısı zamanla azalır:** Sayılar (istek, yanıt kodu, backend başına) saklama süresi boyunca eksiksiz durur. Ama yol ve IP listeleri son 6 saati, tam adres ve IP dökümü gibi ayrıntılar son 1 saati kapsar. Panel bunu ilgili bölümde yazar.
+- **Geçmişin ayrıntısı zamanla azalır:** Sayılar saklama süresi boyunca eksiksiz durur, ama adres ve IP ayrıntısı varsayılan olarak son 1 saati, listeler son 6 saati kapsar. Süreler ayarlanabilir; bkz. [Ne kadar geriye, ne kadar ayrıntı](#ne-kadar-geriye-ne-kadar-ayrıntı).
 - **Kalıcı bir veritabanı yok:** Geçmiş tek bir sıkıştırılmış dosyada tutulur. Yıllık trend ya da serbest sorgu gerekiyorsa Prometheus gibi bir sistem gerekir.
 - **Yeniden başlatma:** HAProxy yeniden başlarsa sayaçları sıfırlandığı için o andan sonrası yeniden birikir; panel aralığın gerçekte kaç dakikayı kapsadığını yazar.
 - **Tek sunucu:** Her kurulum sadece kendi sunucusunu gösterir.
 - **Şifre ve HTTPS yok:** Erişim sadece ağ adresine göre sınırlanır. İzinli ağdaki herkes paneli görebilir; gerekirse `ALLOW` ile yönetim ağına daralt.
+
+## Ne kadar geriye, ne kadar ayrıntı
+
+Geçmişin tamamı aynı ayrıntıda saklanmaz: veri yaşlandıkça kademeli olarak sadeleşir. Amaç belleği sınırlı tutmak; hangi kademenin ne kadar süreceğini siz belirlersiniz.
+
+| Veri yaşı | Panelde ne görürsünüz | Parametre (varsayılan) |
+|---|---|---|
+| 0 – 1 saat | **Her şey.** Sayılar, yol ve IP listeleri, ayrıca satıra tıklayınca açılan ayrıntı: tam adres (alan adı log'da varsa), gerçek yollar ve isteği gönderen IP'ler | `DETAIL` (1 saat) |
+| 1 – 6 saat | Sayılar, ayrıca en yoğun yol ve IP listeleri. Satır ayrıntısı yok | `LISTS` (6 saat) |
+| 6 – 24 saat | **Yalnızca sayılar:** istek sayısı, 2xx/3xx/4xx/5xx dağılımı, backend başına döküm, grafikler | `RETENTION` (24 saat) |
+| 24 saatten eski | Silinir | |
+
+Sayılar hiçbir kademede eksilmez; kısalan tek şey adres ve IP ayrıntısıdır. Grafikler ve oranlar bu yüzden 24 saat boyunca eksiksizdir.
+
+**Değiştirmek için** kurulum komutunun sonundaki `./install.sh` yerine:
+
+```bash
+DETAIL=6h LISTS=24h BUDGET=500 MEMMAX=768M ./install.sh
+```
+
+Bu örnekte ayrıntı 6 saat, listeler 24 saat geriye gider. Bellek maliyeti için aşağıdaki tabloya bakın; ayrıntıyı uzatırsanız bütçeyi ve servis tavanını da yükseltin.
+
+Tüm kademeleri aynı yapmak da mümkün: `RETENTION=24h DETAIL=24h LISTS=24h BUDGET=600 MEMMAX=1G ./install.sh` ile 24 saatin tamamı tam ayrıntılı olur (yoğun bir LB'de ~476 MB).
+
+**Panel ne gördüğünü söyler.** Log bölümü, ayrıntının ve listelerin ayarlanan değil *gerçekte* kapsadığı süreyi yazar. Bir tarama saldırısında bellek bütçesi devreye girip ayrıntıyı kısaltırsa bunu orada görürsünüz.
 
 ## Bellek
 
