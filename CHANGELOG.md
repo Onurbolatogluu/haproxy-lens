@@ -4,6 +4,20 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.10.0
+
+- Bir backend'i açınca artık **o backend'e gelen isteklerin dökümü** görünüyor: kaç istek, hangi yanıt sınıfları, en çok istenen 10 adres ve en çok istek atan 10 IP. "Bu backend'e hiç trafik gitmemeli" dediğin bir yere kimin, nereye istek attığı tek bakışta çıkıyor.
+- Log'da o backend'e hiç istek yoksa panel bunu açıkça yazıyor ve stats'taki toplamın HAProxy açıldığından beri biriktiğini hatırlatıyor; iki sayının neden farklı olduğu belli oluyor.
+- Bellek sınırı: bir dakikada en fazla 100 backend için döküm ve backend başına en fazla 30 farklı IP tutuluyor. Sınır aşılsa da genel sayımlar eksiksiz kalıyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.9.0
 
 - "En çok istek atan IP'ler" satırları artık açılıyor: bir IP'nin en çok hangi adresleri istediği görünüyor. Böylece bir IP'nin normal kullanıcı mı yoksa tarama botu mu olduğu anlaşılıyor (ör. tek IP'den ardı ardına `/wp-login.php` ve `/xmlrpc.php`).

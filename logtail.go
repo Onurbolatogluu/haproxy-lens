@@ -300,14 +300,38 @@ func addCappedN(m map[string]int64, k string, limit int) {
 	}
 }
 
+// Backend başına döküm: "bu backend'e hiç trafik gitmemeli" sorusunu cevaplar
+type backendAgg struct {
+	N, S2, S3, S4, S5, Blocked int64
+	IPs                        map[string]int64
+}
+
+const (
+	maxBackendKeys = 100 // kaç backend için döküm tutulacağı
+	maxBackendIPs  = 30  // backend başına kaç farklı IP saklanacağı
+)
+
 type bucket struct {
 	kinds      map[string]int64
 	paths      map[pathKey]*pathAgg
 	blocked    map[blockKey]*blockAgg
 	clients    map[string]*clientAgg
+	backends   map[string]*backendAgg
 	withHost   int64 // alan adı bulunan satır sayısı
 	detailKeys int   // ayrıntısı tutulan satır sayısı (sınır: maxDetailKeys)
 	clientKeys int   // adres dökümü tutulan IP sayısı (sınır: maxClientDetail)
+}
+
+func (b *bucket) backend(ad string) *backendAgg {
+	if ba := b.backends[ad]; ba != nil {
+		return ba
+	}
+	if len(b.backends) >= maxBackendKeys {
+		return nil
+	}
+	ba := &backendAgg{IPs: map[string]int64{}}
+	b.backends[ad] = ba
+	return ba
 }
 
 // Kovada yer varsa yeni bir ayrıntı açar; yoksa nil (sayılar yine tutulur, ayrıntı tutulmaz)
@@ -323,7 +347,8 @@ func (b *bucket) detail(cur *errDetail) *errDetail {
 }
 
 func newBucket() *bucket {
-	return &bucket{kinds: map[string]int64{}, paths: map[pathKey]*pathAgg{}, blocked: map[blockKey]*blockAgg{}, clients: map[string]*clientAgg{}}
+	return &bucket{kinds: map[string]int64{}, paths: map[pathKey]*pathAgg{}, blocked: map[blockKey]*blockAgg{},
+		clients: map[string]*clientAgg{}, backends: map[string]*backendAgg{}}
 }
 
 type LogAnalyzer struct {
@@ -633,6 +658,24 @@ func (a *LogAnalyzer) add(r logRecord) {
 			b.clients[ck] = ca
 		}
 	}
+	if ba := b.backend(r.Backend); ba != nil {
+		ba.N++
+		switch r.Status / 100 {
+		case 2:
+			ba.S2++
+		case 3:
+			ba.S3++
+		case 4:
+			ba.S4++
+		case 5:
+			ba.S5++
+		}
+		if blocked {
+			ba.Blocked++
+		}
+		addCappedN(ba.IPs, r.Client, maxBackendIPs)
+	}
+
 	ca.N++
 	if blocked {
 		ca.Blocked++
@@ -786,6 +829,19 @@ type CodeCount struct {
 	N    int64 `json:"n"`
 }
 
+// Bir backend'e log'da görünen trafiğin dökümü
+type BackendLogRow struct {
+	Backend string      `json:"backend"`
+	N       int64       `json:"n"`
+	S2      int64       `json:"s2"`
+	S3      int64       `json:"s3"`
+	S4      int64       `json:"s4"`
+	S5      int64       `json:"s5"`
+	Blocked int64       `json:"blocked"`
+	Paths   []NameCount `json:"paths"` // en çok istenen adresler
+	IPs     []ClientRow `json:"ips"`   // en çok istek atan IP'ler
+}
+
 // Bir yolun yanıt sınıflarına göre dökümü; panelde 3xx/4xx/5xx sekmeleriyle süzülür
 type CodePathRow struct {
 	Backend string      `json:"backend"`
@@ -904,6 +960,7 @@ type LogReport struct {
 	Kinds     map[string]int64 `json:"kinds"`
 	Paths     []PathRow        `json:"paths"`
 	CodePaths []CodePathRow    `json:"codePaths"`
+	Backends  []BackendLogRow  `json:"backends"`
 	Classes   [4]int64         `json:"classes"` // 2xx, 3xx, 4xx, 5xx toplamları
 	Blocked   []BlockRow       `json:"blocked"`
 	Clients   []ClientRow      `json:"clients"`
@@ -1004,6 +1061,53 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 	if len(rep.Paths) > 40 {
 		rep.Paths = rep.Paths[:40]
 	}
+	// Backend dökümü: kovaları birleştir
+	beler := map[string]*backendAgg{}
+	for m, b := range a.buckets {
+		if m < from {
+			continue
+		}
+		for ad, v := range b.backends {
+			t := beler[ad]
+			if t == nil {
+				t = &backendAgg{IPs: map[string]int64{}}
+				beler[ad] = t
+			}
+			t.N += v.N
+			t.S2 += v.S2
+			t.S3 += v.S3
+			t.S4 += v.S4
+			t.S5 += v.S5
+			t.Blocked += v.Blocked
+			for ip, n := range v.IPs {
+				t.IPs[ip] += n
+			}
+		}
+	}
+	// Backend başına en çok istenen adresler, yol listesinden türetilir
+	beYollar := map[string]map[string]int64{}
+	for k, v := range paths {
+		m := beYollar[k.Backend]
+		if m == nil {
+			m = map[string]int64{}
+			beYollar[k.Backend] = m
+		}
+		yol := k.Path
+		if k.Method != "" {
+			yol = k.Method + " " + k.Path
+		}
+		m[yol] += v.N
+	}
+	for ad, v := range beler {
+		row := BackendLogRow{Backend: ad, N: v.N, S2: v.S2, S3: v.S3, S4: v.S4, S5: v.S5, Blocked: v.Blocked,
+			Paths: topN(beYollar[ad], 10)}
+		for _, ip := range topN(v.IPs, 10) {
+			row.IPs = append(row.IPs, ClientRow{IP: ip.Name, N: ip.N, Cloudflare: a.isCloudflare(ip.Name)})
+		}
+		rep.Backends = append(rep.Backends, row)
+	}
+	sort.Slice(rep.Backends, func(i, j int) bool { return rep.Backends[i].N > rep.Backends[j].N })
+
 	var codeRows []CodePathRow
 	for k, v := range paths {
 		rep.Classes[0] += v.S2

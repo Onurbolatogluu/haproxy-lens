@@ -255,7 +255,7 @@ function fmtField(k, v, row) {
 // ---------------- Zaman aralığı ----------------
 const RANGES = [[5, `5${NB}dk`], [15, `15${NB}dk`], [60, `1${NB}saat`]];
 // Seçili aralığın satır bazındaki sayaç farkları; errRatio/codeCounts ile aynı biçimde
-const WinCtx = createContext({ wrates: {}, label: "açıldığından beri", minutes: 60 });
+const WinCtx = createContext({ wrates: {}, label: "açıldığından beri", minutes: 60, logs: null });
 
 function windowToRates(win) {
   const out = {};
@@ -710,6 +710,69 @@ function ErrorSummaries({ b }) {
   );
 }
 
+// "Bu backend'e hiç trafik gitmemeli" sorusunun cevabı: log'da o backend'e gelen
+// isteklerin adres ve IP dökümü. Stats'taki toplam HAProxy açıldığından beridir,
+// log ise yalnızca seçili aralığı kapsar; ikisi farklı şeyler söyler, panel bunu yazar.
+function BackendTraffic({ b }) {
+  const { logs, label } = useContext(WinCtx);
+  if (!logs?.enabled) return null;
+  const row = (logs.backends || []).find((x) => x.backend === b.pxname);
+  const kutu = { background: C.panel2 };
+  if (!row || row.n === 0) {
+    return (
+      <p className="rounded-md px-4 py-2.5 mb-5 text-sm" style={{ ...kutu, color: C.muted }}>
+        {cap(label)} içinde bu backend'e log'da hiç istek görünmüyor. Yukarıdaki toplam, HAProxy açıldığından beri birikmiş sayıdır.
+      </p>
+    );
+  }
+  const sinif = [["2xx", row.s2, C.ok], ["3xx", row.s3, C.info], ["4xx", row.s4, C.warn], ["5xx", row.s5, C.bad]].filter(([, n]) => n > 0);
+  const Liste = ({ baslik, satirlar, ip }) => (
+    <div>
+      <div className="text-xs mb-1" style={{ color: C.muted }}>{baslik}</div>
+      {satirlar.length === 0 ? <p className="text-xs" style={{ color: C.faint }}>Kayıt yok.</p> : (
+        <ul className="space-y-1 text-sm">
+          {satirlar.map((x) => {
+            const ad = ip ? x.ip : x.name;
+            return (
+              <li key={ad} className="flex items-baseline justify-between gap-3">
+                <span className="brk tnum">
+                  {ad === "(diğer)" ? (ip ? "(diğer IP'ler)" : "(diğer adresler)") : ad}
+                  {ip && x.cloudflare && <span className="text-xs ml-2" style={{ color: C.faint }}>Cloudflare</span>}
+                </span>
+                <span className="tnum nw" style={{ color: C.muted }}>×{fmtNum(x.n)}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+  return (
+    <div className="rounded-md px-4 py-3 mb-5" style={kutu}>
+      <div className="text-sm mb-3">
+        {cap(label)} içinde bu backend'e log'da <b>{fmtNum(row.n)}</b> istek geldi
+        {sinif.length > 0 && (
+          <>
+            {" ("}
+            {sinif.map(([ad, n, col], i) => (
+              <span key={ad}>
+                {i > 0 && ", "}
+                <span style={{ color: col }}>{fmtNum(n)} {ad}</span>
+              </span>
+            ))}
+            {")"}
+          </>
+        )}
+        {row.blocked > 0 && <span style={{ color: C.warn }}>, {fmtNum(row.blocked)} tanesi engellendi</span>}.
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Liste baslik="En çok istenen adresler" satirlar={row.paths || []} />
+        <Liste baslik="En çok istek atan IP'ler" satirlar={row.ips || []} ip />
+      </div>
+    </div>
+  );
+}
+
 function BackendDetail({ b, rates, onFields }) {
   const algoKey = String(b.algo || "").split("(")[0];
   return (
@@ -729,6 +792,7 @@ function BackendDetail({ b, rates, onFields }) {
         <Fact k="cli_abrt">{fmtNum(num(b.cli_abrt))}</Fact>
       </dl>
       <CodeBar row={b} />
+      <BackendTraffic b={b} />
       <ErrorSummaries b={b} />
       <ServerTable servers={b.servers} rates={rates} onFields={onFields} />
       <button type="button" className="mt-4 text-sm" style={{ color: C.info }} onClick={() => onFields(b)}>
@@ -1712,7 +1776,7 @@ export default function App() {
   const rates = useMemo(() => (cur && prev ? computeRates(prev.rows, cur.rows, (cur.at - prev.at) / 1000) : {}), [cur, prev]);
   const wrates = useMemo(() => windowToRates(state?.window), [state]);
   const label = winLabel(state?.window, minutes);
-  const win = useMemo(() => ({ wrates, label, minutes }), [wrates, label, minutes]);
+  const win = useMemo(() => ({ wrates, label, minutes, logs }), [wrates, label, minutes, logs]);
   const findings = useMemo(() => buildFindings(model, rates, logs, wrates, label), [model, rates, logs, wrates, label]);
   const points = state?.history || [];
 

@@ -388,3 +388,79 @@ func TestClientDetailMemoryCap(t *testing.T) {
 		}
 	}
 }
+
+func TestBackendBreakdown(t *testing.T) {
+	a := NewLogAnalyzer("file:/yok", "")
+	rec := func(be, ip, path string, status int, kind string) logRecord {
+		srv := "s1"
+		if kind != KindServed {
+			srv = "<NOSRV>"
+		}
+		return logRecord{At: time.Now(), Client: ip, Frontend: "fe", Backend: be, Server: srv,
+			Status: status, Method: "GET", Path: path, RawPath: path, Kind: kind}
+	}
+	add := func(n int, r logRecord) {
+		for i := 0; i < n; i++ {
+			a.add(r)
+		}
+	}
+	// Yoğun backend
+	add(500, rec("be_prod", "203.0.113.10", "/urun", 200, KindServed))
+	add(20, rec("be_prod", "203.0.113.10", "/urun", 500, KindServed))
+	// "Hiç trafik almaması gereken" backend: az ama var
+	add(7, rec("be_dev", "198.51.100.44", "/admin", 200, KindServed))
+	add(3, rec("be_dev", "192.0.2.7", "/admin", 200, KindServed))
+	add(2, rec("be_dev", "198.51.100.44", "/config.json", 404, KindServed))
+
+	rep := a.Report(60)
+	get := func(ad string) *BackendLogRow {
+		for i := range rep.Backends {
+			if rep.Backends[i].Backend == ad {
+				return &rep.Backends[i]
+			}
+		}
+		return nil
+	}
+	if len(rep.Backends) != 2 || rep.Backends[0].Backend != "be_prod" {
+		t.Fatalf("backend listesi: %+v", rep.Backends)
+	}
+	prod := get("be_prod")
+	if prod.N != 520 || prod.S5 != 20 || prod.S2 != 500 {
+		t.Fatalf("be_prod: %+v", prod)
+	}
+	dev := get("be_dev")
+	if dev.N != 12 || dev.S4 != 2 {
+		t.Fatalf("be_dev sayıları: %+v", dev)
+	}
+	// Asıl soru: bu backend'e kim, nereye istek atmış
+	if len(dev.IPs) != 2 || dev.IPs[0].IP != "198.51.100.44" || dev.IPs[0].N != 9 {
+		t.Fatalf("be_dev IP'leri: %+v", dev.IPs)
+	}
+	if len(dev.Paths) != 2 || dev.Paths[0].Name != "GET /admin" || dev.Paths[0].N != 10 {
+		t.Fatalf("be_dev adresleri: %+v", dev.Paths)
+	}
+}
+
+func TestBackendBreakdownCap(t *testing.T) {
+	a := NewLogAnalyzer("file:/yok", "")
+	now := time.Now()
+	for i := 0; i < 300; i++ {
+		for j := 0; j < 60; j++ {
+			a.add(logRecord{At: now, Client: fmt.Sprintf("198.51.100.%d", j), Frontend: "fe",
+				Backend: "be" + strconv.Itoa(i), Server: "s1", Status: 200, Method: "GET", Path: "/", Kind: KindServed})
+		}
+	}
+	b := a.buckets[now.Unix()/60]
+	if len(b.backends) > maxBackendKeys {
+		t.Fatalf("backend sınırı aşıldı: %d", len(b.backends))
+	}
+	for ad, ba := range b.backends {
+		if len(ba.IPs) > maxBackendIPs+1 {
+			t.Fatalf("%s için %d IP tutulmuş", ad, len(ba.IPs))
+		}
+	}
+	// Sınır aşılsa da genel sayımlar eksiksiz kalmalı
+	if rep := a.Report(60); rep.Kinds[KindServed] != 300*60 {
+		t.Fatalf("genel sayım bozuldu: %d", rep.Kinds[KindServed])
+	}
+}
