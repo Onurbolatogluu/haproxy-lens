@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -365,6 +366,8 @@ type LogAnalyzer struct {
 	detay     int          // tam ayrıntının (tam adres, IP dökümü) saklandığı dakika
 	liste     int          // yol ve IP listelerinin saklandığı dakika
 	butce     int64        // ayrıntı için bellek bütçesi (bayt); aşılırsa en eski ayrıntı bırakılır
+	tepe      int64        // görülen en yüksek ayrıntı ağırlığı; bellek iadesini tetiklemek için
+	sonIadeDk int64        // en son bellek iadesinin yapıldığı dakika
 	simdiDk   func() int64 // şimdiki dakika; testlerde sahte saat verilebilir
 	dirty     bool
 	buckets   map[int64]*bucket
@@ -671,6 +674,31 @@ func (b *bucket) enYogun(yol, ip int) {
 }
 
 // Yaşlanan kovaları sadeleştirir, saklama süresini aşanları siler
+// Go, boşalan belleği işletim sistemine kendiliğinden hemen iade etmiyor: ölçümde
+// saldırı bittikten sonra ajanın içinde 9 MB kalmasına rağmen RSS 269 MB'da duruyordu.
+// systemd'nin bellek tavanı RSS üzerinden uygulandığı için büyük bir sadeleştirmeden
+// sonra iade tetikleniyor. Arka planda ve tek seferlik; okuma akışını durdurmaz.
+var osIadeBekliyor atomic.Bool
+var iadeSayaci atomic.Int64 // yalnızca testler için: iade kaç kez tetiklendi
+
+func osBellekIadesi() {
+	if osIadeBekliyor.Swap(true) {
+		return
+	}
+	go func() {
+		defer osIadeBekliyor.Store(false)
+		debug.FreeOSMemory()
+	}()
+}
+
+func (a *LogAnalyzer) toplamAgirlik() int64 {
+	var t int64
+	for _, b := range a.buckets {
+		t += b.agirlik()
+	}
+	return t
+}
+
 func (a *LogAnalyzer) bakim() { a.bakimAt(a.simdiDk()) }
 
 func (a *LogAnalyzer) bakimAt(simdi int64) {
@@ -686,6 +714,21 @@ func (a *LogAnalyzer) bakimAt(simdi int64) {
 		}
 	}
 	a.butceUygula()
+	// Bellek tek seferde değil, dakika dakika azalıyor; bu yüzden anlık fark değil
+	// tepe değerden ne kadar gerilendiğine bakılır. Saldırı bittikten sonra
+	// iade bir kez tetiklenir, her bakımda değil.
+	w := a.toplamAgirlik()
+	if w > a.tepe {
+		a.tepe = w
+	}
+	// Büyük bir gerileme olduysa hemen, küçük gerilemelerde en fazla 10 dakikada bir.
+	buyuk := a.tepe-w > 64<<20
+	periyodik := simdi-a.sonIadeDk >= 10 && a.tepe-w > 8<<20
+	if buyuk || periyodik {
+		a.tepe, a.sonIadeDk = w, simdi
+		iadeSayaci.Add(1)
+		osBellekIadesi()
+	}
 }
 
 // Ayrıntı için bellek bütçesi. Tarama saldırılarında her istek benzersiz bir adres

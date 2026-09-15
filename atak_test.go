@@ -42,7 +42,9 @@ func TestAtakBellekButcesi(t *testing.T) {
 	runtime.ReadMemStats(&sonra)
 	mb := (sonra.HeapAlloc - once.HeapAlloc) / 1024 / 1024
 
-	rep := a.Report(180)
+	// Pencere bilerek dolduruları aşıyor: test çalışırken dakika sınırı aşılırsa
+	// en eski dakika kapsam dışında kalmasın.
+	rep := a.Report(185)
 	t.Logf("3 saat tarama, %d istek: %d MB (bütçe %d MB)", istek, mb, butceMB)
 	t.Logf("  ayrıntı kapsamı: %d dk, liste kapsamı: %d dk", rep.DetailMinutes, rep.ListMinutes)
 	if mb > butceMB*2 {
@@ -85,7 +87,8 @@ func TestAtakDayanikliligi(t *testing.T) {
 	runtime.GC()
 	runtime.ReadMemStats(&sonra)
 	mb := (sonra.HeapAlloc - once.HeapAlloc) / 1024 / 1024
-	rep := a.Report(360)
+	// Pencere bilerek doldurulan süreyi aşıyor (dakika sınırı aşılabilir)
+	rep := a.Report(365)
 	t.Logf("6 saat ağır saldırı (%d istek): %d MB, ayrıntı kapsamı %d dk", istek, mb, rep.DetailMinutes)
 	if mb > 400 {
 		t.Fatalf("servis tavanına (512 MB) fazla yaklaşıyor: %d MB", mb)

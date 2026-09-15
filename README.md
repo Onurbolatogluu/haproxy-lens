@@ -209,6 +209,8 @@ Sayılar (istek, yanıt kodu, backend başına döküm) her ayarda saklama süre
 
 **Servis tavanı** (`MemoryMax`) 512 MB'tır. Bu bir rezervasyon değil üst sınırdır; amacı saldırı anında servisin öldürülmemesidir.
 
+**Bellek iadesi.** Yoğunluk geçtikten sonra ajan belleği yalnızca kendi içinde boşaltmakla kalmaz, işletim sistemine de geri verir. Go bunu kendiliğinden hemen yapmadığı ve systemd'nin tavanı RSS üzerinden uygulandığı için iade tetiklenir: büyük bir gerilemeden sonra hemen, küçük gerilemelerde en fazla 10 dakikada bir. Ölçümde saldırı sonrası RSS birkaç saniye içinde 257 MB'tan 100 MB'a indi.
+
 Ayarlar: `DETAIL=6h LISTS=24h BUDGET=500 MEMMAX=768M ./install.sh`. Bütçeyi yükseltirseniz servis tavanını da yükseltin.
 
 ## Sorun giderme

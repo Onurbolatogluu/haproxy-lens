@@ -513,12 +513,12 @@ func TestUzunAralikVeDiskeKayit(t *testing.T) {
 		a.add(logRecord{At: ts, Client: "198.51.100.5", Frontend: "fe", Backend: "be", Server: "s1",
 			Status: 500, Method: "GET", Path: "/hata", RawPath: "/hata", Kind: KindServed})
 	}
-	rep := a.Report(180)
+	rep := a.Report(185) // pencere bilerek geniş: dakika sınırı aşılabilir
 	if rep.Classes[0] != 1800 || rep.Classes[3] != 180 {
 		t.Fatalf("3 saatlik sınıf toplamları: %v", rep.Classes)
 	}
 	// DetailMinutes artık ayarlanan değil, gerçekte kapsanan süre
-	if rep.Minutes != 180 || rep.DetailMinutes < 55 || rep.DetailMinutes > 65 {
+	if rep.Minutes != 185 || rep.DetailMinutes < 55 || rep.DetailMinutes > 65 {
 		t.Fatalf("rapor aralığı: %d, ayrıntı kapsamı: %d (beklenen ~60)", rep.Minutes, rep.DetailMinutes)
 	}
 	if rep.ListMinutes < 175 {
@@ -547,7 +547,7 @@ func TestUzunAralikVeDiskeKayit(t *testing.T) {
 	if len(p2.minutes) != len(p.minutes) {
 		t.Fatalf("yüklenen dakika sayısı %d, beklenen %d", len(p2.minutes), len(p.minutes))
 	}
-	rep2 := a2.Report(180)
+	rep2 := a2.Report(185)
 	if rep2.Classes != rep.Classes {
 		t.Fatalf("yüklenen sınıf toplamları %v, beklenen %v", rep2.Classes, rep.Classes)
 	}
