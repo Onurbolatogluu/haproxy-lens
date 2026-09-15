@@ -29,6 +29,7 @@ echo "Silinecekler:"
 echo "  - haproxy-lens servisi ($UNIT)"
 echo "  - Program dosyası ($BIN)"
 echo "  - 'haproxy-lens' sistem kullanıcısı"
+echo "  - Saklanan geçmiş (/var/lib/haproxy-lens)"
 echo "  - HAProxy'ye dokunulmaz."
 if [ "${1:-}" != "-y" ]; then
   read -r -p "Devam edilsin mi? [e/H] " ans
@@ -37,6 +38,7 @@ fi
 
 systemctl disable --now haproxy-lens >/dev/null 2>&1 || true
 rm -f "$UNIT" "$BIN"
+rm -rf /var/lib/haproxy-lens
 systemctl daemon-reload
 systemctl reset-failed haproxy-lens >/dev/null 2>&1 || true
 id haproxy-lens >/dev/null 2>&1 && userdel haproxy-lens

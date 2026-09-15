@@ -167,7 +167,7 @@ func TestRuntimeConfigChange(t *testing.T) {
 	dir := t.TempDir()
 	cfg := writeCfg(t, dir, "global\n    log /dev/log local0\ndefaults\n    log global\n    mode http\n    option httplog\nfrontend fe\n    bind *:80\n")
 	logs := NewLogAnalyzer("file:/yok", "")
-	env := NewEnv(NewStatsPoller("/yok.sock", time.Second, 10), logs, false)
+	env := NewEnv(NewStatsPoller("/yok.sock", time.Second, 10, 60), logs, false)
 	pid := 100
 	env.find = func() ([]int, []string, string) { return []int{pid}, []string{cfg}, "" }
 	env.refresh()

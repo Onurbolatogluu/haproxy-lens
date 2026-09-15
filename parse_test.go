@@ -143,7 +143,7 @@ func TestOnlyReadOnlyCommands(t *testing.T) {
 }
 
 func TestWindowAndDownsample(t *testing.T) {
-	p := NewStatsPoller("", 2*time.Second, 1800)
+	p := NewStatsPoller("", 2*time.Second, 1800, 1440)
 	row := func(req, e5 string) map[string]string {
 		return map[string]string{"pxname": "be", "svname": "s1", "type": "2", "req_tot": req, "hrsp_5xx": e5, "hrsp_2xx": "0"}
 	}
@@ -462,5 +462,112 @@ func TestBackendBreakdownCap(t *testing.T) {
 	// Sınır aşılsa da genel sayımlar eksiksiz kalmalı
 	if rep := a.Report(60); rep.Kinds[KindServed] != 300*60 {
 		t.Fatalf("genel sayım bozuldu: %d", rep.Kinds[KindServed])
+	}
+}
+
+func TestUzunAralikVeDiskeKayit(t *testing.T) {
+	dir := t.TempDir()
+	p := NewStatsPoller("", 2*time.Second, 1800, 1440)
+	row := func(req, e5 string) map[string]string {
+		return map[string]string{"pxname": "be", "svname": "BACKEND", "type": "1", "req_tot": req, "hrsp_5xx": e5, "hrsp_2xx": "0"}
+	}
+	// 3 saat boyunca dakikada 600 istek, 6'sı 5xx
+	basla := (time.Now().UnixMilli()/60_000 - 180) * 60_000
+	for i := int64(0); i <= 180*6; i++ { // 10 saniyede bir ölçüm
+		at := basla + i*10_000
+		p.store(&Snapshot{At: at, Info: map[string]string{"Uptime_sec": strconv.FormatInt(1000+i*10, 10)},
+			Rows: []map[string]string{row(strconv.FormatInt(i*100, 10), strconv.FormatInt(i, 10))}})
+	}
+	if len(p.minutes) < 175 {
+		t.Fatalf("dakikalık birikim eksik: %d", len(p.minutes))
+	}
+	// 2 saatlik pencere: dakikalık artışların toplamı
+	st := p.State(120)
+	if st.Window == nil {
+		t.Fatal("2 saatlik pencere boş")
+	}
+	w := st.Window.Rows["be|BACKEND"]
+	if w.N < 60000 || w.N > 78000 {
+		t.Fatalf("2 saatte %v istek (beklenen ~72.000)", w.N)
+	}
+	if oran := w.Codes[4] / w.N; oran < 0.009 || oran > 0.011 {
+		t.Fatalf("5xx oranı %v (beklenen ~%%1)", oran)
+	}
+	if len(st.History) == 0 || len(st.History) > maxChartPts {
+		t.Fatalf("grafik noktası: %d", len(st.History))
+	}
+	if st.Retention != 1440 {
+		t.Fatalf("saklama: %d", st.Retention)
+	}
+
+	// Log tarafı: 3 saatlik kayıt, eski dakikalar sadeleşmeli ama sayılar kalmalı
+	a := NewLogAnalyzer("file:/yok", "")
+	a.SetRetention(1440)
+	simdi := time.Now()
+	for dk := 0; dk < 180; dk++ {
+		ts := simdi.Add(-time.Duration(dk) * time.Minute)
+		for i := 0; i < 10; i++ {
+			a.add(logRecord{At: ts, Client: "198.51.100.5", Frontend: "fe", Backend: "be", Server: "s1",
+				Status: 200, Method: "GET", Path: "/y" + strconv.Itoa(i), RawPath: "/y", Kind: KindServed})
+		}
+		a.add(logRecord{At: ts, Client: "198.51.100.5", Frontend: "fe", Backend: "be", Server: "s1",
+			Status: 500, Method: "GET", Path: "/hata", RawPath: "/hata", Kind: KindServed})
+	}
+	rep := a.Report(180)
+	if rep.Classes[0] != 1800 || rep.Classes[3] != 180 {
+		t.Fatalf("3 saatlik sınıf toplamları: %v", rep.Classes)
+	}
+	if rep.Minutes != 180 || rep.DetailMinutes != 60 {
+		t.Fatalf("rapor aralığı: %d, ayrıntı: %d", rep.Minutes, rep.DetailMinutes)
+	}
+	// 1 saati aşan kovalarda ayrıntı düşmüş olmalı, sayılar durmalı
+	eski := a.buckets[simdi.Add(-120*time.Minute).Unix()/60]
+	if eski == nil || eski.level == 0 {
+		t.Fatalf("eski kova sadeleşmedi: %+v", eski)
+	}
+	if eski.classes[0] != 10 {
+		t.Fatalf("eski kovanın sayıları kaybolmuş: %v", eski.classes)
+	}
+
+	// Diske yaz, yeni ajanlara yükle
+	st1 := NewStore(dir, p, a)
+	if err := st1.Save(); err != nil {
+		t.Fatal(err)
+	}
+	p2 := NewStatsPoller("", 2*time.Second, 1800, 1440)
+	a2 := NewLogAnalyzer("file:/yok", "")
+	a2.SetRetention(1440)
+	if err := NewStore(dir, p2, a2).Load(); err != nil {
+		t.Fatal(err)
+	}
+	if len(p2.minutes) != len(p.minutes) {
+		t.Fatalf("yüklenen dakika sayısı %d, beklenen %d", len(p2.minutes), len(p.minutes))
+	}
+	rep2 := a2.Report(180)
+	if rep2.Classes != rep.Classes {
+		t.Fatalf("yüklenen sınıf toplamları %v, beklenen %v", rep2.Classes, rep.Classes)
+	}
+	if rep2.Kinds[KindServed] != rep.Kinds[KindServed] {
+		t.Fatalf("yüklenen tür sayıları farklı")
+	}
+	// Dosya makul boyutta mı
+	fi, err := os.Stat(filepath.Join(dir, stateFile))
+	if err != nil || fi.Size() > 5<<20 {
+		t.Fatalf("kayıt dosyası: %v", err)
+	}
+	t.Logf("3 saatlik geçmiş diskte %d KB", fi.Size()/1024)
+}
+
+func TestBozukKayitDosyasi(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, stateFile), []byte("bu gzip değil"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	p := NewStatsPoller("", 2*time.Second, 1800, 1440)
+	if err := NewStore(dir, p, nil).Load(); err == nil {
+		t.Fatal("bozuk dosya hata vermeliydi")
+	}
+	if len(p.minutes) != 0 {
+		t.Fatal("bozuk dosyadan veri yüklenmiş")
 	}
 }

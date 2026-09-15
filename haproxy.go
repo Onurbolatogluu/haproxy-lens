@@ -133,6 +133,24 @@ type StatsPoller struct {
 	samples []counterSample // 10 saniyede bir, satır bazında sayaç örnekleri (son 1 saat)
 	lastErr string
 	errAt   int64
+
+	// Uzun aralıklar (1 saatten fazla) için dakikalık birikim. Sayaç anlık görüntüsü değil,
+	// o dakikadaki ARTIŞ saklanır; böylece herhangi bir aralığın toplamı basit toplamayla bulunur
+	// ve HAProxy yeniden başlasa bile eski dakikalar geçerli kalır.
+	retention int // dakika
+	minutes   []MinuteAgg
+	curMin    int64
+	minBase   map[string][]float64
+	minPt     Point
+	minPtN    int
+	dirty     bool
+}
+
+// Bir dakikanın özeti: grafik için ortalama nokta, oranlar için satır bazında artış
+type MinuteAgg struct {
+	T int64                `json:"t"` // dakikanın başı, unix ms
+	P Point                `json:"p"`
+	D map[string][]float64 `json:"d"`
 }
 
 // Zaman aralığı hesapları için saklanan sayaçlar (sıra önemli, windowRow bu sırayı kullanır)
@@ -141,7 +159,7 @@ var windowFields = []string{"req_tot", "stot", "hrsp_1xx", "hrsp_2xx", "hrsp_3xx
 const (
 	sampleEveryMs = 10_000
 	maxSamples    = 3600*1000/sampleEveryMs + 2
-	maxWindowMin  = 60
+	fineWindowMin = 60 // bu aralığa kadar 10 saniyelik örnekler, ötesinde dakikalık birikim
 	maxChartPts   = 360
 )
 
@@ -172,8 +190,62 @@ func (p *StatsPoller) addSample(s *Snapshot) {
 	}
 }
 
-func NewStatsPoller(socket string, interval time.Duration, maxHist int) *StatsPoller {
-	return &StatsPoller{socket: socket, interval: interval, maxHist: maxHist}
+func NewStatsPoller(socket string, interval time.Duration, maxHist, retentionMin int) *StatsPoller {
+	if retentionMin < fineWindowMin {
+		retentionMin = fineWindowMin
+	}
+	return &StatsPoller{socket: socket, interval: interval, maxHist: maxHist, retention: retentionMin}
+}
+
+// Dakika değiştiğinde o dakikanın artışını ve ortalama noktasını kaydeder.
+func (p *StatsPoller) rollMinute(s *Snapshot, sifirlandi bool) {
+	dk := s.At / 60_000
+	simdi := map[string][]float64{}
+	for _, r := range s.Rows {
+		simdi[r["pxname"]+"|"+r["svname"]] = rowCounters(r)
+	}
+	if p.curMin == 0 || sifirlandi {
+		p.curMin, p.minBase, p.minPt, p.minPtN = dk, simdi, Point{}, 0
+		return
+	}
+	if dk == p.curMin {
+		return
+	}
+	agg := MinuteAgg{T: p.curMin * 60_000, D: map[string][]float64{}}
+	for k, c := range simdi {
+		b, ok := p.minBase[k]
+		if !ok {
+			continue
+		}
+		d := make([]float64, len(c))
+		bos := true
+		for i := range c {
+			if v := c[i] - b[i]; v > 0 {
+				d[i] = v
+				bos = false
+			}
+		}
+		if !bos {
+			agg.D[k] = d
+		}
+	}
+	if p.minPtN > 0 {
+		n := float64(p.minPtN)
+		agg.P = Point{T: agg.T, C2: p.minPt.C2 / n, C3: p.minPt.C3 / n, C4: p.minPt.C4 / n,
+			C5: p.minPt.C5 / n, In: p.minPt.In / n, Out: p.minPt.Out / n, Reqs: p.minPt.Reqs / n}
+	} else {
+		agg.P = Point{T: agg.T}
+	}
+	p.minutes = append(p.minutes, agg)
+	p.trimMinutes()
+	p.dirty = true
+	p.curMin, p.minBase, p.minPt, p.minPtN = dk, simdi, Point{}, 0
+}
+
+func (p *StatsPoller) trimMinutes() {
+	if len(p.minutes) > p.retention {
+		p.minutes = p.minutes[len(p.minutes)-p.retention:]
+	}
 }
 
 func (p *StatsPoller) Run() {
@@ -264,10 +336,12 @@ func headerOf(statRaw string) []string {
 func (p *StatsPoller) store(s *Snapshot) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.cur != nil && num(s.Info["Uptime_sec"]) < num(p.cur.Info["Uptime_sec"]) {
+	sifirlandi := p.cur != nil && num(s.Info["Uptime_sec"]) < num(p.cur.Info["Uptime_sec"])
+	if sifirlandi {
 		p.samples = nil // HAProxy yeniden başladı, sayaçlar sıfırlandı; aralık hesabı baştan
 	}
 	p.addSample(s)
+	p.rollMinute(s, sifirlandi)
 	p.prev, p.cur = p.cur, s
 	p.lastErr = ""
 	if p.prev == nil {
@@ -313,16 +387,25 @@ func (p *StatsPoller) store(s *Snapshot) {
 	if len(p.hist) > p.maxHist {
 		p.hist = p.hist[len(p.hist)-p.maxHist:]
 	}
+	p.minPt.C2 += pt.C2
+	p.minPt.C3 += pt.C3
+	p.minPt.C4 += pt.C4
+	p.minPt.C5 += pt.C5
+	p.minPt.In += pt.In
+	p.minPt.Out += pt.Out
+	p.minPt.Reqs += pt.Reqs
+	p.minPtN++
 }
 
 type StateResponse struct {
-	OK      bool      `json:"ok"`
-	Error   string    `json:"error,omitempty"`
-	ErrorAt int64     `json:"errorAt,omitempty"`
-	Cur     *Snapshot `json:"cur"`
-	Prev    *Snapshot `json:"prev"`
-	History []Point   `json:"history"`
-	Window  *Window   `json:"window"`
+	OK        bool      `json:"ok"`
+	Error     string    `json:"error,omitempty"`
+	ErrorAt   int64     `json:"errorAt,omitempty"`
+	Cur       *Snapshot `json:"cur"`
+	Prev      *Snapshot `json:"prev"`
+	History   []Point   `json:"history"`
+	Window    *Window   `json:"window"`
+	Retention int       `json:"retention"` // dakika cinsinden saklama süresi
 }
 
 // Seçilen aralıkta her satırın sayaç farkı: kaç istek, kaçı hangi yanıt sınıfı, kaç bağlantı hatası.
@@ -339,18 +422,31 @@ type Window struct {
 	Rows    map[string]WindowRow `json:"rows"`
 }
 
-func clampMinutes(m int) int {
+func (p *StatsPoller) clampMinutes(m int) int {
 	if m < 1 {
 		return 1
 	}
-	if m > maxWindowMin {
-		return maxWindowMin
+	if m > p.retention {
+		return p.retention
 	}
 	return m
 }
 
+// Panelin sunabileceği aralıklar (dakika); saklama süresine göre kırpılır
+func (p *StatsPoller) Ranges() []int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var out []int
+	for _, m := range []int{5, 15, 60, 360, 1440} {
+		if m <= p.retention {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 func (p *StatsPoller) State(minutes int) StateResponse {
-	minutes = clampMinutes(minutes)
+	minutes = p.clampMinutes(minutes)
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	resp := StateResponse{OK: p.lastErr == "" && p.cur != nil, Error: p.lastErr, ErrorAt: p.errAt, Cur: p.cur, Prev: p.prev}
@@ -359,14 +455,62 @@ func (p *StatsPoller) State(minutes int) StateResponse {
 	}
 	from := p.cur.At - int64(minutes)*60_000
 	var pts []Point
-	for _, pt := range p.hist {
+	kaynak := p.hist // 1 saate kadar 2 saniyelik noktalar
+	if minutes > fineWindowMin {
+		kaynak = make([]Point, 0, len(p.minutes)) // ötesinde dakikalık ortalamalar
+		for _, m := range p.minutes {
+			kaynak = append(kaynak, m.P)
+		}
+	}
+	for _, pt := range kaynak {
 		if pt.T >= from {
 			pts = append(pts, pt)
 		}
 	}
 	resp.History = downsample(pts, maxChartPts)
-	resp.Window = p.window(from, minutes)
+	if minutes > fineWindowMin {
+		resp.Window = p.windowFromMinutes(from, minutes)
+	} else {
+		resp.Window = p.window(from, minutes)
+	}
+	resp.Retention = p.retention
 	return resp
+}
+
+// Uzun aralıklar: dakikalık artışların toplamı
+func (p *StatsPoller) windowFromMinutes(from int64, minutes int) *Window {
+	toplam := map[string][]float64{}
+	var ilk int64
+	for _, m := range p.minutes {
+		if m.T < from {
+			continue
+		}
+		if ilk == 0 {
+			ilk = m.T
+		}
+		for k, d := range m.D {
+			t := toplam[k]
+			if t == nil {
+				t = make([]float64, len(windowFields))
+				toplam[k] = t
+			}
+			for i, v := range d {
+				t[i] += v
+			}
+		}
+	}
+	if ilk == 0 {
+		return nil
+	}
+	w := &Window{Minutes: minutes, Seconds: float64(p.cur.At-ilk) / 1000, Rows: map[string]WindowRow{}}
+	for k, c := range toplam {
+		n := c[0]
+		if n == 0 {
+			n = c[1] // eski sürümlerde sunucu satırında req_tot yok
+		}
+		w.Rows[k] = WindowRow{N: n, Codes: [6]float64{c[2], c[3], c[4], c[5], c[6], c[7]}, Econ: c[8], Eresp: c[9]}
+	}
+	return w
 }
 
 // Aralığın başına denk gelen (ya da ondan hemen önceki) örnekle şimdiki değerlerin farkı

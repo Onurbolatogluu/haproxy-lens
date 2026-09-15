@@ -4,6 +4,23 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.11.0
+
+- **Geçmiş artık 24 saat saklanıyor** (eskiden 1 saat). Zaman aralığı seçicisine **6 saat** ve **24 saat** eklendi. Süre `RETENTION=48h ./install.sh` ile değiştirilebiliyor.
+- **Ajan yeniden başlasa da geçmiş kaybolmuyor.** Veriler dakikada bir `/var/lib/haproxy-lens` altına sıkıştırılmış tek dosya olarak yazılıyor; 24 saat birkaç yüz KB tutuyor. Dosya bozuksa ajan sıfırdan başlıyor ve bunu günlüğe yazıyor.
+- Uzun aralıklarda oranlar dakikalık artışların toplamından hesaplanıyor; grafikler dakikalık ortalamalardan çiziliyor.
+- Eski dakikalar kademeli sadeleşiyor: 1 saatten sonra tam adres ve IP dökümü gibi ayrıntılar, 6 saatten sonra yol ve IP listeleri düşüyor. **Sayılar (istek, yanıt kodu, backend başına) saklama süresi boyunca eksiksiz kalıyor.** Panel hangi bilginin ne kadarlık süreyi kapsadığını yazıyor.
+- Servisin bellek tavanı 128 MB'tan 256 MB'a çıkarıldı; 24 saatlik geçmiş bellekte de tutuluyor.
+- Kaldırma betiği saklanan geçmişi de siliyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.10.1
 
 - Backend başına adres ve IP dökümü yanlış yerdeydi: backend ayrıntısının içine konmuştu. Artık **"En çok istek alan backend'ler"** panelinde; satıra tıklayınca o backend'e gelen adresler ve IP'ler açılıyor. Böylece "bu backend'e hiç trafik gitmemeli" sorusu listeye bakarken cevaplanıyor.

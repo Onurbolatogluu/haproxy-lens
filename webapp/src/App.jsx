@@ -253,7 +253,8 @@ function fmtField(k, v, row) {
 }
 
 // ---------------- Zaman aralığı ----------------
-const RANGES = [[5, `5${NB}dk`], [15, `15${NB}dk`], [60, `1${NB}saat`]];
+const RANGES = [[5, `5${NB}dk`], [15, `15${NB}dk`], [60, `1${NB}saat`], [360, `6${NB}saat`], [1440, `24${NB}saat`]];
+const araLabel = (dk) => (dk % 60 === 0 ? `${dk / 60}${NB}saat` : `${dk}${NB}dakika`);
 // Seçili aralığın satır bazındaki sayaç farkları; errRatio/codeCounts ile aynı biçimde
 const WinCtx = createContext({ wrates: {}, label: "açıldığından beri", minutes: 60, logs: null });
 
@@ -265,7 +266,7 @@ function windowToRates(win) {
 function winLabel(win, minutes) {
   if (!win) return "açıldığından beri";
   if (win.seconds < minutes * 60 - 20) return `son ${fmtDur(win.seconds)}`;
-  return minutes >= 60 ? `son 1${NB}saat` : `son ${minutes}${NB}dakika`;
+  return `son ${araLabel(minutes)}`;
 }
 const cap = (t) => t.charAt(0).toLocaleUpperCase("tr-TR") + t.slice(1);
 
@@ -1317,12 +1318,16 @@ function TrafficCharts({ points }) {
   );
 }
 
-function RangePicker({ minutes, setMinutes }) {
+function RangePicker({ minutes, setMinutes, retention }) {
+  const secenek = RANGES.filter(([m]) => !retention || m <= retention);
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 mt-8 mb-3">
-      <p className="text-sm" style={{ color: C.muted }}>Grafikler, 5xx oranları, yanıt türleri ve log bölümü bu zaman aralığını kullanır.</p>
+      <p className="text-sm" style={{ color: C.muted }}>
+        Grafikler, 5xx oranları, yanıt türleri ve log bölümü bu zaman aralığını kullanır.
+        {retention ? ` Geçmiş ${araLabel(retention)} saklanır ve ajan yeniden başlasa da kaybolmaz.` : ""}
+      </p>
       <div className="flex gap-1" role="group" aria-label="Zaman aralığı">
-        {RANGES.map(([m, t]) => (
+        {secenek.map(([m, t]) => (
           <button key={m} type="button" onClick={() => setMinutes(m)} aria-pressed={minutes === m}
             className="rounded-md px-3 py-1.5 text-sm"
             style={minutes === m ? { background: C.panel2, color: C.text, border: `1px solid ${C.info}` } : { color: C.muted, border: `1px solid ${C.line}` }}>
@@ -1568,10 +1573,16 @@ function LogSection({ logs, minutes }) {
         <div>
           <h2 className="text-xl font-semibold" style={{ letterSpacing: "-0.01em" }}>Log'dan gelenler</h2>
           <p className="text-sm mt-1" style={{ color: C.muted }}>
-            {minutes >= 60 ? `Son 1${NB}saatte` : `Son ${minutes}${NB}dakikada`} {fmtNum(total)} istek.
+            Son {araLabel(minutes)} içinde {fmtNum(total)} istek.
             {ago != null ? ` En son satır ${fmtDur(Math.max(0, ago))} önce.` : " Henüz satır okunmadı."}
             {" "}Sorgu parametreleri (?...) saklanmaz.
             {logs.source ? <span style={{ color: C.faint }}> Kaynak: {logs.source.replace(/^file:/, "").replace(/^journal:/, "journald, ")}.</span> : null}
+            {logs.detailMinutes > 0 && minutes > logs.detailMinutes && (
+              <span style={{ color: C.faint }}>
+                {" "}Sayılar {araLabel(minutes)} için; adres ve IP ayrıntısı son {araLabel(logs.detailMinutes)},
+                {minutes > logs.listMinutes ? ` yol ve IP listeleri son ${araLabel(logs.listMinutes)}` : " yol ve IP listeleri de tüm aralık"} için.
+              </span>
+            )}
             {total > 0 && (
               <span style={{ color: C.faint }}>
                 {" "}{logs.hostLines === 0
@@ -1848,7 +1859,7 @@ export default function App() {
             <StatusHero findings={findings} model={model} onJump={jump} />
             <ConfigNotes cfg={cfg} />
             <PulseStrip model={model} rates={rates} info={cur.info} />
-            <RangePicker minutes={minutes} setMinutes={setMinutes} />
+            <RangePicker minutes={minutes} setMinutes={setMinutes} retention={state?.retention} />
             <TrafficCharts points={points} />
 
             <SectionTitle title="Backend'ler" sub={`Sorunlu olanlar ve en yoğunlar üstte. İstek/sn şu anki değer; 5xx oranı ${label} için. Satıra tıkla, sunucuları gör; sunucu adına tıklarsan HAProxy'nin verdiği tüm alanlar açılır.`} />

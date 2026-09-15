@@ -28,6 +28,8 @@ func main() {
 	listen := flag.String("listen", "127.0.0.1:8405", "Panelin dinleyeceği adres (IP:port)")
 	allow := flag.String("allow", "", "Panele erişebilecek ağlar, virgülle (boşsa özel ağlar: "+defaultAllow+")")
 	interval := flag.Duration("interval", 2*time.Second, "Stats okuma aralığı")
+	retention := flag.Duration("retention", 24*time.Hour, "Geçmişin ne kadar saklanacağı (en az 1 saat)")
+	stateDir := flag.String("state-dir", "", "Geçmişin diske yazılacağı klasör (boşsa sadece bellekte tutulur)")
 	detect := flag.Bool("detect", false, "Uyumluluk kontrolü: bul, dene, rapor ver ve çık (hiçbir şey değiştirmez)")
 	detectEnv := flag.Bool("detect-env", false, "Tespit sonucunu kurulum betiği için yaz ve çık")
 	showAllow := flag.Bool("show-allow", false, "-allow listesini doğrula, anlaşılır hâlini yaz ve çık")
@@ -81,7 +83,11 @@ func main() {
 		}
 	}
 
-	stats := NewStatsPoller(*socket, *interval, int(time.Hour / *interval))
+	retMin := int(retention.Minutes())
+	if retMin < 60 {
+		retMin = 60
+	}
+	stats := NewStatsPoller(*socket, *interval, int(time.Hour / *interval), retMin)
 	go stats.Run()
 
 	var logs *LogAnalyzer
@@ -92,7 +98,16 @@ func main() {
 			src = "" // gözlemci bulacak
 		}
 		logs = NewLogAnalyzer(src, *cfList)
+		logs.SetRetention(retMin)
 		go logs.Run()
+	}
+	// Geçmişi diske yaz: ajan yeniden başladığında (sürüm güncellemesi gibi) veriler kaybolmasın
+	if *stateDir != "" {
+		store := NewStore(*stateDir, stats, logs)
+		if err := store.Load(); err != nil {
+			log.Printf("Kayıtlı geçmiş yüklenemedi, sıfırdan başlanıyor: %v", err)
+		}
+		go store.Run()
 	}
 	// Config'i, log kaynağını ve socket'i çalışırken izler; değişiklikleri yeniden kurulum olmadan uygular
 	env := NewEnv(stats, logs, logAuto)
@@ -120,6 +135,9 @@ func main() {
 			m = 5
 		}
 		writeJSON(w, logs.Report(m))
+	})
+	mux.HandleFunc("/api/ranges", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"ranges": stats.Ranges(), "retention": retMin})
 	})
 	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, env.Info())

@@ -20,6 +20,7 @@ Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur
 
 - **HAProxy config'ine ve servisine dokunmaz.** Reload ve restart yapmaz.
 - **Her sunucuya kendini uydurur.** Ajan, çalışan HAProxy'nin config'ini sadece okuyarak stats socket'ini, log kaynağını ve her frontend'in log biçimini kendisi bulur. Özel `log-format` tanımları da okunur.
+- **Geçmişi saklar.** Grafikler ve oranlar varsayılan olarak 24 saat geriye gider. Veriler `/var/lib/haproxy-lens` altına yazılır (24 saat için birkaç yüz KB), böylece ajan yeniden başladığında geçmiş kaybolmaz.
 - **Çalışırken izler, yeniden kurulum istemez.** Config değişip HAProxy reload edilince (yeni log biçimi, yeni Host yakalaması, yeni backend) ajan bunu en geç 30 saniyede fark eder ve kendini günceller. Log kaynağı susarsa yenisini arar; stats socket çalışmazsa config'teki başka bir socket'e geçer.
 - **Eksiği panelde söyler.** Config'te veriyi kısıtlayan bir şey varsa (log kapalı, `dontlog-normal`, alan adı yakalanmıyor, sağlık kontrolü yok, okunamayan log satırları...) panelin üstündeki "Yapılandırma notları" bölümünde ne olduğunu, neyi etkilediğini ve eklenebilecek config satırını yazar.
 - **Emin olamazsa kurmaz.** Çalışan bir stats socket bulamazsa hiçbir şey değiştirmeden durur ve sebebini yazar.
@@ -78,6 +79,7 @@ Satırın sonundaki `./install.sh` yerine kullanabilirsin:
 | `LISTEN=10.0.0.5 ./install.sh` | Panelin adresini elle verir |
 | `LISTEN=127.0.0.1 ./install.sh` | Paneli sadece sunucunun içinden açar (SSH tüneliyle kullanılır) |
 | `LOG=/yol/haproxy.log ./install.sh` | Log kaynağını elle sabitler (varsayılan: ajan kendisi bulur ve izler) |
+| `RETENTION=48h ./install.sh` | Geçmişin ne kadar saklanacağı (varsayılan 24 saat, en az 1 saat) |
 
 Güncellemede `ALLOW` verilmezse önceki kurulumdaki liste korunur.
 
@@ -146,6 +148,7 @@ Ajan config'e hiçbir şey yazmaz. Önerilen bir satırı eklemek senin kararın
 | Ne | Nerede |
 |---|---|
 | Program | `/usr/local/bin/haproxy-lens` |
+| Saklanan geçmiş | `/var/lib/haproxy-lens` (systemd oluşturur, kaldırma betiği siler) |
 | Servis | `/etc/systemd/system/haproxy-lens.service` |
 | Sistem kullanıcısı | `haproxy-lens` (giriş yapamaz) |
 
@@ -179,7 +182,9 @@ Alan adını görmek istediğin bir LB'de bunu sen eklemeye karar verirsen en ba
 - **Alan adı:** Varsayılan `httplog` biçimi Host bilgisini içermez; o LB'de hiçbir kaynaktan alan adı bulunamazsa (yukarıdaki tabloya bakın) 3xx, 4xx ve 5xx dönen isteklerde sadece yol ve IP görünür.
 - **Gerçek IP:** Cloudflare arkasından gelen isteklerde log'daki IP Cloudflare'e aittir; panel bu IP'leri "Cloudflare" diye etiketler.
 - **Log biçimi tahmini değil:** Ajan satırları config'teki log tanımına göre okur. Config'te olmayan bir biçimle gelen satırlar (ör. başka bir sunucudan aynı dosyaya yazılanlar) okunamaz ve "Yapılandırma notları"nda örnekleriyle görünür.
-- **Geçmiş:** Grafikler ve yanıt kodu sayımları 1 saat hafızada tutulur; ajan ya da HAProxy yeniden başlarsa sıfırdan dolmaya başlar. O sırada panel, aralığın gerçekte kaç dakikayı kapsadığını yazar. Kalıcı bir veritabanı yok.
+- **Geçmişin ayrıntısı zamanla azalır:** Sayılar (istek, yanıt kodu, backend başına) saklama süresi boyunca eksiksiz durur. Ama yol ve IP listeleri son 6 saati, tam adres ve IP dökümü gibi ayrıntılar son 1 saati kapsar. Panel bunu ilgili bölümde yazar.
+- **Kalıcı bir veritabanı yok:** Geçmiş tek bir sıkıştırılmış dosyada tutulur. Yıllık trend ya da serbest sorgu gerekiyorsa Prometheus gibi bir sistem gerekir.
+- **Yeniden başlatma:** HAProxy yeniden başlarsa sayaçları sıfırlandığı için o andan sonrası yeniden birikir; panel aralığın gerçekte kaç dakikayı kapsadığını yazar.
 - **Tek sunucu:** Her kurulum sadece kendi sunucusunu gösterir.
 - **Şifre ve HTTPS yok:** Erişim sadece ağ adresine göre sınırlanır. İzinli ağdaki herkes paneli görebilir; gerekirse `ALLOW` ile yönetim ağına daralt.
 
@@ -222,6 +227,7 @@ Dosyalar:
 | Dosya | İçerik |
 |---|---|
 | `main.go` | Parametreler, web sunucusu, `/api/*` uçları |
+| `store.go` | Geçmişin diske yazılması ve yeniden başlatmada yüklenmesi |
 | `haproxy.go` | Stats socket'inden okuma (izin verilen komutlar burada), zaman aralığı hesabı |
 | `config.go` | haproxy.cfg'yi okuma: bölümler, `defaults` mirası, log hedefleri, Host yakalama |
 | `logformat.go` | `log-format` tanımını ayrıştırıcıya çevirme (httplog, httpslog, tcplog, özel) |

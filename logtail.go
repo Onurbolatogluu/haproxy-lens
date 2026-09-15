@@ -317,9 +317,11 @@ type bucket struct {
 	blocked    map[blockKey]*blockAgg
 	clients    map[string]*clientAgg
 	backends   map[string]*backendAgg
-	withHost   int64 // alan adı bulunan satır sayısı
-	detailKeys int   // ayrıntısı tutulan satır sayısı (sınır: maxDetailKeys)
-	clientKeys int   // adres dökümü tutulan IP sayısı (sınır: maxClientDetail)
+	classes    [4]int64 // 2xx, 3xx, 4xx, 5xx; yollar sadeleştirilse de kalır
+	level      int      // 0 tam ayrıntı, 1 sadeleşmiş, 2 en sade
+	withHost   int64    // alan adı bulunan satır sayısı
+	detailKeys int      // ayrıntısı tutulan satır sayısı (sınır: maxDetailKeys)
+	clientKeys int      // adres dökümü tutulan IP sayısı (sınır: maxClientDetail)
 }
 
 func (b *bucket) backend(ad string) *backendAgg {
@@ -352,20 +354,22 @@ func newBucket() *bucket {
 }
 
 type LogAnalyzer struct {
-	source   string // "file:/yol", "journal:haproxy" ya da "" (henüz yok)
-	path     string
-	cfNets   []*net.IPNet
-	parser   atomic.Pointer[LogParser]
-	mu       sync.Mutex
-	stop     chan struct{} // kaynak değişince eski okuyucuyu durdurur
-	changed  chan struct{}
-	buckets  map[int64]*bucket
-	lines    int64
-	parsed   int64
-	tcpLines int64
-	lastAt   time.Time
-	lastLine time.Time // kaynaktan en son satır geldiği an (okunmasa bile)
-	lastErr  string
+	source    string // "file:/yol", "journal:haproxy" ya da "" (henüz yok)
+	path      string
+	cfNets    []*net.IPNet
+	parser    atomic.Pointer[LogParser]
+	mu        sync.Mutex
+	stop      chan struct{} // kaynak değişince eski okuyucuyu durdurur
+	changed   chan struct{}
+	retention int // dakika
+	dirty     bool
+	buckets   map[int64]*bucket
+	lines     int64
+	parsed    int64
+	tcpLines  int64
+	lastAt    time.Time
+	lastLine  time.Time // kaynaktan en son satır geldiği an (okunmasa bile)
+	lastErr   string
 	// okunamayan trafik satırları: dakikalık sayım + son örnekler
 	unparsed map[int64]int64
 	samples  []string
@@ -385,7 +389,7 @@ func NewLogAnalyzer(source, cloudflareList string) *LogAnalyzer {
 	source = normSource(source)
 	_, path, _ := strings.Cut(source, ":")
 	nets := append(builtinCloudflareNets(), loadCIDRs(cloudflareList)...)
-	a := &LogAnalyzer{source: source, path: path, cfNets: nets, buckets: map[int64]*bucket{},
+	a := &LogAnalyzer{source: source, path: path, cfNets: nets, retention: detayDakika, buckets: map[int64]*bucket{},
 		stop: make(chan struct{}), changed: make(chan struct{}, 1), unparsed: map[int64]int64{}}
 	a.parser.Store(defaultParser)
 	return a
@@ -393,6 +397,22 @@ func NewLogAnalyzer(source, cloudflareList string) *LogAnalyzer {
 
 // Config değişince yeni ayrıştırıcı; okuma kesilmeden devreye girer. Eski biçime göre
 // "okunamadı" sayılan satırlar yeni durumu yansıtmadığı için o sayaç sıfırlanır.
+// Saklama süresi (dakika); ajan başlarken ayarlanır
+func (a *LogAnalyzer) SetRetention(dk int) {
+	if dk < detayDakika {
+		dk = detayDakika
+	}
+	a.mu.Lock()
+	a.retention = dk
+	a.mu.Unlock()
+}
+
+func (a *LogAnalyzer) Retention() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.retention
+}
+
 func (a *LogAnalyzer) SetParser(p *LogParser) {
 	a.parser.Store(p)
 	a.mu.Lock()
@@ -564,6 +584,87 @@ func (a *LogAnalyzer) isCloudflare(ip string) bool {
 	return false
 }
 
+// Eski dakikalar iki kademede sadeleşir: 1 saatten sonra ayrıntılar (tam adres, IP dökümü)
+// düşer, 6 saatten sonra yol ve IP listeleri de düşer. Sayılar her zaman eksiksiz kalır.
+const (
+	detayDakika = 60  // bu süreye kadar tam ayrıntı
+	listeDakika = 360 // bu süreye kadar yol ve IP listeleri
+)
+
+func (b *bucket) sadelestir(hedef int) {
+	if b.level >= hedef {
+		return
+	}
+	if hedef >= 1 {
+		for _, v := range b.paths {
+			v.Err = nil
+		}
+		for _, v := range b.blocked {
+			v.Det = nil
+		}
+		for _, v := range b.clients {
+			v.Paths = nil
+		}
+		b.enYogun(50, 30)
+	}
+	if hedef >= 2 {
+		b.paths = map[pathKey]*pathAgg{}
+		b.blocked = map[blockKey]*blockAgg{}
+		b.clients = map[string]*clientAgg{}
+	}
+	b.level = hedef
+}
+
+// Kovada yalnızca en yoğun yolları ve IP'leri bırakır
+func (b *bucket) enYogun(yol, ip int) {
+	if len(b.paths) > yol {
+		tip := make([]pathKey, 0, len(b.paths))
+		for k := range b.paths {
+			tip = append(tip, k)
+		}
+		sort.Slice(tip, func(i, j int) bool { return b.paths[tip[i]].N > b.paths[tip[j]].N })
+		for _, k := range tip[yol:] {
+			delete(b.paths, k)
+		}
+	}
+	if len(b.blocked) > yol {
+		tip := make([]blockKey, 0, len(b.blocked))
+		for k := range b.blocked {
+			tip = append(tip, k)
+		}
+		sort.Slice(tip, func(i, j int) bool { return b.blocked[tip[i]].N > b.blocked[tip[j]].N })
+		for _, k := range tip[yol:] {
+			delete(b.blocked, k)
+		}
+	}
+	if len(b.clients) > ip {
+		tip := make([]string, 0, len(b.clients))
+		for k := range b.clients {
+			tip = append(tip, k)
+		}
+		sort.Slice(tip, func(i, j int) bool { return b.clients[tip[i]].N > b.clients[tip[j]].N })
+		for _, k := range tip[ip:] {
+			delete(b.clients, k)
+		}
+	}
+}
+
+// Yaşlanan kovaları sadeleştirir, saklama süresini aşanları siler
+func (a *LogAnalyzer) bakim() {
+	simdi := time.Now().Unix() / 60
+	for k, b := range a.buckets {
+		yas := simdi - k
+		switch {
+		case yas > int64(a.retention):
+			delete(a.buckets, k)
+		case yas > listeDakika:
+			b.sadelestir(2)
+		case yas > detayDakika:
+			b.sadelestir(1)
+		}
+	}
+}
+
 func (a *LogAnalyzer) add(r logRecord) {
 	min := r.At.Unix() / 60
 	a.mu.Lock()
@@ -572,18 +673,17 @@ func (a *LogAnalyzer) add(r logRecord) {
 	if b == nil {
 		b = newBucket()
 		a.buckets[min] = b
-		cutoff := time.Now().Unix()/60 - 61
-		for k := range a.buckets {
-			if k < cutoff {
-				delete(a.buckets, k)
-			}
-		}
+		a.bakim()
+		a.dirty = true
 	}
 	a.parsed++
 	if r.At.After(a.lastAt) {
 		a.lastAt = r.At
 	}
 	b.kinds[r.Kind]++
+	if i := r.Status/100 - 2; i >= 0 && i < 4 {
+		b.classes[i]++
+	}
 	if r.Host != "" {
 		b.withHost++
 	}
@@ -966,18 +1066,24 @@ type LogReport struct {
 	Clients   []ClientRow      `json:"clients"`
 	CFKnown   bool             `json:"cfKnown"`
 	HostLines int64            `json:"hostLines"` // aralıkta alan adı bulunan satır sayısı
+	// Eski dakikalar sadeleştiği için ayrıntı ve listeler daha kısa bir süreyi kapsar
+	DetailMinutes int `json:"detailMinutes"`
+	ListMinutes   int `json:"listMinutes"`
+	Retention     int `json:"retention"`
 }
 
 func (a *LogAnalyzer) Report(minutes int) LogReport {
 	if minutes < 1 {
 		minutes = 1
 	}
-	if minutes > 60 {
-		minutes = 60
-	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	rep := LogReport{Enabled: true, Source: a.source, Error: a.lastErr, Minutes: minutes, Lines: a.lines, Parsed: a.parsed, Kinds: map[string]int64{}, CFKnown: len(a.cfNets) > 0}
+	if minutes > a.retention {
+		minutes = a.retention
+	}
+	rep := LogReport{Enabled: true, Source: a.source, Error: a.lastErr, Minutes: minutes, Lines: a.lines, Parsed: a.parsed,
+		Kinds: map[string]int64{}, CFKnown: len(a.cfNets) > 0,
+		DetailMinutes: detayDakika, ListMinutes: listeDakika, Retention: a.retention}
 	if !a.lastAt.IsZero() {
 		rep.LastAt = a.lastAt.UnixMilli()
 	}
@@ -990,6 +1096,9 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 			continue
 		}
 		rep.HostLines += b.withHost
+		for i, n := range b.classes {
+			rep.Classes[i] += n
+		}
 		for k, v := range b.kinds {
 			rep.Kinds[k] += v
 		}
@@ -1110,10 +1219,6 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 
 	var codeRows []CodePathRow
 	for k, v := range paths {
-		rep.Classes[0] += v.S2
-		rep.Classes[1] += v.S3
-		rep.Classes[2] += v.S4
-		rep.Classes[3] += v.S5
 		if v.S3+v.S4+v.S5 == 0 {
 			continue
 		}
