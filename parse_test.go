@@ -517,8 +517,12 @@ func TestUzunAralikVeDiskeKayit(t *testing.T) {
 	if rep.Classes[0] != 1800 || rep.Classes[3] != 180 {
 		t.Fatalf("3 saatlik sınıf toplamları: %v", rep.Classes)
 	}
-	if rep.Minutes != 180 || rep.DetailMinutes != 60 {
-		t.Fatalf("rapor aralığı: %d, ayrıntı: %d", rep.Minutes, rep.DetailMinutes)
+	// DetailMinutes artık ayarlanan değil, gerçekte kapsanan süre
+	if rep.Minutes != 180 || rep.DetailMinutes < 55 || rep.DetailMinutes > 65 {
+		t.Fatalf("rapor aralığı: %d, ayrıntı kapsamı: %d (beklenen ~60)", rep.Minutes, rep.DetailMinutes)
+	}
+	if rep.ListMinutes < 175 {
+		t.Fatalf("liste kapsamı: %d (beklenen ~180)", rep.ListMinutes)
 	}
 	// 1 saati aşan kovalarda ayrıntı düşmüş olmalı, sayılar durmalı
 	eski := a.buckets[simdi.Add(-120*time.Minute).Unix()/60]

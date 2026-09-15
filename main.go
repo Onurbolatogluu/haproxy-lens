@@ -30,6 +30,9 @@ func main() {
 	interval := flag.Duration("interval", 2*time.Second, "Stats okuma aralığı")
 	retention := flag.Duration("retention", 24*time.Hour, "Geçmişin ne kadar saklanacağı (en az 1 saat)")
 	stateDir := flag.String("state-dir", "", "Geçmişin diske yazılacağı klasör (boşsa sadece bellekte tutulur)")
+	detailWin := flag.Duration("detail", time.Hour, "Tam ayrıntının (adres, IP dökümü) saklanacağı süre; belleği doğrudan etkiler")
+	listWin := flag.Duration("lists", 6*time.Hour, "Yol ve IP listelerinin saklanacağı süre")
+	budgetMB := flag.Int("memory-budget", 250, "Ayrıntı için bellek bütçesi (MB); aşılırsa en eski ayrıntı bırakılır")
 	detect := flag.Bool("detect", false, "Uyumluluk kontrolü: bul, dene, rapor ver ve çık (hiçbir şey değiştirmez)")
 	detectEnv := flag.Bool("detect-env", false, "Tespit sonucunu kurulum betiği için yaz ve çık")
 	showAllow := flag.Bool("show-allow", false, "-allow listesini doğrula, anlaşılır hâlini yaz ve çık")
@@ -99,6 +102,8 @@ func main() {
 		}
 		logs = NewLogAnalyzer(src, *cfList)
 		logs.SetRetention(retMin)
+		logs.SetDetailWindows(int(detailWin.Minutes()), int(listWin.Minutes()))
+		logs.SetBudget(int64(*budgetMB) << 20)
 		go logs.Run()
 	}
 	// Geçmişi diske yaz: ajan yeniden başladığında (sürüm güncellemesi gibi) veriler kaybolmasın

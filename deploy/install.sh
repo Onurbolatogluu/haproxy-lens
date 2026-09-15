@@ -10,6 +10,9 @@
 #   ALLOW=10.0.0.0/24 ./install.sh   Panele erişebilecek ağlar (varsayılan: özel ağlar)
 #   LOG=/yol/haproxy.log ./install.sh  Log kaynağını elle sabitle (varsayılan: ajan kendisi bulur)
 #   RETENTION=48h ./install.sh       Geçmişin ne kadar saklanacağı (varsayılan 24 saat)
+#   DETAIL=24h LISTS=24h ./install.sh  Ayrıntının ve listelerin saklanacağı süre (varsayılan: 1 ve 6 saat)
+#   BUDGET=500 ./install.sh          Ayrıntı için bellek bütçesi, MB (varsayılan 250)
+#   MEMMAX=768M ./install.sh         Servisin bellek tavanı (varsayılan 512M)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -63,6 +66,10 @@ GROUPS_ALL="$(echo $GROUPS_ALL)"
 LOG_SRC="${LOG:-auto}"
 # Geçmişin saklama süresi; veriler /var/lib/haproxy-lens altına yazılır
 RETENTION="${RETENTION:-24h}"
+DETAIL="${DETAIL:-1h}"
+LISTS="${LISTS:-6h}"
+BUDGET="${BUDGET:-250}"
+MEMMAX="${MEMMAX:-512M}"
 
 # Erişim listesi: elle verilmediyse güncellemede önceki kurulumunki korunur
 if [ -z "${ALLOW+x}" ] && [ -f "$UNIT" ]; then
@@ -86,6 +93,10 @@ echo "  - Giriş yapamayan 'haproxy-lens' sistem kullanıcısı"
 echo "  - Servisin ek grupları: ${GROUPS_ALL:-yok} (kullanıcı bu gruplara kalıcı olarak eklenmez)"
 echo "  - Config, log biçimi ve log kaynağı çalışırken izlenir; config değişince yeniden kurulum gerekmez."
 echo "  - Geçmiş $RETENTION saklanır: /var/lib/haproxy-lens (birkaç yüz KB; kaldırırken silinir)"
+echo "  - Adres ve IP ayrıntısı $DETAIL, yol/IP listeleri $LISTS saklanır"
+echo "  - Ayrıntı için bellek bütçesi ${BUDGET} MB, servis tavanı $MEMMAX"
+echo "    Bellek yalnızca gerektiği kadar kullanılır; bütçe aşılırsa ajan en eski ayrıntıyı bırakır."
+echo "    Sayılar (istek, yanıt kodu, backend dökümü) her durumda $RETENTION boyunca eksiksiz kalır."
 if [ "$LISTEN" = 127.0.0.1 ]; then
   echo "  - Panel: 127.0.0.1:$PORT (dışarıdan erişilemez, SSH tüneliyle açılır)"
 else
@@ -126,7 +137,10 @@ Environment="LENS_SOCKET=$(esc "$DET_SOCKET")"
 Environment="LENS_LOG=$(esc "$LOG_SRC")"
 Environment="LENS_ALLOW=$(esc "$ALLOW")"
 Environment="LENS_RETENTION=$(esc "$RETENTION")"
-ExecStart=/usr/local/bin/haproxy-lens -socket \${LENS_SOCKET} -log \${LENS_LOG} -listen $LISTEN_HOST:$PORT -allow \${LENS_ALLOW} -retention \${LENS_RETENTION} -state-dir /var/lib/haproxy-lens
+Environment="LENS_DETAIL=$(esc "$DETAIL")"
+Environment="LENS_LISTS=$(esc "$LISTS")"
+Environment="LENS_BUDGET=$(esc "$BUDGET")"
+ExecStart=/usr/local/bin/haproxy-lens -socket \${LENS_SOCKET} -log \${LENS_LOG} -listen $LISTEN_HOST:$PORT -allow \${LENS_ALLOW} -retention \${LENS_RETENTION} -detail \${LENS_DETAIL} -lists \${LENS_LISTS} -memory-budget \${LENS_BUDGET} -state-dir /var/lib/haproxy-lens
 
 # Geçmişin yazıldığı klasör; systemd oluşturur ve servis kullanıcısına verir
 StateDirectory=haproxy-lens
@@ -137,7 +151,7 @@ RestartSec=5
 # Kaynak tavanı: ajan ne yaparsa yapsın HAProxy'den kaynak çalamaz
 Nice=10
 CPUQuota=10%
-MemoryMax=256M
+MemoryMax=$MEMMAX
 
 # Sertleştirme: /etc ve /usr'e yazamaz, yetki yükseltemez
 NoNewPrivileges=yes

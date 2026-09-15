@@ -4,6 +4,24 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.12.0
+
+- **Bellek hatası düzeltildi (önemli).** Geç gelen log satırları eski bir dakikaya yazılabiliyor: ajan açılışta birikmiş log'u okurken ya da log gecikmeliyse. Böyle bir dakika bir kez sadeleştirilmiş sayılıyor, sonra yeniden dolduğunda bir daha sadeleştirilmiyordu; bellek sessizce büyüyordu. Ölçümde 6 saatlik bir tarama saldırısı **696 MB**'a çıkıyordu, düzeltmeden sonra aynı senaryo **125 MB**. Sadeleştirme artık her bakımda yeniden uygulanıyor.
+- **İkinci bellek düzeltmesi:** Sadeleştirmede listeler kırpılıyor ama Go'da map'ten anahtar silmek iç diziyi küçültmediği için bellek gerçekte boşalmıyordu. Map'ler artık yeniden kuruluyor; yoğun bir LB'de ~19 MB fark ediyor.
+- **Bellek bütçesi eklendi (varsayılan 250 MB).** Bellek, istek sayısından çok farklı adres sayısına bağlı; tarama saldırılarında her istek benzersiz bir adres olabiliyor ve eskiden bunu sınırlayan bir şey yoktu. Bütçe aşılırsa ajan en eski ayrıntıyı kendiliğinden bırakıyor. Dakikada 8.000 benzersiz adresle 6 saatlik saldırı testinde bellek 161 MB'da kaldı, ayrıntı 50 dakikaya indi ve **2.880.000 isteğin sayımı eksiksiz korundu**.
+- Servisin bellek tavanı 512M oldu (bütçe 250 MB + pay). Tavan bir rezervasyon değil üst sınırdır; normal kullanımda ajan yine ~40 MB tutar.
+- Panel artık ayrıntının ve listelerin ayarlanan değil **gerçekte kapsadığı** süreyi yazıyor; bütçe devreye girdiğinde bu görünür.
+- Ayrıntı ve liste süreleri ayarlanabilir oldu: `DETAIL=6h LISTS=24h BUDGET=500 MEMMAX=768M ./install.sh`. **Varsayılanlar değişmedi** (ayrıntı 1 saat, listeler 6 saat).
+- README'ye ölçülmüş bellek tablosu eklendi; ölçümler `go test -run TestBellekKullanimi` ve `go test -run TestAtakDayanikliligi` ile tekrarlanabilir.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.11.0
 
 - **Geçmiş artık 24 saat saklanıyor** (eskiden 1 saat). Zaman aralığı seçicisine **6 saat** ve **24 saat** eklendi. Süre `RETENTION=48h ./install.sh` ile değiştirilebiliyor.

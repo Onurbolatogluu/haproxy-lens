@@ -80,6 +80,8 @@ Satırın sonundaki `./install.sh` yerine kullanabilirsin:
 | `LISTEN=127.0.0.1 ./install.sh` | Paneli sadece sunucunun içinden açar (SSH tüneliyle kullanılır) |
 | `LOG=/yol/haproxy.log ./install.sh` | Log kaynağını elle sabitler (varsayılan: ajan kendisi bulur ve izler) |
 | `RETENTION=48h ./install.sh` | Geçmişin ne kadar saklanacağı (varsayılan 24 saat, en az 1 saat) |
+| `DETAIL=6h LISTS=24h ./install.sh` | Ayrıntının ve yol/IP listelerinin saklanacağı süre (belleği artırır, aşağıya bakın) |
+| `MEMMAX=512M ./install.sh` | Servisin bellek tavanı (varsayılan 256M) |
 
 Güncellemede `ALLOW` verilmezse önceki kurulumdaki liste korunur.
 
@@ -182,11 +184,32 @@ Alan adını görmek istediğin bir LB'de bunu sen eklemeye karar verirsen en ba
 - **Alan adı:** Varsayılan `httplog` biçimi Host bilgisini içermez; o LB'de hiçbir kaynaktan alan adı bulunamazsa (yukarıdaki tabloya bakın) 3xx, 4xx ve 5xx dönen isteklerde sadece yol ve IP görünür.
 - **Gerçek IP:** Cloudflare arkasından gelen isteklerde log'daki IP Cloudflare'e aittir; panel bu IP'leri "Cloudflare" diye etiketler.
 - **Log biçimi tahmini değil:** Ajan satırları config'teki log tanımına göre okur. Config'te olmayan bir biçimle gelen satırlar (ör. başka bir sunucudan aynı dosyaya yazılanlar) okunamaz ve "Yapılandırma notları"nda örnekleriyle görünür.
+- **Geçmiş bellekte tutulur, disk yalnızca yedektir.** Bu yüzden asıl sınır disk değil bellektir; ayrıntı süresini uzatmadan önce aşağıdaki tabloya bakın.
 - **Geçmişin ayrıntısı zamanla azalır:** Sayılar (istek, yanıt kodu, backend başına) saklama süresi boyunca eksiksiz durur. Ama yol ve IP listeleri son 6 saati, tam adres ve IP dökümü gibi ayrıntılar son 1 saati kapsar. Panel bunu ilgili bölümde yazar.
 - **Kalıcı bir veritabanı yok:** Geçmiş tek bir sıkıştırılmış dosyada tutulur. Yıllık trend ya da serbest sorgu gerekiyorsa Prometheus gibi bir sistem gerekir.
 - **Yeniden başlatma:** HAProxy yeniden başlarsa sayaçları sıfırlandığı için o andan sonrası yeniden birikir; panel aralığın gerçekte kaç dakikayı kapsadığını yazar.
 - **Tek sunucu:** Her kurulum sadece kendi sunucusunu gösterir.
 - **Şifre ve HTTPS yok:** Erişim sadece ağ adresine göre sınırlanır. İzinli ağdaki herkes paneli görebilir; gerekirse `ALLOW` ile yönetim ağına daralt.
+
+## Bellek
+
+Geçmiş bellekte tutulur (disk yalnızca yeniden başlatma için yedektir), bu yüzden asıl sınır diskte değil bellektedir. Varsayılan ayarlarda yoğun bir LB'de **~40 MB** kullanılır.
+
+Ölçümler `go test -run TestBellekKullanimi` ile tekrarlanabilir; yük olarak saatte ~44.000 istek, dakikada 300 farklı adres, 150 farklı IP alındı.
+
+| Ayar | Bellek |
+|---|---|
+| **Varsayılan:** ayrıntı 1 saat, listeler 6 saat | ~38 MB |
+| `DETAIL=6h LISTS=24h` | ~146 MB |
+| `DETAIL=24h LISTS=24h` (her şey tam ayrıntı) | ~476 MB |
+
+Sayılar (istek, yanıt kodu, backend başına döküm) her ayarda saklama süresi boyunca eksiksiz kalır; tablo yalnızca adres ve IP ayrıntısının maliyetidir. Trafiği düşük LB'lerde bu rakamlar çok daha azdır.
+
+**Bellek bütçesi.** Bellek istek sayısından çok *farklı adres sayısına* bağlıdır ve bir tarama saldırısında her istek benzersiz bir adres olabilir. Bu yüzden süre sınırının yanında bir bütçe vardır (varsayılan 250 MB): aşılırsa ajan en eski ayrıntıyı kendiliğinden bırakır ve panel ayrıntının gerçekte kaç dakikayı kapsadığını yazar. Testte dakikada 8.000 benzersiz adresle 6 saat saldırı üretildi (2,88 milyon istek): bellek 161 MB'da kaldı, ayrıntı 50 dakikaya indi ve sayımların tamamı korundu (`go test -run TestAtakDayanikliligi`).
+
+**Servis tavanı** (`MemoryMax`) 512 MB'tır. Bu bir rezervasyon değil üst sınırdır; amacı saldırı anında servisin öldürülmemesidir.
+
+Ayarlar: `DETAIL=6h LISTS=24h BUDGET=500 MEMMAX=768M ./install.sh`. Bütçeyi yükseltirseniz servis tavanını da yükseltin.
 
 ## Sorun giderme
 

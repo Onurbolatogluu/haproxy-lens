@@ -361,7 +361,11 @@ type LogAnalyzer struct {
 	mu        sync.Mutex
 	stop      chan struct{} // kaynak değişince eski okuyucuyu durdurur
 	changed   chan struct{}
-	retention int // dakika
+	retention int          // dakika
+	detay     int          // tam ayrıntının (tam adres, IP dökümü) saklandığı dakika
+	liste     int          // yol ve IP listelerinin saklandığı dakika
+	butce     int64        // ayrıntı için bellek bütçesi (bayt); aşılırsa en eski ayrıntı bırakılır
+	simdiDk   func() int64 // şimdiki dakika; testlerde sahte saat verilebilir
 	dirty     bool
 	buckets   map[int64]*bucket
 	lines     int64
@@ -389,7 +393,8 @@ func NewLogAnalyzer(source, cloudflareList string) *LogAnalyzer {
 	source = normSource(source)
 	_, path, _ := strings.Cut(source, ":")
 	nets := append(builtinCloudflareNets(), loadCIDRs(cloudflareList)...)
-	a := &LogAnalyzer{source: source, path: path, cfNets: nets, retention: detayDakika, buckets: map[int64]*bucket{},
+	a := &LogAnalyzer{source: source, path: path, cfNets: nets, retention: detayDakika, detay: detayDakika, liste: listeDakika,
+		simdiDk: func() int64 { return time.Now().Unix() / 60 }, buckets: map[int64]*bucket{},
 		stop: make(chan struct{}), changed: make(chan struct{}, 1), unparsed: map[int64]int64{}}
 	a.parser.Store(defaultParser)
 	return a
@@ -587,14 +592,15 @@ func (a *LogAnalyzer) isCloudflare(ip string) bool {
 // Eski dakikalar iki kademede sadeleşir: 1 saatten sonra ayrıntılar (tam adres, IP dökümü)
 // düşer, 6 saatten sonra yol ve IP listeleri de düşer. Sayılar her zaman eksiksiz kalır.
 const (
-	detayDakika = 60  // bu süreye kadar tam ayrıntı
-	listeDakika = 360 // bu süreye kadar yol ve IP listeleri
+	detayDakika = 60  // varsayılan: bu süreye kadar tam ayrıntı
+	listeDakika = 360 // varsayılan: bu süreye kadar yol ve IP listeleri
 )
 
+// Not: "zaten sadeleştirildi" diye atlamaz. Geç gelen log satırları (ajan açılışta
+// birikmiş log'u okurken ya da log gecikmeliyse) eski bir dakikaya yazılabiliyor;
+// o kova sadeleştirilmiş olsa bile yeniden dolabiliyor. Bu yüzden her bakımda
+// hedef durum yeniden uygulanır.
 func (b *bucket) sadelestir(hedef int) {
-	if b.level >= hedef {
-		return
-	}
 	if hedef >= 1 {
 		for _, v := range b.paths {
 			v.Err = nil
@@ -608,14 +614,23 @@ func (b *bucket) sadelestir(hedef int) {
 		b.enYogun(50, 30)
 	}
 	if hedef >= 2 {
-		b.paths = map[pathKey]*pathAgg{}
-		b.blocked = map[blockKey]*blockAgg{}
-		b.clients = map[string]*clientAgg{}
+		if len(b.paths) > 0 {
+			b.paths = map[pathKey]*pathAgg{}
+		}
+		if len(b.blocked) > 0 {
+			b.blocked = map[blockKey]*blockAgg{}
+		}
+		if len(b.clients) > 0 {
+			b.clients = map[string]*clientAgg{}
+		}
 	}
-	b.level = hedef
+	if hedef > b.level {
+		b.level = hedef
+	}
 }
 
-// Kovada yalnızca en yoğun yolları ve IP'leri bırakır
+// Kovada yalnızca en yoğun yolları ve IP'leri bırakır.
+// Map'ten anahtar silmek Go'da iç diziyi küçültmediği için map'ler yeniden kurulur.
 func (b *bucket) enYogun(yol, ip int) {
 	if len(b.paths) > yol {
 		tip := make([]pathKey, 0, len(b.paths))
@@ -623,9 +638,11 @@ func (b *bucket) enYogun(yol, ip int) {
 			tip = append(tip, k)
 		}
 		sort.Slice(tip, func(i, j int) bool { return b.paths[tip[i]].N > b.paths[tip[j]].N })
-		for _, k := range tip[yol:] {
-			delete(b.paths, k)
+		yeni := make(map[pathKey]*pathAgg, yol)
+		for _, k := range tip[:yol] {
+			yeni[k] = b.paths[k]
 		}
+		b.paths = yeni
 	}
 	if len(b.blocked) > yol {
 		tip := make([]blockKey, 0, len(b.blocked))
@@ -633,9 +650,11 @@ func (b *bucket) enYogun(yol, ip int) {
 			tip = append(tip, k)
 		}
 		sort.Slice(tip, func(i, j int) bool { return b.blocked[tip[i]].N > b.blocked[tip[j]].N })
-		for _, k := range tip[yol:] {
-			delete(b.blocked, k)
+		yeni := make(map[blockKey]*blockAgg, yol)
+		for _, k := range tip[:yol] {
+			yeni[k] = b.blocked[k]
 		}
+		b.blocked = yeni
 	}
 	if len(b.clients) > ip {
 		tip := make([]string, 0, len(b.clients))
@@ -643,26 +662,117 @@ func (b *bucket) enYogun(yol, ip int) {
 			tip = append(tip, k)
 		}
 		sort.Slice(tip, func(i, j int) bool { return b.clients[tip[i]].N > b.clients[tip[j]].N })
-		for _, k := range tip[ip:] {
-			delete(b.clients, k)
+		yeni := make(map[string]*clientAgg, ip)
+		for _, k := range tip[:ip] {
+			yeni[k] = b.clients[k]
 		}
+		b.clients = yeni
 	}
 }
 
 // Yaşlanan kovaları sadeleştirir, saklama süresini aşanları siler
-func (a *LogAnalyzer) bakim() {
-	simdi := time.Now().Unix() / 60
+func (a *LogAnalyzer) bakim() { a.bakimAt(a.simdiDk()) }
+
+func (a *LogAnalyzer) bakimAt(simdi int64) {
 	for k, b := range a.buckets {
 		yas := simdi - k
 		switch {
 		case yas > int64(a.retention):
 			delete(a.buckets, k)
-		case yas > listeDakika:
+		case yas > int64(a.liste):
 			b.sadelestir(2)
-		case yas > detayDakika:
+		case yas > int64(a.detay):
 			b.sadelestir(1)
 		}
 	}
+	a.butceUygula()
+}
+
+// Ayrıntı için bellek bütçesi. Tarama saldırılarında her istek benzersiz bir adres
+// olabildiği için süre tabanlı sınır tek başına yetmez; bu bütçe aşılırsa en eski
+// ayrıntı bırakılır. Sayılar hiçbir durumda kaybolmaz.
+func (a *LogAnalyzer) SetBudget(bayt int64) {
+	a.mu.Lock()
+	a.butce = bayt
+	a.mu.Unlock()
+}
+
+// Kovanın kabaca kapladığı bellek. Katsayılar ölçümden geldi (bkz. bellek_test.go):
+// tam ayrıntılı bir yol kaydı ~600 bayt, sadeleşmiş ~250 bayt.
+func (b *bucket) agirlik() int64 {
+	switch b.level {
+	case 0:
+		return int64(len(b.paths))*600 + int64(len(b.blocked))*400 + int64(len(b.clients))*250 + int64(len(b.backends))*200
+	case 1:
+		return int64(len(b.paths))*250 + int64(len(b.blocked))*150 + int64(len(b.clients))*120 + int64(len(b.backends))*200
+	default:
+		return int64(len(b.backends))*200 + 500
+	}
+}
+
+// Bütçe aşılırsa en eskiden başlayarak ayrıntıyı bırakır
+func (a *LogAnalyzer) butceUygula() {
+	if a.butce <= 0 {
+		return
+	}
+	var toplam int64
+	for _, b := range a.buckets {
+		toplam += b.agirlik()
+	}
+	if toplam <= a.butce {
+		return
+	}
+	for _, hedef := range []int{1, 2} {
+		var sira []int64
+		for k, b := range a.buckets {
+			if b.level < hedef {
+				sira = append(sira, k)
+			}
+		}
+		sort.Slice(sira, func(i, j int) bool { return sira[i] < sira[j] }) // en eski önce
+		for _, k := range sira {
+			if toplam <= a.butce {
+				return
+			}
+			b := a.buckets[k]
+			once := b.agirlik()
+			b.sadelestir(hedef)
+			toplam -= once - b.agirlik()
+		}
+	}
+}
+
+// Ayrıntının ve listelerin gerçekte kaç dakikayı kapsadığı (bütçe yüzünden kısalmış olabilir)
+func (a *LogAnalyzer) kapsam(simdi int64) (detay, liste int) {
+	enEski0, enEski1 := int64(-1), int64(-1)
+	for k, b := range a.buckets {
+		if b.level == 0 && (enEski0 < 0 || k < enEski0) {
+			enEski0 = k
+		}
+		if b.level <= 1 && (enEski1 < 0 || k < enEski1) {
+			enEski1 = k
+		}
+	}
+	if enEski0 >= 0 {
+		detay = int(simdi-enEski0) + 1
+	}
+	if enEski1 >= 0 {
+		liste = int(simdi-enEski1) + 1
+	}
+	return detay, liste
+}
+
+// Ayrıntı ve liste pencereleri; bellek kullanımını doğrudan belirler
+func (a *LogAnalyzer) SetDetailWindows(detayDk, listeDk int) {
+	if detayDk < 5 {
+		detayDk = 5
+	}
+	if listeDk < detayDk {
+		listeDk = detayDk
+	}
+	a.mu.Lock()
+	a.detay, a.liste = detayDk, listeDk
+	a.mu.Unlock()
 }
 
 func (a *LogAnalyzer) add(r logRecord) {
@@ -1083,11 +1193,12 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 	}
 	rep := LogReport{Enabled: true, Source: a.source, Error: a.lastErr, Minutes: minutes, Lines: a.lines, Parsed: a.parsed,
 		Kinds: map[string]int64{}, CFKnown: len(a.cfNets) > 0,
-		DetailMinutes: detayDakika, ListMinutes: listeDakika, Retention: a.retention}
+		Retention: a.retention}
+	rep.DetailMinutes, rep.ListMinutes = a.kapsam(a.simdiDk())
 	if !a.lastAt.IsZero() {
 		rep.LastAt = a.lastAt.UnixMilli()
 	}
-	from := time.Now().Unix()/60 - int64(minutes) + 1
+	from := a.simdiDk() - int64(minutes) + 1
 	paths := map[pathKey]*pathAgg{}
 	blocked := map[blockKey]*blockAgg{}
 	clients := map[string]*clientAgg{}
