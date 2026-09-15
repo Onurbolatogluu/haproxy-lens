@@ -6,7 +6,7 @@ sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
 ## 0.13.0
 
-- **"En çok istenen adresler" satırları artık açılıyor:** o adrese en çok istek yapan **20 IP**, sayılarıyla ve Cloudflare etiketiyle. Her IP'nin yanında o adreste aldığı yanıt kodlarının dağılımı da var (2xx/3xx/4xx/5xx).
+- **"En çok istenen adresler" satırları artık açılıyor:** o adrese en çok istek yapan **20 IP**, istek sayılarıyla. Her IP'nin yanında o adreste aldığı yanıt kodlarının dağılımı da var (2xx/3xx/4xx/5xx). Cloudflare aralıklarına düşen IP'ler "Cloudflare" diye etiketlenir; doğrudan gelen istemcilerin IP'si etiketsiz, olduğu gibi görünür.
 - Döküm yanıt kodundan bağımsız: bir adres yalnızca 2xx da dönse, yalnızca 5xx de dönse IP'ler görünür. Eskiden IP dökümü sadece hata alan adresler için tutuluyordu.
 - Listeye sığmayan IP'ler "(diğer)" satırında toplanıyor; böylece IP'lerin toplamı her zaman adresin toplam isteğine eşit.
 - Sınıra takılınca **ilk görülen değil en çok istek yapan** IP'ler tutuluyor: harita dolduğunda sayıya göre budanıyor, böylece sonradan başlayan yoğun bir IP de listeye girebiliyor.
