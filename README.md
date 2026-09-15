@@ -69,7 +69,21 @@ Rapor dört bölümden oluşur: bulunan config dosyaları ve stats socket'leri, 
 
 ### 3. Kurulum seçenekleri
 
-Satırın sonundaki `./install.sh` yerine kullanabilirsin:
+Hiçbir parametre vermezsen kurulum şu varsayılanlarla çalışır:
+
+| Parametre | Varsayılan | Ne yapar |
+|---|---|---|
+| `PORT` | `8405` | Panelin portu |
+| `LISTEN` | sunucunun iç IP'si | Panelin adresi; bulunamazsa `127.0.0.1` (yalnızca SSH tüneliyle) |
+| `ALLOW` | özel ağlar (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`, `127.0.0.0/8`) | Panele erişebilecek ağlar |
+| `LOG` | `auto` | Log kaynağı; ajan kendisi bulur ve çalışırken izler |
+| `RETENTION` | `24h` | Sayıların saklanma süresi |
+| `DETAIL` | `1h` | Tam ayrıntının (tam adres, gerçek yollar, IP dökümü) saklanma süresi |
+| `LISTS` | `6h` | Yol ve IP listelerinin saklanma süresi |
+| `BUDGET` | `250` | Ayrıntı için bellek bütçesi (MB) |
+| `MEMMAX` | `512M` | Servisin bellek tavanı |
+
+Değiştirmek için satırın sonundaki `./install.sh` yerine kullanabilirsin:
 
 | Komut | Ne yapar |
 |---|---|
@@ -87,7 +101,7 @@ Satırın sonundaki `./install.sh` yerine kullanabilirsin:
 
 Son dördü ne kadar geriye ne kadar ayrıntı göreceğini belirler; [aşağıdaki bölüme](#ne-kadar-geriye-ne-kadar-ayrıntı) bakın.
 
-Güncellemede `ALLOW` verilmezse önceki kurulumdaki liste korunur.
+Güncellemede `ALLOW` verilmezse önceki kurulumdaki liste korunur; diğer parametreler verilmezse yukarıdaki varsayılanlara döner. Kurulum, sonunda hangi değerlerle çalıştığını ekrana yazar.
 
 ### 4. Paneli aç
 
@@ -205,6 +219,8 @@ Geçmişin tamamı aynı ayrıntıda saklanmaz: veri yaşlandıkça kademeli ola
 | 1 – 6 saat | Sayılar, ayrıca en yoğun yol ve IP listeleri. Satır ayrıntısı yok | `LISTS` (6 saat) |
 | 6 – 24 saat | **Yalnızca sayılar:** istek sayısı, 2xx/3xx/4xx/5xx dağılımı, backend başına döküm, grafikler | `RETENTION` (24 saat) |
 | 24 saatten eski | Silinir | |
+
+Tablodaki süreler varsayılanlardır; hiçbir parametre vermezsen bu şekilde çalışır.
 
 Sayılar hiçbir kademede eksilmez; kısalan tek şey adres ve IP ayrıntısıdır. Grafikler ve oranlar bu yüzden 24 saat boyunca eksiksizdir.
 

@@ -9,6 +9,7 @@ sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 - README'ye **"Ne kadar geriye, ne kadar ayrıntı"** bölümü eklendi: verinin yaşlandıkça hangi kademelerden geçtiği (0-1 saat her şey, 1-6 saat listeler, 6-24 saat yalnızca sayılar), her kademeyi hangi parametrenin belirlediği ve nasıl değiştirileceği tek tabloda.
 - Kurulum seçenekleri tablosu güncellendi: `BUDGET` eksikti, `MEMMAX` varsayılanı yanlış yazıyordu (256M yerine 512M), `DETAIL` ve `LISTS` ayrı satırlara alınıp ne işe yaradıkları açıklandı.
 - Özellik listesindeki zaman aralıkları eskiydi (6 saat ve 24 saat eklenmişti, yazmıyordu).
+- **Varsayılanlar tablosu eklendi:** hiçbir parametre verilmediğinde kurulumun hangi değerlerle çalıştığı (port, adres, erişim listesi, log kaynağı, saklama süreleri, bellek bütçesi ve tavanı) tek tabloda.
 
 ### Kurulum ve güncelleme
 
@@ -143,7 +144,7 @@ Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hat
 ## 0.8.4
 
 - Panelin kendi simgesi (favicon) eklendi: mercek ve içinden geçen üç akış çizgisi. Açık zeminli olduğu için hem koyu hem açık sekme çubuğunda okunuyor; 16x16'ya kadar test edildi. SVG ve PNG olarak programın içine gömülüyor, ayrı dosya gerekmiyor.
-- Sekme başlığında artık sunucu adı yazıyor (`fbe-lb02 · haproxy-lens`); birden fazla LB'yi aynı anda açtığında hangisinin hangisi olduğu belli oluyor.
+- Sekme başlığında artık sunucu adı yazıyor (`fenerbahce-lb02 · haproxy-lens`); birden fazla LB'yi aynı anda açtığında hangisinin hangisi olduğu belli oluyor.
 - "En çok istenen adresler" tablosuna 2xx sütunu eklendi; artık bir adresin yanıtlarının dört sınıfa dağılımı tek satırda görünüyor.
 - README'ye marka notu: bu bağımsız bir proje, HAProxy Technologies ile ilgisi yok.
 
