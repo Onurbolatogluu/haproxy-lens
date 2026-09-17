@@ -296,11 +296,58 @@ const (
 	maxClientPaths  = 12
 )
 
-// Bir IP'nin bir adrese yaptığı istekler; sayaçlar int32 çünkü dakikalık kova başına
-// bir IP'nin milyarlarca isteği olamaz ve bellek önemli.
+// Bir IP'nin bir adrese yaptığı istekler. Sınıf (2xx) yerine gerçek kod (200, 404)
+// saklanır ama bellek için sabit boyutlu: en fazla 6 farklı kod tutulur, fazlası
+// "diğer" altında toplanır. Tek bir IP'nin tek bir adreste 6'dan fazla farklı kod
+// alması nadirdir; toplam sayı her durumda doğru kalır.
+const maxIPCodes = 6
+
+type ipCode struct {
+	Code int16 `json:"code"`
+	N    int32 `json:"n"`
+}
+
 type ipAgg struct {
-	N int64
-	C [4]int32 // 2xx, 3xx, 4xx, 5xx
+	N     int64
+	Codes [maxIPCodes]ipCode
+	Diger int32 // listeye sığmayan kodların toplamı
+}
+
+func (v *ipAgg) kodEkle(kod int, n int32) {
+	if kod <= 0 {
+		v.Diger += n
+		return
+	}
+	enAz := -1
+	for i := range v.Codes {
+		switch {
+		case v.Codes[i].Code == int16(kod):
+			v.Codes[i].N += n
+			return
+		case v.Codes[i].Code == 0:
+			v.Codes[i] = ipCode{int16(kod), n}
+			return
+		case enAz < 0 || v.Codes[i].N < v.Codes[enAz].N:
+			enAz = i
+		}
+	}
+	// Yuvalar dolu. Yer değiştirme yapılmaz çünkü akış hâlinde gelen kayıtlar birer
+	// birer sayıldığı için yeni bir kod tek başına hiçbir zaman baskın görünmez;
+	// sayıyı "diğer"e eklemek gerçeği olduğu gibi yansıtır.
+	_ = enAz
+	v.Diger += n
+}
+
+// Görüntüleme için: kodlar çoktan aza, boş yuvalar atılır
+func (v *ipAgg) kodListesi() []ipCode {
+	out := make([]ipCode, 0, maxIPCodes)
+	for _, c := range v.Codes {
+		if c.Code != 0 {
+			out = append(out, c)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].N > out[j].N })
+	return out
 }
 
 // Sınıra takılınca ilk görülen IP'leri değil EN ÇOK İSTEK YAPANLARI tutar:
@@ -319,9 +366,17 @@ func addIP(m map[string]*ipAgg, ip string, kod int, limit int) {
 		}
 	}
 	v.N++
-	if i := kod/100 - 2; i >= 0 && i < 4 {
-		v.C[i]++
+	v.kodEkle(kod, 1)
+}
+
+// Başka bir kaydın kodlarını bu kayda ekler (N hariç)
+func (v *ipAgg) birlestir(o *ipAgg) {
+	for _, c := range o.Codes {
+		if c.Code != 0 {
+			v.kodEkle(int(c.Code), c.N)
+		}
 	}
+	v.Diger += o.Diger
 }
 
 func budaIP(m map[string]*ipAgg, limit int) {
@@ -343,9 +398,7 @@ func budaIP(m map[string]*ipAgg, limit int) {
 	for _, k := range tip[limit:] {
 		v := m[k]
 		diger.N += v.N
-		for i := range diger.C {
-			diger.C[i] += v.C[i]
-		}
+		diger.birlestir(v)
 		delete(m, k)
 	}
 }
@@ -1253,9 +1306,7 @@ func topIPs(m map[string]*ipAgg, n int) []struct {
 		diger := &ipAgg{}
 		for _, x := range out[n:] {
 			diger.N += x.v.N
-			for i := range diger.C {
-				diger.C[i] += x.v.C[i]
-			}
+			diger.birlestir(x.v)
 		}
 		out = append(out[:n:n], struct {
 			ip string
@@ -1306,7 +1357,8 @@ func (a *LogAnalyzer) buildDetail(d *errDetail) *Detail {
 type PathIPRow struct {
 	IP         string   `json:"ip"`
 	N          int64    `json:"n"`
-	Codes      [4]int32 `json:"codes"` // 2xx, 3xx, 4xx, 5xx
+	Codes      []ipCode `json:"codes"`           // gerçek kodlar (200, 404...), çoktan aza
+	Other      int32    `json:"other,omitempty"` // listeye sığmayan kodların toplamı
 	Cloudflare bool     `json:"cloudflare"`
 }
 
@@ -1404,9 +1456,7 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 						t.IPs[ip] = h
 					}
 					h.N += n.N
-					for i := range h.C {
-						h.C[i] += n.C[i]
-					}
+					h.birlestir(n)
 				}
 			}
 			for code, n := range v.Codes {
@@ -1451,7 +1501,8 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 			row.AvgMs = float64(v.SumTa) / float64(v.NTa)
 		}
 		for _, ip := range topIPs(v.IPs, maxPathIPs) {
-			row.IPs = append(row.IPs, PathIPRow{IP: ip.ip, N: ip.v.N, Codes: ip.v.C, Cloudflare: a.isCloudflare(ip.ip)})
+			row.IPs = append(row.IPs, PathIPRow{IP: ip.ip, N: ip.v.N, Codes: ip.v.kodListesi(),
+				Other: ip.v.Diger, Cloudflare: a.isCloudflare(ip.ip)})
 		}
 		rep.Paths = append(rep.Paths, row)
 	}

@@ -429,7 +429,7 @@ const CODE_TEXT = {
   503: "servis yok (sunucu meşgul ya da kapalı)", 504: "geçit zaman aşımı (backend yavaş)", 507: "yetersiz alan",
   0: "diğer",
 };
-const codeColor = (code) => (code >= 500 || code === 0 ? C.bad : code >= 400 ? C.warn : C.info);
+const codeColor = (code) => (code >= 500 || code === 0 ? C.bad : code >= 400 ? C.warn : code >= 300 ? C.info : C.ok);
 function CodeChip({ code, n }) {
   return (
     <span className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs tnum" style={{ background: C.panel2, border: `1px solid ${C.line}` }} title={CODE_TEXT[code] || ""}>
@@ -1676,7 +1676,7 @@ function LogSection({ logs, minutes }) {
                             ) : (
                               <div className="rounded-md p-3" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
                                 <div className="text-xs mb-2" style={{ color: C.muted }}>
-                                  Bu adrese en çok istek yapan IP'ler (yanıt kodundan bağımsız, en çok {p.ips.length > 1 ? p.ips.length - 1 : 1} IP)
+                                  Bu adrese en çok istek yapan IP'ler ve her birinin aldığı yanıt kodları
                                 </div>
                                 <ul className="grid gap-x-6 md:grid-cols-2 text-sm">
                                   {p.ips.map((c) => (
@@ -1689,11 +1689,12 @@ function LogSection({ logs, minutes }) {
                                         <span className="tnum nw">{fmtNum(c.n)}</span>
                                       </span>
                                       <span className="flex flex-wrap gap-x-3 text-xs" style={{ color: C.faint }}>
-                                        {(c.codes || []).map((n, i) => (n > 0 ? (
-                                          <span key={i} className="nw" style={{ color: CODE_PARTS[i][2] }}>
-                                            {["2xx", "3xx", "4xx", "5xx"][i]} {fmtNum(n)}
+                                        {(c.codes || []).map((k) => (
+                                          <span key={k.code} className="nw" style={{ color: codeColor(k.code) }}>
+                                            {k.code} {fmtNum(k.n)}
                                           </span>
-                                        ) : null))}
+                                        ))}
+                                        {c.other > 0 && <span className="nw">diğer {fmtNum(c.other)}</span>}
                                       </span>
                                     </li>
                                   ))}

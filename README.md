@@ -12,7 +12,7 @@ Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur
 - Log'dan "Hangi adres ne döndürüyor": 3xx, 4xx ve 5xx sekmeleri. Hangi path'in hangi kodu (301, 404, 502...) kaç kez döndürdüğü; HAProxy'nin kendi ürettiği http→https yönlendirmeleri dahil.
 - Hatalı ve engellenen isteklerde satıra tıklayınca açılan ayrıntı: tam adres (alan adı log'da varsa), gerçek yollar ve isteği gönderen IP'ler.
 - "En çok istek atan IP'ler": her IP'nin en çok istediği adresler; bir IP'nin normal kullanıcı mı, tarama botu mu olduğu görülebiliyor.
-- "En çok istenen adresler": satıra tıklayınca o adrese en çok istek yapan 20 IP; her IP'nin yanında aldığı yanıt kodlarının dağılımı (2xx/3xx/4xx/5xx). Yanıt kodundan bağımsız çalışır, yani başarılı isteklerde de görünür. Cloudflare'e ait IP'ler etiketlenir, doğrudan gelenler etiketsiz görünür.
+- "En çok istenen adresler": satıra tıklayınca o adrese en çok istek yapan 20 IP; her IP'nin yanında aldığı yanıt kodları tam olarak (200, 404, 500...). Yanıt kodundan bağımsız çalışır, yani başarılı isteklerde de görünür. Cloudflare'e ait IP'ler etiketlenir, doğrudan gelenler etiketsiz görünür.
 - Bir backend'i açınca o backend'e gelen isteklerin adres ve IP dökümü: "buraya hiç trafik gitmemeli" dediğin bir backend'e kimin, nereye istek attığı.
 - Log'dan: en çok istenen adresler, engellenen (403) ve hiçbir backend'e eşleşmeyen (503) istekler, en çok istek atan IP'ler.
 - Her terimin sade Türkçe açıklaması ve her satır için HAProxy'nin verdiği tüm alanlar.
@@ -239,15 +239,15 @@ Tüm kademeleri aynı yapmak da mümkün: `RETENTION=24h DETAIL=24h LISTS=24h BU
 
 ## Bellek
 
-Geçmiş bellekte tutulur (disk yalnızca yeniden başlatma için yedektir), bu yüzden asıl sınır diskte değil bellektedir. Varsayılan ayarlarda (24 saat sayı, 6 saat yol/IP listesi, 1 saat tam ayrıntı) yoğun bir LB'de **~49 MB** kullanılır.
+Geçmiş bellekte tutulur (disk yalnızca yeniden başlatma için yedektir), bu yüzden asıl sınır diskte değil bellektedir. Varsayılan ayarlarda (24 saat sayı, 6 saat yol/IP listesi, 1 saat tam ayrıntı) yoğun bir LB'de **~51 MB** kullanılır.
 
 Ölçümler `go test -run TestBellekKullanimi` ile tekrarlanabilir; yük olarak saatte ~44.000 istek, dakikada 300 farklı adres, 150 farklı IP alındı.
 
 | Ayar | Bellek |
 |---|---|
-| **Varsayılan:** ayrıntı 1 saat, listeler 6 saat | ~49 MB |
-| `DETAIL=6h LISTS=24h` | ~201 MB |
-| `DETAIL=24h LISTS=24h` (her şey tam ayrıntı) | ~635 MB |
+| **Varsayılan:** ayrıntı 1 saat, listeler 6 saat | ~51 MB |
+| `DETAIL=6h LISTS=24h` | ~213 MB |
+| `DETAIL=24h LISTS=24h` (her şey tam ayrıntı) | ~664 MB |
 
 Sayılar (istek, yanıt kodu, backend başına döküm) her ayarda saklama süresi boyunca eksiksiz kalır; tablo yalnızca adres ve IP ayrıntısının maliyetidir. Trafiği düşük LB'lerde bu rakamlar çok daha azdır.
 

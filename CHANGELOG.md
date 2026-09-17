@@ -4,6 +4,21 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.14.0
+
+- Adres ayrıntısındaki IP listesi artık **sınıf yerine gerçek yanıt kodlarını** yazıyor: `2xx 193` yerine `200 193`, `404 22`, `500 12`. Kodlar çoktan aza sıralı ve sınıfına göre renkli.
+- Bellek için IP başına en fazla 6 farklı kod saklanıyor; daha fazlası olursa kalanı "diğer" altında toplanıyor ve toplam hiçbir durumda bozulmuyor. Tek bir IP'nin tek bir adreste 6'dan fazla farklı kod alması nadirdir.
+- Sütunlar (2xx/3xx/4xx/5xx) ve özet şeritleri sınıf olarak kaldı; oralarda tam kod yazmak tabloyu gereksiz genişletirdi.
+- Ölçülen bellek etkisi: varsayılan ayarda 49 MB yerine **51 MB**.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.13.1
 
 - **Düzeltme:** IP dökümü diske yazılmıyordu. Ajan yeniden başladıktan sonra (örneğin sürüm güncellemesinde) eski dakikaların sayıları geri geliyor ama IP'leri gelmiyordu; panelde bir adresin IP toplamı, o adresin istek sayısından belirgin düşük görünüyordu. Artık her dakikanın en yoğun 25 adresinin IP dökümü de saklanıyor ve geri yükleniyor.

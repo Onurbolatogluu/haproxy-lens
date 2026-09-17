@@ -610,15 +610,17 @@ func TestYolBasinaIPDokumu(t *testing.T) {
 	if row.IPs[0].IP != "162.158.1.1" || row.IPs[0].N != 900 || !row.IPs[0].Cloudflare {
 		t.Fatalf("ilk IP: %+v", row.IPs[0])
 	}
-	if row.IPs[0].Codes != [4]int32{900, 0, 0, 0} {
-		t.Fatalf("ilk IP kod dağılımı: %v", row.IPs[0].Codes)
+	// Sınıf değil gerçek kod saklanmalı
+	if len(row.IPs[0].Codes) != 1 || row.IPs[0].Codes[0] != (ipCode{200, 900}) {
+		t.Fatalf("ilk IP kod dağılımı: %+v", row.IPs[0].Codes)
 	}
 	// İkinci IP'nin istekleri hem 2xx hem 4xx
 	if row.IPs[1].IP != "198.51.100.7" || row.IPs[1].N != 350 {
 		t.Fatalf("ikinci IP: %+v", row.IPs[1])
 	}
-	if row.IPs[1].Codes != [4]int32{300, 0, 50, 0} {
-		t.Fatalf("ikinci IP kod dağılımı: %v", row.IPs[1].Codes)
+	// İkinci IP hem 200 hem 404 almış; çoktan aza sıralı
+	if len(row.IPs[1].Codes) != 2 || row.IPs[1].Codes[0] != (ipCode{200, 300}) || row.IPs[1].Codes[1] != (ipCode{404, 50}) {
+		t.Fatalf("ikinci IP kod dağılımı: %+v", row.IPs[1].Codes)
 	}
 }
 
@@ -694,8 +696,11 @@ func TestIPDokumuDiskeYaziliyor(t *testing.T) {
 	if toplam != rep.Paths[0].N {
 		t.Fatalf("IP toplamı %d, yol toplamı %d", toplam, rep.Paths[0].N)
 	}
-	if ips[0].Codes != [4]int32{500, 0, 0, 0} || ips[1].Codes != [4]int32{0, 0, 120, 0} {
-		t.Fatalf("kod dağılımı korunmamış: %+v", ips)
+	if len(ips[0].Codes) != 1 || ips[0].Codes[0] != (ipCode{200, 500}) {
+		t.Fatalf("kod dağılımı korunmamış: %+v", ips[0].Codes)
+	}
+	if len(ips[1].Codes) != 1 || ips[1].Codes[0] != (ipCode{404, 120}) {
+		t.Fatalf("kod dağılımı korunmamış: %+v", ips[1].Codes)
 	}
 }
 
@@ -727,5 +732,50 @@ func TestKayitDosyasiBoyutu(t *testing.T) {
 	t.Logf("24 saatlik geçmiş diskte: %d KB", fi.Size()/1024)
 	if fi.Size() > 20<<20 {
 		t.Fatalf("kayıt dosyası çok büyük: %d MB", fi.Size()>>20)
+	}
+}
+
+// Bir IP'nin tek bir adreste aldığı farklı kodlar: 6'ya kadar gerçek kodla görünür,
+// fazlası "diğer"de toplanır ve toplam hiçbir durumda bozulmaz.
+func TestIPKodSiniri(t *testing.T) {
+	ekle := func(a *LogAnalyzer, kodlar []int, adet int) int64 {
+		var toplam int64
+		for tur := 0; tur < adet; tur++ {
+			for _, kod := range kodlar {
+				a.add(logRecord{At: time.Now(), Client: "203.0.113.5", Frontend: "fe", Backend: "be", Server: "s1",
+					Status: kod, Method: "GET", Path: "/x", RawPath: "/x", Kind: KindServed})
+				toplam++
+			}
+		}
+		return toplam
+	}
+
+	// 6 farklı kod: hepsi gerçek koduyla görünmeli
+	a := NewLogAnalyzer("file:/yok", "")
+	toplam := ekle(a, []int{200, 404, 500, 302, 403, 502}, 10)
+	ip := a.Report(60).Paths[0].IPs[0]
+	if ip.N != toplam || len(ip.Codes) != 6 || ip.Other != 0 {
+		t.Fatalf("6 kod: %+v (toplam %d)", ip, toplam)
+	}
+
+	// 9 farklı kod: 6'sı görünür, kalanı "diğer"de; toplam korunur
+	b := NewLogAnalyzer("file:/yok", "")
+	toplam = ekle(b, []int{200, 404, 500, 302, 403, 502, 401, 429, 301}, 10)
+	ip = b.Report(60).Paths[0].IPs[0]
+	if ip.N != toplam {
+		t.Fatalf("IP toplamı %d, beklenen %d", ip.N, toplam)
+	}
+	if len(ip.Codes) != maxIPCodes {
+		t.Fatalf("kod sayısı: %d", len(ip.Codes))
+	}
+	var k int64
+	for _, c := range ip.Codes {
+		k += int64(c.N)
+	}
+	if k+int64(ip.Other) != ip.N {
+		t.Fatalf("kodların toplamı %d + diğer %d, IP toplamı %d", k, ip.Other, ip.N)
+	}
+	if ip.Other != 30 { // listeye girmeyen 3 kod x 10 istek
+		t.Fatalf("diğer: %d", ip.Other)
 	}
 }
