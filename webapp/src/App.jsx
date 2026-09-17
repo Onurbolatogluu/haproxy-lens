@@ -1624,12 +1624,17 @@ function SearchSection({ inputRef }) {
 }
 
 function SearchResult({ res }) {
-  if (res.note && res.matches === 0) return <p className="text-sm mt-4" style={{ color: C.muted }}>{res.note}</p>;
   if (res.matches === 0) {
     return (
-      <p className="text-sm mt-4" style={{ color: C.muted }}>
-        Eşleşme yok. {fmtNum(res.scanned)} satır tarandı ({(res.files || []).join(", ")}), {fmtNum(res.took)} ms sürdü.
-      </p>
+      <div className="mt-4 text-sm">
+        <p style={{ color: C.muted }}>
+          {res.scanned > 0
+            ? <>Eşleşme yok. {fmtNum(res.scanned)} satır tarandı ({(res.files || []).join(", ")}), {fmtNum(res.took)} ms sürdü.</>
+            : res.note || "Eşleşme yok."}
+          {res.skipped > 0 && <> {res.skipped} eski dosya seçilen aralığın dışında kaldığı için açılmadı.</>}
+        </p>
+        {res.truncated && res.scanned > 0 && <p className="mt-1" style={{ color: C.warn }}>{res.note}</p>}
+      </div>
     );
   }
   const zaman = (ms) => new Date(ms).toLocaleString("tr-TR");

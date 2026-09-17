@@ -13,9 +13,11 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -265,28 +267,64 @@ func (a *LogAnalyzer) Search(q SearchQuery) SearchResult {
 	t.res.Took = time.Since(basla).Milliseconds()
 	t.bitir()
 	if t.res.Truncated && t.res.Note == "" {
-		t.res.Note = "Arama süre ya da boyut sınırına takıldı; sonuçlar eksik olabilir. Daha dar bir zaman aralığı ya da daha belirgin bir arama metni deneyin."
+		t.res.Note = "Süre sınırına ulaşıldı. Log en yeniden eskiye tarandığı için yukarıdaki sonuçlar en güncel kayıtları kapsar; daha eskiler taranamadı. Daha dar bir zaman aralığı seçerek tamamını tarayabilirsin."
 	}
 	return t.res
 }
 
 func (t *aramaToplayici) aramaDosya(yol string, parser *LogParser, bitis time.Time) {
-	sc, kapat, err := satirOkuyucu(yol)
-	if err != nil {
+	t.res.Files = append(t.res.Files, filepath.Base(yol))
+	if strings.HasSuffix(yol, ".gz") {
+		t.aramaGz(yol, parser, bitis)
 		return
 	}
-	defer kapat()
-	t.res.Files = append(t.res.Files, filepath.Base(yol))
-	n := 0
-	for sc.Scan() {
-		satir := sc.Text()
+	n, eski := 0, 0
+	geriSatirlar(yol, func(satir string) bool {
 		t.res.Scanned++
 		t.res.Bytes += int64(len(satir)) + 1
 		if n++; n%2000 == 0 {
 			if time.Now().After(bitis) || t.res.Bytes > aramaBaytSiniri {
 				t.res.Truncated = true
-				return
+				return false
 			}
+		}
+		rec, ok := parser.Parse(satir)
+		if !ok {
+			return true
+		}
+		if ms := rec.At.UnixMilli(); ms > t.enYeniDosyada {
+			t.enYeniDosyada = ms
+		}
+		// Sondan başa okunduğu için aranan aralığın öncesine geçilmiştir; satırlar
+		// tam sıralı olmayabileceğinden bir süre daha bakılıp sonra durulur.
+		if !t.q.Since.IsZero() && rec.At.Before(t.q.Since) {
+			if eski++; eski > 5000 {
+				return false
+			}
+			return true
+		}
+		eski = 0
+		if t.q.uyuyor(rec) {
+			t.ekle(rec)
+		}
+		return true
+	})
+}
+
+func (t *aramaToplayici) aramaGz(yol string, parser *LogParser, bitis time.Time) {
+	sc, kapat, err := satirOkuyucu(yol)
+	if err != nil {
+		return
+	}
+	defer kapat()
+	n := 0
+	for sc.Scan() {
+		satir := sc.Text()
+		t.res.Scanned++
+		t.res.Bytes += int64(len(satir)) + 1
+		if n++; n%2000 == 0 && (time.Now().After(bitis) || t.res.Bytes > aramaBaytSiniri) {
+			t.res.Truncated = true
+			return
 		}
 		rec, ok := parser.Parse(satir)
 		if !ok {
@@ -379,4 +417,67 @@ func searchQueryFrom(get func(string) string) (SearchQuery, error) {
 		}
 	}
 	return q, nil
+}
+
+// Dosyayı SONDAN BAŞA okur. Log'lar zaman sıralı olduğu için en yeni kayıtlar dosyanın
+// sonundadır; baştan okumak, büyük bir dosyada aranan aralığa hiç ulaşamadan süre
+// sınırına takılmak demekti. Geriye okuyunca "son 1 saat" araması dosya ne kadar
+// büyük olursa olsun hızlı biter.
+func geriSatirlar(yol string, fn func(satir string) bool) error {
+	f, err := os.Open(yol)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	const parca = 1 << 20
+	kalan := fi.Size()
+	var kuyruk []byte // parçanın başındaki yarım satır
+	buf := make([]byte, parca)
+	for kalan > 0 {
+		n := int64(parca)
+		if kalan < n {
+			n = kalan
+		}
+		kalan -= n
+		if _, err := f.Seek(kalan, 0); err != nil {
+			return err
+		}
+		if _, err := io.ReadFull(f, buf[:n]); err != nil {
+			return err
+		}
+		veri := append(buf[:n:n], kuyruk...)
+		// İlk satır yarım olabilir; dosyanın başına geldiysek değildir
+		bas := 0
+		if kalan > 0 {
+			if i := bytes.IndexByte(veri, '\n'); i >= 0 {
+				kuyruk = append([]byte(nil), veri[:i]...)
+				bas = i + 1
+			} else {
+				kuyruk = append([]byte(nil), veri...)
+				continue
+			}
+		} else {
+			kuyruk = nil
+		}
+		govde := veri[bas:]
+		for son := len(govde); son > 0; {
+			i := bytes.LastIndexByte(govde[:son], '\n')
+			satir := govde[i+1 : son]
+			son = i
+			if len(satir) > 0 && !fn(string(satir)) {
+				return nil
+			}
+			if i < 0 {
+				break
+			}
+		}
+	}
+	if len(kuyruk) > 0 {
+		fn(string(kuyruk))
+	}
+	return nil
 }

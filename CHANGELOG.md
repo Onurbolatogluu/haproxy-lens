@@ -4,6 +4,22 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.15.2
+
+- **Düzeltme: arama büyük log'larda çalışmıyordu.** Dosyalar baştan okunuyordu, yani en eski kayıtlardan başlanıyordu; büyük bir log'da "son 1 saat" araması bile aranan aralığa hiç ulaşamadan süre sınırına takılıyor ve sonuç bulamıyordu. Log dosyaları artık **sondan başa** okunuyor ve aranan aralığın öncesine geçilince duruluyor.
+- Ölçülen etki (175 MB, 1 milyon satırlık günlük log): "son 1 saat" araması 46.747 satır tarayıp **244 ms**'de bitiyor; eskiden dosyanın tamamı taranmaya çalışılıp 20 saniyede sonuçsuz kalıyordu. "Tüm log" araması da 5 saniyede tamamlanıyor.
+- Süre sınırına ulaşılırsa mesaj artık ne anlama geldiğini söylüyor: log en yeniden eskiye tarandığı için eldeki sonuçlar en güncel kayıtları kapsar.
+- Sonuç bulunamadığında da tarama bilgisi (kaç satır, kaç ms, hangi dosyalar) gösteriliyor; eskiden yalnızca uyarı görünüyordu.
+- Bu davranış testle korunuyor: 860.000 satırlık dosyada son 1 saat araması 41.000 satır tarayıp 168 ms'de bitiyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.15.1
 
 - "Log'da ara" bölümü sayfanın en altında olduğu için gözden kaçıyordu. Sayfanın başına, "Duraklat" düğmesinin yanına bir **Log'da ara** düğmesi eklendi: tıklayınca bölüme kaydırıyor ve arama kutusuna odaklanıyor.

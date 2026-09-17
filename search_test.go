@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"compress/gzip"
 	"fmt"
 	"os"
@@ -229,5 +230,49 @@ func TestAramaEnYeniVeErkenDurma(t *testing.T) {
 	}
 	if res.Scanned > 100 {
 		t.Fatalf("erken durma çalışmadı: %d satır tarandı", res.Scanned)
+	}
+}
+
+// Büyük bir dosyada "son 1 saat" araması, dosyanın tamamını taramadan hızlıca
+// bitmeli: log'lar zaman sıralı olduğu için sondan başa okunur.
+func TestAramaBuyukDosyadaSonSaat(t *testing.T) {
+	if testing.Short() {
+		t.Skip("uzun süren ölçüm")
+	}
+	dir := t.TempDir()
+	f, err := os.Create(filepath.Join(dir, "haproxy.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := bufio.NewWriterSize(f, 1<<20)
+	simdi := time.Now()
+	// 24 saatlik log, saniyede ~10 istek: 860.000 satır. Aranan adres yalnızca
+	// son 30 dakikada geçiyor, yani dosyanın en sonunda.
+	for i := 860000; i > 0; i-- {
+		ts := simdi.Add(-time.Duration(i) * 100 * time.Millisecond)
+		yol := "/eski/sayfa"
+		if i < 18000 {
+			yol = "/api/yeni"
+		}
+		fmt.Fprintln(w, logSatiri(ts, "203.0.113.5", yol, 200))
+	}
+	w.Flush()
+	f.Close()
+
+	a := NewLogAnalyzer("file:"+filepath.Join(dir, "haproxy.log"), "")
+	basla := time.Now()
+	res := a.Search(SearchQuery{Path: "/api/yeni", Since: simdi.Add(-time.Hour)})
+	sure := time.Since(basla)
+	t.Logf("%d eşleşme, %d satır tarandı, %v sürdü (dosyada 860.000 satır var)", res.Matches, res.Scanned, sure.Round(time.Millisecond))
+
+	if res.Matches != 17999 {
+		t.Fatalf("eşleşme: %d, beklenen 17.999", res.Matches)
+	}
+	if res.Truncated {
+		t.Fatal("süre sınırına takılmamalıydı")
+	}
+	// Dosyanın tamamı taranmamalı: aralığın dışına çıkınca durulur
+	if res.Scanned > 100000 {
+		t.Fatalf("gereğinden fazla tarandı: %d satır", res.Scanned)
 	}
 }
