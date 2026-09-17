@@ -149,7 +149,7 @@ cd /root && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./inst
 
 ## Log'da arama
 
-Panelin alt kısmındaki "Log'da ara" bölümü, paneldeki verilerden bağımsız çalışır: doğrudan log dosyalarını okur, döndürülmüş (`haproxy.log.1`) ve sıkıştırılmış (`.gz`) dosyalar dahil. Bu yüzden panelin saklama süresinden (varsayılan 24 saat) çok daha geriye gidebilir.
+Panelin en altındaki "Log'da ara" bölümü (sayfanın başındaki **Log'da ara** düğmesi oraya götürür), paneldeki verilerden bağımsız çalışır: doğrudan log dosyalarını okur, döndürülmüş (`haproxy.log.1`) ve sıkıştırılmış (`.gz`) dosyalar dahil. Bu yüzden panelin saklama süresinden (varsayılan 24 saat) çok daha geriye gidebilir.
 
 Aranabilenler: adresin içinde geçen metin, IP (tam ya da başlangıcı), durum kodu (`500` ya da `5xx`) ve zaman aralığı. Sonuçta toplam eşleşme, kod dağılımı, en çok istek yapan IP'ler, en çok eşleşen adresler ve en yeni eşleşen istekler zaman damgalarıyla listelenir.
 

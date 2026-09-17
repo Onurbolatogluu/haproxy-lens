@@ -4,6 +4,18 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.15.1
+
+- "Log'da ara" bölümü sayfanın en altında olduğu için gözden kaçıyordu. Sayfanın başına, "Duraklat" düğmesinin yanına bir **Log'da ara** düğmesi eklendi: tıklayınca bölüme kaydırıyor ve arama kutusuna odaklanıyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.15.0
 
 - **Yeni: "Log'da ara" bölümü.** Panelin belleğinden değil doğrudan log dosyalarından okur; döndürülmüş (`haproxy.log.1`) ve sıkıştırılmış (`.gz`) dosyalar dahil. Böylece panelin saklama süresinin (varsayılan 24 saat) ötesine bakılabiliyor.

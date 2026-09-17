@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, createContext, useContext, Fragment } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import { ChevronDown, ChevronRight, Info, X, Pause, Play } from "lucide-react";
+import { ChevronDown, ChevronRight, Info, X, Pause, Play, Search } from "lucide-react";
 
 /* haproxy-lens paneli — ajan API'sinden (/api/state, /api/logs) beslenir. */
 
@@ -1054,7 +1054,7 @@ function buildFindings(model, rates, logs, wrates = {}, label = "") {
   return out.sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
 }
 
-function Header({ info, running, onToggleRun, ok, lastAt, agentVersion }) {
+function Header({ info, running, onToggleRun, ok, lastAt, agentVersion, onSearch }) {
   const up = num(info?.Uptime_sec);
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 pb-5" style={{ borderBottom: `1px solid ${C.line}` }}>
@@ -1074,6 +1074,7 @@ function Header({ info, running, onToggleRun, ok, lastAt, agentVersion }) {
           {!ok ? "Bağlantı sorunu" : running ? `Canlı, ${TICK_SEC} saniyede bir` : "Duraklatıldı"}
           {lastAt ? <span style={{ color: C.faint }}>({new Date(lastAt).toLocaleTimeString("tr-TR")})</span> : null}
         </span>
+        {onSearch && <Btn onClick={onSearch}><Search size={14} />Log'da ara</Btn>}
         <Btn onClick={onToggleRun}>{running ? <Pause size={14} /> : <Play size={14} />}{running ? "Duraklat" : "Devam et"}</Btn>
       </div>
     </header>
@@ -1541,7 +1542,7 @@ function CodePathsPanel({ logs, openRows, toggleRow, frozen }) {
 // dosyalara da bakabilir.
 const ARAMA_ARALIK = [[1, "Son 1 saat"], [24, "Son 24 saat"], [168, "Son 7 gün"], [720, "Son 30 gün"], [0, "Tüm log"]];
 
-function SearchSection() {
+function SearchSection({ inputRef }) {
   const [form, setForm] = useState({ path: "", ip: "", status: "", hours: 24 });
   const [durum, setDurum] = useState("hazir"); // hazir | araniyor | bitti | hata
   const [res, setRes] = useState(null);
@@ -1584,7 +1585,7 @@ function SearchSection() {
         <form onSubmit={ara} className="flex flex-wrap items-end gap-3">
           <label className="text-sm">
             <div className="text-xs mb-1" style={{ color: C.muted }}>Adres (yolun içinde geçen)</div>
-            <input value={form.path} onChange={(e) => setForm({ ...form, path: e.target.value })}
+            <input ref={inputRef} value={form.path} onChange={(e) => setForm({ ...form, path: e.target.value })}
               placeholder="/api/kayit" style={{ ...alan, width: 260 }} />
           </label>
           <label className="text-sm">
@@ -2038,6 +2039,12 @@ export default function App() {
     if (n.has(name)) n.delete(name); else n.add(name);
     return n;
   });
+  const searchRef = useRef(null);
+  const goSearch = () => {
+    document.getElementById("search")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setTimeout(() => searchRef.current?.focus(), 400);
+  };
+
   const jump = (target) => {
     if (target === "logs") { document.getElementById("logs")?.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
     if (target.startsWith("fe:")) {
@@ -2055,7 +2062,7 @@ export default function App() {
     <div className="hl-root" style={{ background: C.bg, color: C.text, minHeight: "100vh" }}>
       <style>{CSS}</style>
       <div className="max-w-6xl mx-auto px-4 py-6 md:px-8 md:py-8">
-        <Header info={cur?.info} running={running} onToggleRun={() => setRunning((r) => !r)} ok={!problem} lastAt={cur?.at} agentVersion={cfg?.version} />
+        <Header info={cur?.info} running={running} onToggleRun={() => setRunning((r) => !r)} ok={!problem} lastAt={cur?.at} agentVersion={cfg?.version} onSearch={goSearch} />
         {problem && (
           <div className="mt-6 rounded-md px-4 py-3 text-sm leading-relaxed" style={{ background: C.panel, boxShadow: `inset 3px 0 0 ${C.bad}` }}>
             <div>{problem}</div>
@@ -2081,7 +2088,7 @@ export default function App() {
             <BackendList model={model} rates={rates} expanded={expanded} onToggle={toggle} onFields={setFieldsRow} />
 
             <LogSection logs={logs} minutes={minutes} />
-            <SearchSection />
+            <SearchSection inputRef={searchRef} />
 
             <SectionTitle title="Frontend'ler" sub="Kullanıcıların bağlandığı giriş noktaları." />
             <FrontendTable model={model} rates={rates} onFields={setFieldsRow} />
