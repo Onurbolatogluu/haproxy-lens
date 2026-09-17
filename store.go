@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -42,7 +43,13 @@ type pathDump struct {
 	N, S2, S3, S4, S5     int64
 	SumTa, NTa            int64
 	Codes                 map[int]int64
+	IPs                   map[string]*ipAgg `json:",omitempty"`
 }
+
+// IP dökümü yalnızca dakikanın en yoğun yolları için diske yazılır: dosyayı
+// şişirmeden, panelde tıklanma ihtimali yüksek satırların verisi korunur.
+const dumpIPYol = 25
+
 type blockDump struct {
 	Kind, Method, Path string
 	N                  int64
@@ -81,9 +88,27 @@ func (a *LogAnalyzer) dumpBuckets() []logMinute {
 	out := make([]logMinute, 0, len(a.buckets))
 	for t, b := range a.buckets {
 		lm := logMinute{T: t, Level: b.level, Kinds: b.kinds, Classes: b.classes, WithHost: b.withHost, Backends: b.backends}
+		enYogunYollar := map[pathKey]bool{}
+		{
+			tip := make([]pathKey, 0, len(b.paths))
+			for k := range b.paths {
+				tip = append(tip, k)
+			}
+			sort.Slice(tip, func(i, j int) bool { return b.paths[tip[i]].N > b.paths[tip[j]].N })
+			if len(tip) > dumpIPYol {
+				tip = tip[:dumpIPYol]
+			}
+			for _, k := range tip {
+				enYogunYollar[k] = true
+			}
+		}
 		for k, v := range b.paths {
-			lm.Paths = append(lm.Paths, pathDump{Backend: k.Backend, Method: k.Method, Path: k.Path, Kind: v.Kind,
-				N: v.N, S2: v.S2, S3: v.S3, S4: v.S4, S5: v.S5, SumTa: v.SumTa, NTa: v.NTa, Codes: v.Codes})
+			d := pathDump{Backend: k.Backend, Method: k.Method, Path: k.Path, Kind: v.Kind,
+				N: v.N, S2: v.S2, S3: v.S3, S4: v.S4, S5: v.S5, SumTa: v.SumTa, NTa: v.NTa, Codes: v.Codes}
+			if enYogunYollar[k] {
+				d.IPs = v.IPs
+			}
+			lm.Paths = append(lm.Paths, d)
 		}
 		for k, v := range b.blocked {
 			lm.Blocked = append(lm.Blocked, blockDump{Kind: k.Kind, Method: k.Method, Path: k.Path, N: v.N})
@@ -120,7 +145,7 @@ func (a *LogAnalyzer) loadBuckets(ms []logMinute) {
 		}
 		for _, d := range lm.Paths {
 			b.paths[pathKey{d.Backend, d.Method, d.Path}] = &pathAgg{Kind: d.Kind, N: d.N, S2: d.S2, S3: d.S3,
-				S4: d.S4, S5: d.S5, SumTa: d.SumTa, NTa: d.NTa, Codes: d.Codes}
+				S4: d.S4, S5: d.S5, SumTa: d.SumTa, NTa: d.NTa, Codes: d.Codes, IPs: d.IPs}
 		}
 		for _, d := range lm.Blocked {
 			b.blocked[blockKey{d.Kind, d.Method, d.Path}] = &blockAgg{N: d.N}

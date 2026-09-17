@@ -4,6 +4,20 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.13.1
+
+- **Düzeltme:** IP dökümü diske yazılmıyordu. Ajan yeniden başladıktan sonra (örneğin sürüm güncellemesinde) eski dakikaların sayıları geri geliyor ama IP'leri gelmiyordu; panelde bir adresin IP toplamı, o adresin istek sayısından belirgin düşük görünüyordu. Artık her dakikanın en yoğun 25 adresinin IP dökümü de saklanıyor ve geri yükleniyor.
+- Ölçülen etki: 24 saatlik geçmiş dosyası birkaç yüz KB'ta kalıyor (IP dökümü dahil).
+- Yeniden başlatma testiyle korunuyor: ajan durdurulup açıldığında IP toplamı yolun toplamına eşit kalıyor (`go test -run TestIPDokumuDiskeYaziliyor`).
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.13.0
 
 - **"En çok istenen adresler" satırları artık açılıyor:** o adrese en çok istek yapan **20 IP**, istek sayılarıyla. Her IP'nin yanında o adreste aldığı yanıt kodlarının dağılımı da var (2xx/3xx/4xx/5xx). Cloudflare aralıklarına düşen IP'ler "Cloudflare" diye etiketlenir; doğrudan gelen istemcilerin IP'si etiketsiz, olduğu gibi görünür.

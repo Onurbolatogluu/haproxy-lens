@@ -658,3 +658,74 @@ func TestYolIPSiniri(t *testing.T) {
 		t.Fatalf("son satır '(diğer)' olmalı: %+v", ips[len(ips)-1])
 	}
 }
+
+// Ajan yeniden başladığında IP dökümü de korunmalı: eskiden yalnızca sayılar
+// diske yazılıyordu, bu yüzden yeniden başlatmadan sonra IP'ler eksik görünüyordu.
+func TestIPDokumuDiskeYaziliyor(t *testing.T) {
+	dir := t.TempDir()
+	a := NewLogAnalyzer("file:/yok", "")
+	for i := 0; i < 500; i++ {
+		a.add(logRecord{At: time.Now(), Client: "203.0.113.5", Frontend: "fe", Backend: "be", Server: "s1",
+			Status: 200, Method: "POST", Path: "/api/kayit", RawPath: "/api/kayit", Kind: KindServed})
+	}
+	for i := 0; i < 120; i++ {
+		a.add(logRecord{At: time.Now(), Client: "198.51.100.9", Frontend: "fe", Backend: "be", Server: "s1",
+			Status: 404, Method: "POST", Path: "/api/kayit", RawPath: "/api/kayit", Kind: KindServed})
+	}
+	if err := NewStore(dir, nil, a).Save(); err != nil {
+		t.Fatal(err)
+	}
+	a2 := NewLogAnalyzer("file:/yok", "")
+	if err := NewStore(dir, nil, a2).Load(); err != nil {
+		t.Fatal(err)
+	}
+	rep := a2.Report(60)
+	if len(rep.Paths) != 1 || rep.Paths[0].N != 620 {
+		t.Fatalf("yüklenen yol: %+v", rep.Paths)
+	}
+	ips := rep.Paths[0].IPs
+	if len(ips) != 2 {
+		t.Fatalf("yüklenen IP dökümü: %+v", ips)
+	}
+	var toplam int64
+	for _, c := range ips {
+		toplam += c.N
+	}
+	if toplam != rep.Paths[0].N {
+		t.Fatalf("IP toplamı %d, yol toplamı %d", toplam, rep.Paths[0].N)
+	}
+	if ips[0].Codes != [4]int32{500, 0, 0, 0} || ips[1].Codes != [4]int32{0, 0, 120, 0} {
+		t.Fatalf("kod dağılımı korunmamış: %+v", ips)
+	}
+}
+
+// Diske yazılan dosya, IP dökümüyle birlikte makul boyutta kalmalı
+func TestKayitDosyasiBoyutu(t *testing.T) {
+	if testing.Short() {
+		t.Skip("uzun süren ölçüm")
+	}
+	dir := t.TempDir()
+	a := NewLogAnalyzer("file:/yok", "")
+	a.SetRetention(1440)
+	simdi := time.Now()
+	// 24 saat, dakikada 300 farklı adres ve 50 farklı IP
+	for dk := 1439; dk >= 0; dk-- {
+		ts := simdi.Add(-time.Duration(dk) * time.Minute)
+		for i := 0; i < 300; i++ {
+			yol := "/api/bolum" + strconv.Itoa(i%37) + "/kaynak/" + strconv.Itoa(i)
+			a.add(logRecord{At: ts, Client: fmt.Sprintf("198.51.100.%d", i%50), Frontend: "fe",
+				Backend: "be_web", Server: "s1", Status: 200, Method: "GET", Path: yol, RawPath: yol, Kind: KindServed})
+		}
+	}
+	if err := NewStore(dir, nil, a).Save(); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(filepath.Join(dir, stateFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("24 saatlik geçmiş diskte: %d KB", fi.Size()/1024)
+	if fi.Size() > 20<<20 {
+		t.Fatalf("kayıt dosyası çok büyük: %d MB", fi.Size()>>20)
+	}
+}
