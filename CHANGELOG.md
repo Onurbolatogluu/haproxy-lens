@@ -4,6 +4,23 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.15.0
+
+- **Yeni: "Log'da ara" bölümü.** Panelin belleğinden değil doğrudan log dosyalarından okur; döndürülmüş (`haproxy.log.1`) ve sıkıştırılmış (`.gz`) dosyalar dahil. Böylece panelin saklama süresinin (varsayılan 24 saat) ötesine bakılabiliyor.
+- Aranabilenler: adres metni, IP (tam ya da başlangıcı), durum kodu (`500` ya da `5xx`), zaman aralığı (son 1 saat / 24 saat / 7 gün / 30 gün / tüm log).
+- Sonuçta toplam eşleşme, kod dağılımı, en çok istek yapan IP'ler, en çok eşleşen adresler ve en yeni eşleşen istekler zaman damgalarıyla listeleniyor.
+- Güvenlik ve yük: kabuk komutu çalıştırılmaz (dosyalar programın içinde okunur), yalnızca ajanın kendi log kaynağı ve döndürülmüş kopyaları okunabilir, arama en fazla 20 saniye çalışır ve aynı anda tek arama yapılır.
+- Zaman aralığı verildiğinde son yazma zamanı aralığın dışında kalan dosyalar hiç açılmaz; testte "son 1 saat" araması 2 eski dosyayı atlayıp 121 ms'de bitti.
+- Gösterilen satırlar dosyaların taranma sırasından bağımsız olarak en yeniler; bu bir testle korunuyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.14.0
 
 - Adres ayrıntısındaki IP listesi artık **sınıf yerine gerçek yanıt kodlarını** yazıyor: `2xx 193` yerine `200 193`, `404 22`, `500 12`. Kodlar çoktan aza sıralı ve sınıfına göre renkli.

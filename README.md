@@ -22,6 +22,7 @@ Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur
 - **HAProxy config'ine ve servisine dokunmaz.** Reload ve restart yapmaz.
 - **Her sunucuya kendini uydurur.** Ajan, çalışan HAProxy'nin config'ini sadece okuyarak stats socket'ini, log kaynağını ve her frontend'in log biçimini kendisi bulur. Özel `log-format` tanımları da okunur.
 - **Geçmişi saklar.** Grafikler ve oranlar varsayılan olarak 24 saat geriye gider. Veriler `/var/lib/haproxy-lens` altına yazılır (24 saat için birkaç yüz KB), böylece ajan yeniden başladığında geçmiş kaybolmaz.
+- **Log'da arama.** Panelden bağımsız olarak log dosyalarında (döndürülmüş ve sıkıştırılmış dahil) arama yapar; saklama süresinin ötesine bakabilir.
 - **Çalışırken izler, yeniden kurulum istemez.** Config değişip HAProxy reload edilince (yeni log biçimi, yeni Host yakalaması, yeni backend) ajan bunu en geç 30 saniyede fark eder ve kendini günceller. Log kaynağı susarsa yenisini arar; stats socket çalışmazsa config'teki başka bir socket'e geçer.
 - **Eksiği panelde söyler.** Config'te veriyi kısıtlayan bir şey varsa (log kapalı, `dontlog-normal`, alan adı yakalanmıyor, sağlık kontrolü yok, okunamayan log satırları...) panelin üstündeki "Yapılandırma notları" bölümünde ne olduğunu, neyi etkilediğini ve eklenebilecek config satırını yazar.
 - **Emin olamazsa kurmaz.** Çalışan bir stats socket bulamazsa hiçbir şey değiştirmeden durur ve sebebini yazar.
@@ -145,6 +146,19 @@ scp haproxy-lens-linux-amd64.tar.gz root@SUNUCU_ADRESI:/root/
 ```bash
 cd /root && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
 ```
+
+## Log'da arama
+
+Panelin alt kısmındaki "Log'da ara" bölümü, paneldeki verilerden bağımsız çalışır: doğrudan log dosyalarını okur, döndürülmüş (`haproxy.log.1`) ve sıkıştırılmış (`.gz`) dosyalar dahil. Bu yüzden panelin saklama süresinden (varsayılan 24 saat) çok daha geriye gidebilir.
+
+Aranabilenler: adresin içinde geçen metin, IP (tam ya da başlangıcı), durum kodu (`500` ya da `5xx`) ve zaman aralığı. Sonuçta toplam eşleşme, kod dağılımı, en çok istek yapan IP'ler, en çok eşleşen adresler ve en yeni eşleşen istekler zaman damgalarıyla listelenir.
+
+Nasıl korunur:
+
+- Kabuk komutu çalıştırılmaz; dosyalar programın içinde okunur, bu yüzden arama metniyle komut çalıştırılamaz.
+- Yalnızca ajanın kullandığı log kaynağı ve onun döndürülmüş kopyaları okunur; kullanıcıdan dosya yolu kabul edilmez.
+- Arama en fazla 20 saniye çalışır ve aynı anda tek arama yapılır (ajanın CPU tavanı düşük). Sınıra takılırsa sonuç bunu açıkça yazar.
+- Zaman aralığı verildiğinde, son yazma zamanı aralığın dışında kalan dosyalar hiç açılmaz.
 
 ## Yapılandırma notları
 

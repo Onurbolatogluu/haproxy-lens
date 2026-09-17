@@ -1536,6 +1536,176 @@ function CodePathsPanel({ logs, openRows, toggleRow, frozen }) {
   );
 }
 
+// Log'da arama. Panelin belleğinden değil doğrudan log dosyalarından okur; bu yüzden
+// saklama süresinin (varsayılan 24 saat) ötesine, döndürülmüş ve sıkıştırılmış
+// dosyalara da bakabilir.
+const ARAMA_ARALIK = [[1, "Son 1 saat"], [24, "Son 24 saat"], [168, "Son 7 gün"], [720, "Son 30 gün"], [0, "Tüm log"]];
+
+function SearchSection() {
+  const [form, setForm] = useState({ path: "", ip: "", status: "", hours: 24 });
+  const [durum, setDurum] = useState("hazir"); // hazir | araniyor | bitti | hata
+  const [res, setRes] = useState(null);
+  const [hata, setHata] = useState("");
+
+  const ara = async (e) => {
+    e?.preventDefault?.();
+    if (!form.path && !form.ip && !form.status) {
+      setHata("Aramak için adres, IP ya da durum kodu yazın.");
+      setDurum("hata");
+      return;
+    }
+    setDurum("araniyor");
+    setHata("");
+    try {
+      const p = new URLSearchParams();
+      for (const k of ["path", "ip", "status"]) if (form[k]) p.set(k, form[k]);
+      if (form.hours) p.set("hours", String(form.hours));
+      const r = await fetch(`/api/search?${p}`, { cache: "no-store" });
+      const j = await r.json();
+      if (j.error) {
+        setHata(j.error);
+        setDurum("hata");
+        return;
+      }
+      setRes(j);
+      setDurum("bitti");
+    } catch (err) {
+      setHata("Arama yapılamadı: " + err.message);
+      setDurum("hata");
+    }
+  };
+
+  const alan = { background: C.bg, border: `1px solid ${C.line}`, color: C.text, borderRadius: 6, padding: "6px 10px" };
+  return (
+    <section id="search" className="mt-12">
+      <SectionTitle title="Log'da ara"
+        sub="Doğrudan log dosyalarında arar: döndürülmüş ve sıkıştırılmış dosyalar dahil. Bu yüzden panelin saklama süresinden daha geriye gidebilir." />
+      <Panel>
+        <form onSubmit={ara} className="flex flex-wrap items-end gap-3">
+          <label className="text-sm">
+            <div className="text-xs mb-1" style={{ color: C.muted }}>Adres (yolun içinde geçen)</div>
+            <input value={form.path} onChange={(e) => setForm({ ...form, path: e.target.value })}
+              placeholder="/api/kayit" style={{ ...alan, width: 260 }} />
+          </label>
+          <label className="text-sm">
+            <div className="text-xs mb-1" style={{ color: C.muted }}>IP (tam ya da başlangıcı)</div>
+            <input value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })}
+              placeholder="203.0.113." style={{ ...alan, width: 150 }} />
+          </label>
+          <label className="text-sm">
+            <div className="text-xs mb-1" style={{ color: C.muted }}>Durum kodu</div>
+            <input value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
+              placeholder="500 ya da 5xx" style={{ ...alan, width: 130 }} />
+          </label>
+          <label className="text-sm">
+            <div className="text-xs mb-1" style={{ color: C.muted }}>Zaman aralığı</div>
+            <select value={form.hours} onChange={(e) => setForm({ ...form, hours: Number(e.target.value) })} style={alan}>
+              {ARAMA_ARALIK.map(([h, t]) => <option key={h} value={h}>{t}</option>)}
+            </select>
+          </label>
+          <button type="submit" disabled={durum === "araniyor"}
+            className="rounded-md px-4 py-2 text-sm"
+            style={{ background: C.info, color: C.bg, opacity: durum === "araniyor" ? 0.6 : 1 }}>
+            {durum === "araniyor" ? "Aranıyor..." : "Ara"}
+          </button>
+        </form>
+
+        {durum === "hata" && <p className="text-sm mt-3" style={{ color: C.warn }}>{hata}</p>}
+        {durum === "araniyor" && (
+          <p className="text-sm mt-3" style={{ color: C.muted }}>
+            Log dosyaları taranıyor. Büyük log'larda bu biraz sürebilir; arama en fazla 20 saniye çalışır.
+          </p>
+        )}
+        {durum === "bitti" && res && <SearchResult res={res} />}
+      </Panel>
+    </section>
+  );
+}
+
+function SearchResult({ res }) {
+  if (res.note && res.matches === 0) return <p className="text-sm mt-4" style={{ color: C.muted }}>{res.note}</p>;
+  if (res.matches === 0) {
+    return (
+      <p className="text-sm mt-4" style={{ color: C.muted }}>
+        Eşleşme yok. {fmtNum(res.scanned)} satır tarandı ({(res.files || []).join(", ")}), {fmtNum(res.took)} ms sürdü.
+      </p>
+    );
+  }
+  const zaman = (ms) => new Date(ms).toLocaleString("tr-TR");
+  return (
+    <div className="mt-4">
+      <p className="text-sm" style={{ color: C.muted }}>
+        <b style={{ color: C.text }}>{fmtNum(res.matches)}</b> eşleşme.
+        {" "}{fmtNum(res.scanned)} satır tarandı ({(res.files || []).join(", ")}), {fmtNum(res.took)} ms.
+        {res.skipped > 0 && <> {res.skipped} eski dosya seçilen aralığın dışında kaldığı için açılmadı.</>}
+        {res.firstAt > 0 && <> İlk kayıt {zaman(res.firstAt)}, son kayıt {zaman(res.lastAt)}.</>}
+      </p>
+      {res.truncated && <p className="text-sm mt-1" style={{ color: C.warn }}>{res.note}</p>}
+
+      <div className="flex flex-wrap gap-1.5 mt-3">
+        {(res.codes || []).map((c) => <CodeChip key={c.code} code={c.code} n={c.n} />)}
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2 mt-4">
+        <div>
+          <div className="text-sm font-medium mb-1">En çok istek yapan IP'ler</div>
+          <ul className="text-sm">
+            {(res.ips || []).map((c) => (
+              <li key={c.ip} className="flex items-baseline justify-between gap-3 py-0.5" style={{ borderTop: `1px solid ${C.line}` }}>
+                <span className="tnum brk">{c.ip}{c.cloudflare && <span className="text-xs ml-2" style={{ color: C.faint }}>Cloudflare</span>}</span>
+                <span className="tnum nw" style={{ color: C.muted }}>{fmtNum(c.n)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <div className="text-sm font-medium mb-1">En çok eşleşen adresler</div>
+          <ul className="text-sm">
+            {(res.paths || []).map((x) => (
+              <li key={x.name} className="flex items-baseline justify-between gap-3 py-0.5" style={{ borderTop: `1px solid ${C.line}` }}>
+                <span className="brk">{x.name}</span>
+                <span className="tnum nw" style={{ color: C.muted }}>{fmtNum(x.n)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      <div className="text-sm font-medium mt-5 mb-1">
+        Eşleşen istekler <span className="font-normal text-xs" style={{ color: C.faint }}>(en yeniden eskiye, en fazla {fmtNum((res.hits || []).length)} satır)</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
+          <thead>
+            <tr className="text-xs" style={{ color: C.muted }}>
+              <th className="py-2 pr-3 font-normal text-left">Zaman</th>
+              <th className="py-2 pr-3 font-normal text-left">IP</th>
+              <th className="py-2 pr-3 font-normal text-right">Kod</th>
+              <th className="py-2 pr-3 font-normal text-left">Adres</th>
+              <th className="py-2 pr-3 font-normal text-left">Sunucu</th>
+              <th className="py-2 font-normal text-right">Süre</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(res.hits || []).map((h, i) => (
+              <tr key={i} style={{ borderTop: `1px solid ${C.line}` }}>
+                <td className="py-2 pr-3 align-top tnum nw text-xs">{zaman(h.at)}</td>
+                <td className="py-2 pr-3 align-top tnum brk">{h.ip}</td>
+                <td className="py-2 pr-3 align-top tnum nw text-right" style={{ color: codeColor(h.status) }}>{h.status}</td>
+                <td className="py-2 pr-3 align-top brk">
+                  <span style={{ color: C.faint }}>{h.method} </span>{h.host ? <span style={{ color: C.muted }}>{h.host}</span> : null}{h.path}
+                </td>
+                <td className="py-2 pr-3 align-top brk text-xs" style={{ color: C.faint }}>{h.backend}/{h.server}</td>
+                <td className="py-2 align-top tnum nw text-right text-xs">{h.ms >= 0 ? fmtMs(h.ms) : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function LogSection({ logs, minutes }) {
   const [openRows, setOpenRows] = useState(() => new Set());
   const toggleRow = (key) => setOpenRows((cur) => {
@@ -1911,6 +2081,7 @@ export default function App() {
             <BackendList model={model} rates={rates} expanded={expanded} onToggle={toggle} onFields={setFieldsRow} />
 
             <LogSection logs={logs} minutes={minutes} />
+            <SearchSection />
 
             <SectionTitle title="Frontend'ler" sub="Kullanıcıların bağlandığı giriş noktaları." />
             <FrontendTable model={model} rates={rates} onFields={setFieldsRow} />

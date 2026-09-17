@@ -141,6 +141,19 @@ func main() {
 		}
 		writeJSON(w, logs.Report(m))
 	})
+	mux.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
+		if logs == nil {
+			writeJSON(w, map[string]string{"error": "Bu sunucuda log analizi kapalı."})
+			return
+		}
+		q, err := searchQueryFrom(r.URL.Query().Get)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			writeJSON(w, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, logs.Search(q))
+	})
 	mux.HandleFunc("/api/ranges", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ranges": stats.Ranges(), "retention": retMin})
 	})
