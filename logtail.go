@@ -1270,7 +1270,13 @@ func topPerClass(rows []CodePathRow, per int) []CodePathRow {
 				idx = append(idx, i)
 			}
 		}
-		sort.Slice(idx, func(a, b int) bool { return get(rows[idx[a]]) > get(rows[idx[b]]) })
+		sort.Slice(idx, func(a, b int) bool {
+			x, y := rows[idx[a]], rows[idx[b]]
+			if get(x) != get(y) {
+				return get(x) > get(y)
+			}
+			return x.Path+x.Method+x.Backend < y.Path+y.Method+y.Backend // eşitlikte sabit sıra
+		})
 		if len(idx) > per {
 			idx = idx[:per]
 		}
@@ -1513,7 +1519,16 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 		}
 		rep.Paths = append(rep.Paths, row)
 	}
-	sort.Slice(rep.Paths, func(i, j int) bool { return rep.Paths[i].N > rep.Paths[j].N })
+	sort.Slice(rep.Paths, func(i, j int) bool {
+		a, b := rep.Paths[i], rep.Paths[j]
+		if a.N != b.N {
+			return a.N > b.N
+		}
+		if a.Path != b.Path {
+			return a.Path < b.Path // eşit sayıda: sıra her yenilemede aynı kalsın
+		}
+		return a.Method+a.Backend < b.Method+b.Backend
+	})
 	if len(rep.Paths) > 40 {
 		rep.Paths = rep.Paths[:40]
 	}
@@ -1562,7 +1577,12 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 		}
 		rep.Backends = append(rep.Backends, row)
 	}
-	sort.Slice(rep.Backends, func(i, j int) bool { return rep.Backends[i].N > rep.Backends[j].N })
+	sort.Slice(rep.Backends, func(i, j int) bool {
+		if rep.Backends[i].N != rep.Backends[j].N {
+			return rep.Backends[i].N > rep.Backends[j].N
+		}
+		return rep.Backends[i].Backend < rep.Backends[j].Backend
+	})
 
 	var codeRows []CodePathRow
 	for k, v := range paths {
@@ -1586,7 +1606,16 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 	for k, v := range blocked {
 		rep.Blocked = append(rep.Blocked, BlockRow{Kind: k.Kind, Method: k.Method, Path: k.Path, N: v.N, Detail: a.buildDetail(v.Det)})
 	}
-	sort.Slice(rep.Blocked, func(i, j int) bool { return rep.Blocked[i].N > rep.Blocked[j].N })
+	sort.Slice(rep.Blocked, func(i, j int) bool {
+		a, b := rep.Blocked[i], rep.Blocked[j]
+		if a.N != b.N {
+			return a.N > b.N
+		}
+		if a.Path != b.Path {
+			return a.Path < b.Path
+		}
+		return a.Method+a.Kind < b.Method+b.Kind
+	})
 	if len(rep.Blocked) > 40 {
 		rep.Blocked = rep.Blocked[:40]
 	}
@@ -1594,7 +1623,12 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 		rep.Clients = append(rep.Clients, ClientRow{IP: k, N: v.N, Blocked: v.Blocked,
 			Cloudflare: a.isCloudflare(k), Paths: topN(v.Paths, 6)})
 	}
-	sort.Slice(rep.Clients, func(i, j int) bool { return rep.Clients[i].N > rep.Clients[j].N })
+	sort.Slice(rep.Clients, func(i, j int) bool {
+		if rep.Clients[i].N != rep.Clients[j].N {
+			return rep.Clients[i].N > rep.Clients[j].N
+		}
+		return rep.Clients[i].IP < rep.Clients[j].IP
+	})
 	if len(rep.Clients) > 30 {
 		rep.Clients = rep.Clients[:30]
 	}

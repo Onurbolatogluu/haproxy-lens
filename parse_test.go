@@ -828,3 +828,50 @@ func TestKisaAralikDiskVerisineDuser(t *testing.T) {
 		t.Fatal("grafik noktası yok")
 	}
 }
+
+// Aynı veriyle üretilen rapor her seferinde aynı sırada gelmeli. Eşit sayıdaki
+// satırlar (özellikle birer kez görülen tarama istekleri) rastgele sıralanırsa
+// panel her yenilemede yerinden oynar.
+func TestRaporSirasiKararli(t *testing.T) {
+	a := NewLogAnalyzer("file:/yok", "")
+	simdi := time.Now()
+	// Çoğu birer kez görülen, yani eşit sayıda satırlar
+	yollar := []string{"/HNAP1", "/evox/about", "/admin/login.jsp", "/Dr0v", "/sdk", "/robots.txt",
+		"/favicon.ico", "/api/auth/validate-sso", "/nmaplowercheck", "/nice%20ports"}
+	for _, y := range yollar {
+		a.add(logRecord{At: simdi, Client: "203.0.113.5", Frontend: "fe", Backend: "fe", Server: "<NOSRV>",
+			Status: 403, Method: "GET", Path: y, RawPath: y, Kind: KindDenied})
+	}
+	for i := 0; i < 5; i++ { // biri daha sık
+		a.add(logRecord{At: simdi, Client: "203.0.113.6", Frontend: "fe", Backend: "fe", Server: "<NOSRV>",
+			Status: 403, Method: "HEAD", Path: "/", RawPath: "/", Kind: KindDenied})
+	}
+
+	sira := func() []string {
+		rep := a.Report(60)
+		var out []string
+		for _, b := range rep.Blocked {
+			out = append(out, b.Method+" "+b.Path)
+		}
+		for _, p := range rep.Paths {
+			out = append(out, "y:"+p.Method+" "+p.Path)
+		}
+		for _, c := range rep.Clients {
+			out = append(out, "ip:"+c.IP)
+		}
+		return out
+	}
+	ilk := sira()
+	if len(ilk) < len(yollar) {
+		t.Fatalf("rapor eksik: %d satır", len(ilk))
+	}
+	for i := 0; i < 20; i++ { // map sırası her turda değişir; sonuç değişmemeli
+		if s := sira(); !reflect.DeepEqual(s, ilk) {
+			t.Fatalf("sıra %d. denemede değişti:\n  ilk:   %v\n  sonra: %v", i+1, ilk, s)
+		}
+	}
+	// En sık görülen yine başta olmalı
+	if ilk[0] != "HEAD /" {
+		t.Fatalf("en sık satır başta değil: %v", ilk[0])
+	}
+}
