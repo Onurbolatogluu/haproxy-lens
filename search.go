@@ -173,13 +173,12 @@ func satirOkuyucu(yol string) (*bufio.Scanner, func(), error) {
 }
 
 type aramaToplayici struct {
-	enYeniDosyada int64 // taranan dosyadaki en yeni kaydın zamanı (erken durmak için)
-	q             SearchQuery
-	res           SearchResult
-	kodlar        map[int]int64
-	ipler         map[string]int64
-	yollar        map[string]int64
-	cf            func(string) bool
+	q      SearchQuery
+	res    SearchResult
+	kodlar map[int]int64
+	ipler  map[string]int64
+	yollar map[string]int64
+	cf     func(string) bool
 }
 
 func (t *aramaToplayici) ekle(r logRecord) {
@@ -200,9 +199,6 @@ func (t *aramaToplayici) ekle(r logRecord) {
 		Path: r.RawPath, Host: r.Host, Backend: r.Backend, Server: r.Server, Ms: r.Ta})
 	if len(t.res.Hits) >= aramaOrnekSiniri*2 {
 		t.budaHits()
-	}
-	if ms > t.enYeniDosyada {
-		t.enYeniDosyada = ms
 	}
 }
 
@@ -257,11 +253,13 @@ func (a *LogAnalyzer) Search(q SearchQuery) SearchResult {
 				t.res.Skipped++
 				continue
 			}
-			t.enYeniDosyada = 0
+			// Not: "bu dosya eskiydi, ötekilere bakmayalım" gibi bir kestirme YOK.
+			// Öyle bir kural dosyaların değiştirilme zamanına göre doğru sıralanmasına
+			// bağlı olurdu; zamanlar birbirine yakınsa sıra karışır ve arama erken
+			// durup boş sonuç döndürür. Güvenlik, dosya başına iki sınırla sağlanıyor:
+			// aralık dışındaki dosya hiç açılmaz (yukarıda), açılan dosya da sondan
+			// başa okunup aralığın öncesine geçilince bırakılır.
 			t.aramaDosya(f.Yol, parser, bitis)
-			if !q.Since.IsZero() && t.enYeniDosyada > 0 && t.enYeniDosyada < q.Since.UnixMilli() {
-				break
-			}
 		}
 	}
 	t.res.Took = time.Since(basla).Milliseconds()
@@ -291,9 +289,6 @@ func (t *aramaToplayici) aramaDosya(yol string, parser *LogParser, bitis time.Ti
 		rec, ok := parser.Parse(satir)
 		if !ok {
 			return true
-		}
-		if ms := rec.At.UnixMilli(); ms > t.enYeniDosyada {
-			t.enYeniDosyada = ms
 		}
 		// Sondan başa okunduğu için aranan aralığın öncesine geçilmiştir; satırlar
 		// tam sıralı olmayabileceğinden bir süre daha bakılıp sonra durulur.
@@ -329,9 +324,6 @@ func (t *aramaToplayici) aramaGz(yol string, parser *LogParser, bitis time.Time)
 		rec, ok := parser.Parse(satir)
 		if !ok {
 			continue
-		}
-		if ms := rec.At.UnixMilli(); ms > t.enYeniDosyada {
-			t.enYeniDosyada = ms
 		}
 		if t.q.uyuyor(rec) {
 			t.ekle(rec)

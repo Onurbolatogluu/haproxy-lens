@@ -67,8 +67,17 @@ func aramaOrtami(t *testing.T) *LogAnalyzer {
 	cokEski := []string{logSatiri(simdi.Add(-120*time.Hour), "192.0.2.88", "/api/kayit", 200)}
 	yaz(t, filepath.Join(dir, "haproxy.log.2.gz"), cokEski, true)
 
-	a := NewLogAnalyzer("file:"+filepath.Join(dir, "haproxy.log"), "")
-	return a
+	// Döndürülmüş dosyaların değiştirilme zamanları gerçekte olduğu gibi eski
+	eskit(t, filepath.Join(dir, "haproxy.log.1"), simdi.Add(-30*time.Hour))
+	eskit(t, filepath.Join(dir, "haproxy.log.2.gz"), simdi.Add(-5*24*time.Hour))
+	return NewLogAnalyzer("file:"+filepath.Join(dir, "haproxy.log"), "")
+}
+
+func eskit(t *testing.T, yol string, ts time.Time) {
+	t.Helper()
+	if err := os.Chtimes(yol, ts, ts); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestAramaDondurulmusDosyalar(t *testing.T) {
@@ -274,5 +283,33 @@ func TestAramaBuyukDosyadaSonSaat(t *testing.T) {
 	// Dosyanın tamamı taranmamalı: aralığın dışına çıkınca durulur
 	if res.Scanned > 100000 {
 		t.Fatalf("gereğinden fazla tarandı: %d satır", res.Scanned)
+	}
+}
+
+// Dosyaların değiştirilme zamanları birbirine çok yakın olabilir (ör. yeni kurulan
+// bir sunucuda ya da kopyalanmış log'larda). Arama bu sıralamaya bağlı olmamalı:
+// hangi sırayla taranırsa taransın sonuç aynı çıkmalı.
+func TestAramaDosyaSirasinaBagliDegil(t *testing.T) {
+	dir := t.TempDir()
+	simdi := time.Now()
+	yaz(t, filepath.Join(dir, "haproxy.log"), []string{
+		logSatiri(simdi.Add(-10*time.Minute), "203.0.113.5", "/api/kayit", 200),
+		logSatiri(simdi.Add(-20*time.Minute), "203.0.113.5", "/api/kayit", 200),
+	}, false)
+	yaz(t, filepath.Join(dir, "haproxy.log.1"), []string{
+		logSatiri(simdi.Add(-40*time.Minute), "203.0.113.6", "/api/kayit", 500),
+	}, false)
+	// Zamanlar birebir aynı: sıralama belirsiz
+	ayni := simdi
+	eskit(t, filepath.Join(dir, "haproxy.log"), ayni)
+	eskit(t, filepath.Join(dir, "haproxy.log.1"), ayni)
+
+	a := NewLogAnalyzer("file:"+filepath.Join(dir, "haproxy.log"), "")
+	res := a.Search(SearchQuery{Path: "/api/kayit", Since: simdi.Add(-2 * time.Hour)})
+	if res.Matches != 3 {
+		t.Fatalf("eşleşme: %d, beklenen 3 (dosyalar: %v)", res.Matches, res.Files)
+	}
+	if len(res.Files) != 2 {
+		t.Fatalf("her iki dosya da taranmalıydı: %v", res.Files)
 	}
 }
