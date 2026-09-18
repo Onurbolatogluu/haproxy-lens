@@ -715,7 +715,9 @@ function ErrorSummaries({ b }) {
 // isteklerin adres ve IP dökümü. Stats'taki toplam HAProxy açıldığından beridir,
 // log ise yalnızca seçili aralığı kapsar; ikisi farklı şeyler söyler, panel bunu yazar.
 function BackendTraffic({ name }) {
-  const { logs, label } = useContext(WinCtx);
+  const { logs, minutes } = useContext(WinCtx);
+  // Buradaki sayılar log'dan gelir; stats penceresinin süresiyle etiketlenmemeli.
+  const sure = `son ${araLabel(logs?.minutes || minutes)}`;
   const kutu = { background: C.panel2 };
   if (!logs?.enabled) {
     return (
@@ -728,7 +730,7 @@ function BackendTraffic({ name }) {
   if (!row || row.n === 0) {
     return (
       <p className="rounded-md px-4 py-2.5 text-sm" style={{ ...kutu, color: C.muted }}>
-        {cap(label)} içinde bu backend'e log'da hiç istek görünmüyor. Yukarıdaki toplam, HAProxy açıldığından beri birikmiş sayıdır.
+        {cap(sure)} içinde bu backend'e log'da hiç istek görünmüyor. Yukarıdaki toplam, HAProxy açıldığından beri birikmiş sayıdır.
       </p>
     );
   }
@@ -757,7 +759,7 @@ function BackendTraffic({ name }) {
   return (
     <div className="rounded-md px-4 py-3" style={kutu}>
       <div className="text-sm mb-3">
-        {cap(label)} içinde bu backend'e log'da <b>{fmtNum(row.n)}</b> istek geldi
+        {cap(sure)} içinde bu backend'e log'da <b>{fmtNum(row.n)}</b> istek geldi
         {sinif.length > 0 && (
           <>
             {" ("}

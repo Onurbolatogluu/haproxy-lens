@@ -126,6 +126,9 @@ func (a *LogAnalyzer) loadBuckets(ms []logMinute) {
 	defer a.mu.Unlock()
 	kesim := time.Now().Unix()/60 - int64(a.retention)
 	for _, lm := range ms {
+		if lm.T > a.yuklenenDk {
+			a.yuklenenDk = lm.T // diskten gelen en yeni dakika
+		}
 		if lm.T < kesim || a.buckets[lm.T] != nil {
 			continue
 		}

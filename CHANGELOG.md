@@ -4,6 +4,20 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.15.4
+
+- **Düzeltme: yeniden başlatmadan sonra log sayıları şişiyordu.** Ajan açılışta hem geçmişi diskten yüklüyor hem de panel boş başlamasın diye log dosyasının sonunu yeniden okuyordu; aynı satırlar iki kez sayılıyordu. Artık diskten gelen dakikalara ait satırlar tekrar sayılmıyor. Karşılığında, son diske yazmadan sonraki (en fazla bir dakikalık) kayıtlar geri gelmiyor; iki katı göstermekten iyidir.
+- **Düzeltme: backend ayrıntısındaki süre etiketi yanlıştı.** Kutudaki sayılar log'dan geliyor ama stats penceresinin süresiyle etiketleniyordu. Ajan yeni başladığında stats penceresi kısa olduğu için panel "1 saat" seçiliyken "Son 5 dk içinde ... 56.799 istek" gibi tutarsız bir cümle yazıyordu. Artık log'un kendi aralığı yazılıyor.
+- Her iki davranış da testle korunuyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.15.3
 
 - **Düzeltme (CI hatası):** Arama, bir dosyadaki kayıtlar aranan aralıktan eskiyse "gerisine bakmaya gerek yok" diyip duruyordu. Bu kestirme, dosyaların değiştirilme zamanına göre doğru sıralandığını varsayıyordu; zamanlar birbirine yakın olduğunda sıra karışıp **güncel dosya hiç taranmıyor ve arama boş sonuç dönüyordu**. CI'da tam bu oldu. Kestirme kaldırıldı.

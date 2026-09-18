@@ -466,28 +466,29 @@ func newBucket() *bucket {
 }
 
 type LogAnalyzer struct {
-	source    string // "file:/yol", "journal:haproxy" ya da "" (henüz yok)
-	path      string
-	cfNets    []*net.IPNet
-	parser    atomic.Pointer[LogParser]
-	mu        sync.Mutex
-	stop      chan struct{} // kaynak değişince eski okuyucuyu durdurur
-	changed   chan struct{}
-	retention int          // dakika
-	detay     int          // tam ayrıntının (tam adres, IP dökümü) saklandığı dakika
-	liste     int          // yol ve IP listelerinin saklandığı dakika
-	butce     int64        // ayrıntı için bellek bütçesi (bayt); aşılırsa en eski ayrıntı bırakılır
-	tepe      int64        // görülen en yüksek ayrıntı ağırlığı; bellek iadesini tetiklemek için
-	sonIadeDk int64        // en son bellek iadesinin yapıldığı dakika
-	simdiDk   func() int64 // şimdiki dakika; testlerde sahte saat verilebilir
-	dirty     bool
-	buckets   map[int64]*bucket
-	lines     int64
-	parsed    int64
-	tcpLines  int64
-	lastAt    time.Time
-	lastLine  time.Time // kaynaktan en son satır geldiği an (okunmasa bile)
-	lastErr   string
+	source     string // "file:/yol", "journal:haproxy" ya da "" (henüz yok)
+	path       string
+	cfNets     []*net.IPNet
+	parser     atomic.Pointer[LogParser]
+	mu         sync.Mutex
+	stop       chan struct{} // kaynak değişince eski okuyucuyu durdurur
+	changed    chan struct{}
+	retention  int          // dakika
+	yuklenenDk int64        // diskten yüklenen en yeni dakika; o dakikaya kadarki satırlar tekrar sayılmaz
+	detay      int          // tam ayrıntının (tam adres, IP dökümü) saklandığı dakika
+	liste      int          // yol ve IP listelerinin saklandığı dakika
+	butce      int64        // ayrıntı için bellek bütçesi (bayt); aşılırsa en eski ayrıntı bırakılır
+	tepe       int64        // görülen en yüksek ayrıntı ağırlığı; bellek iadesini tetiklemek için
+	sonIadeDk  int64        // en son bellek iadesinin yapıldığı dakika
+	simdiDk    func() int64 // şimdiki dakika; testlerde sahte saat verilebilir
+	dirty      bool
+	buckets    map[int64]*bucket
+	lines      int64
+	parsed     int64
+	tcpLines   int64
+	lastAt     time.Time
+	lastLine   time.Time // kaynaktan en son satır geldiği an (okunmasa bile)
+	lastErr    string
 	// okunamayan trafik satırları: dakikalık sayım + son örnekler
 	unparsed map[int64]int64
 	samples  []string
@@ -933,6 +934,12 @@ func (a *LogAnalyzer) add(r logRecord) {
 	min := r.At.Unix() / 60
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	// Ajan açılırken geçmişi diskten yükler, ayrıca panel boş başlamasın diye log
+	// dosyasının sonunu yeniden okur. O satırlar diskten gelen dakikalarda zaten
+	// sayılmıştır; tekrar sayılırsa son dakikalar iki katı görünür.
+	if min <= a.yuklenenDk {
+		return
+	}
 	b := a.buckets[min]
 	if b == nil {
 		b = newBucket()
