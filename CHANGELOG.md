@@ -4,6 +4,22 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.15.6
+
+- **Düzeltme: arama büyük log'larda çok yavaştı.** Her satır tam olarak ayrıştırılıyordu; yoğun bir LB'de 20 saniyede ancak 46.000 satır taranabiliyor, aranan kayıtlar daha geride kaldığı için "eşleşme yok" dönüyordu. Artık satırlar önce ucuz bir metin karşılaştırmasından geçiyor, yalnızca aday satırlar ayrıştırılıyor.
+- Ölçülen etki: 500.000 satırlık dosyada arama 197.000 satır/sn'den **1.650.000 satır/sn**'ye çıktı (8 kat). 177 MB'lık günlük bir log'da "son 24 saat" araması 1 milyon satırı 704 ms'de tarıyor.
+- Sonuçlar değişmez: eleme yalnızca "bu satır kesinlikle eşleşmez" diyebildiği satırları atar, asıl süzgeç yine ayrıştırılmış kayıt üzerinde çalışır. Büyük/küçük harf ayrımı yoktur.
+- Zaman sınırı da korundu: ön eleme yüzünden satırların çoğu ayrıştırılmadığı için, aralığın gerisine düşülüp düşülmediği her 500 satırda bir örnek satır ayrıştırılarak anlaşılıyor.
+- Hız bir testle korunuyor (`TestAramaOnElemeHizi`): 500.000 satırlık dosyada arama 600.000 satır/sn'nin altına düşerse test başarısız olur.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.15.5
 
 - **Düzeltme: kısa aralıklar yeniden başlatmadan sonra çok kısa görünüyordu.** 1 saat, 6 saat ve 24 saat düzgün çalışırken 5 dk ve 15 dk seçildiğinde panel "son 1 dk" gibi bir aralık gösteriyordu. Sebebi: uzun aralıklar dakikalık birikimden hesaplanıyor ve o veri diske yazıldığı için yeniden başlatmayı atlatıyor; kısa aralıklar ise yalnızca bellekteki 10 saniyelik ölçümlerden geliyordu. Artık kısa aralıklar da gerektiğinde diskten gelen dakikalık veriye düşüyor.

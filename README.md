@@ -157,6 +157,7 @@ Nasıl korunur:
 
 - Kabuk komutu çalıştırılmaz; dosyalar programın içinde okunur, bu yüzden arama metniyle komut çalıştırılamaz.
 - Yalnızca ajanın kullandığı log kaynağı ve onun döndürülmüş kopyaları okunur; kullanıcıdan dosya yolu kabul edilmez.
+- Aranan metni içermeyen satırlar, ayrıştırılmadan ucuz bir metin karşılaştırmasıyla elenir. Ayrıştırma saniyede ~200 bin satır işlerken bu eleme ~4 milyon satır işler; büyük log'larda aramayı kat kat hızlandırır. Sonuç değişmez: eleme yalnızca "kesinlikle eşleşmez" diyebildiği satırları atar, asıl süzgeç yine ayrıştırılmış kayıt üzerinde çalışır.
 - Log dosyaları **sondan başa** okunur: en yeni kayıtlar önce taranır. Bu sayede "son 1 saat" araması dosya ne kadar büyük olursa olsun hızlı biter ve süre sınırına takılsa bile elde edilen sonuçlar en güncel kayıtları kapsar.
 - Arama en fazla 20 saniye çalışır ve aynı anda tek arama yapılır (ajanın CPU tavanı düşük). Sınıra takılırsa sonuç bunu açıkça yazar.
 - Zaman aralığı verildiğinde, son yazma zamanı aralığın dışında kalan dosyalar hiç açılmaz.

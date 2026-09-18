@@ -82,6 +82,48 @@ func (q SearchQuery) bos() bool {
 	return q.Path == "" && q.IP == "" && q.Status == "" && q.Method == "" && q.Backend == ""
 }
 
+// Satırı ayrıştırmadan önce ucuz bir metin elemesi. Ayrıştırma saniyede ~200 bin
+// satır işlerken düz metin araması ~4 milyon satır işliyor; aranan metni içermeyen
+// satırları burada elemek aramayı kat kat hızlandırıyor. Eleme yalnızca "bu satır
+// kesinlikle eşleşmez" diyebildiğinde atlar; asıl süzgeç yine ayrıştırılmış kayıt
+// üzerinde çalıştığı için sonuç değişmez.
+func (q SearchQuery) onEleme() []string {
+	var gerekli []string
+	for _, v := range []string{q.Path, q.IP, q.Backend} {
+		if v != "" {
+			gerekli = append(gerekli, strings.ToLower(v))
+		}
+	}
+	return gerekli
+}
+
+// Büyük/küçük harf ayrımı olmadan, bellek ayırmadan metin arama
+func icerirFold(s, aranan string) bool {
+	n, m := len(s), len(aranan)
+	if m == 0 {
+		return true
+	}
+	if m > n {
+		return false
+	}
+	for i := 0; i+m <= n; i++ {
+		k := 0
+		for ; k < m; k++ {
+			d := s[i+k]
+			if d >= 'A' && d <= 'Z' {
+				d += 'a' - 'A'
+			}
+			if d != aranan[k] {
+				break
+			}
+		}
+		if k == m {
+			return true
+		}
+	}
+	return false
+}
+
 func (q SearchQuery) uyuyor(r logRecord) bool {
 	if q.Path != "" && !strings.Contains(strings.ToLower(r.RawPath), strings.ToLower(q.Path)) &&
 		!strings.Contains(strings.ToLower(r.Path), strings.ToLower(q.Path)) {
@@ -173,12 +215,22 @@ func satirOkuyucu(yol string) (*bufio.Scanner, func(), error) {
 }
 
 type aramaToplayici struct {
-	q      SearchQuery
-	res    SearchResult
-	kodlar map[int]int64
-	ipler  map[string]int64
-	yollar map[string]int64
-	cf     func(string) bool
+	gerekli []string // satırda mutlaka geçmesi gereken metinler (ucuz ön eleme)
+	q       SearchQuery
+	res     SearchResult
+	kodlar  map[int]int64
+	ipler   map[string]int64
+	yollar  map[string]int64
+	cf      func(string) bool
+}
+
+func (t *aramaToplayici) elemedenGecer(satir string) bool {
+	for _, g := range t.gerekli {
+		if !icerirFold(satir, g) {
+			return false
+		}
+	}
+	return true
 }
 
 func (t *aramaToplayici) ekle(r logRecord) {
@@ -228,8 +280,8 @@ func (a *LogAnalyzer) Search(q SearchQuery) SearchResult {
 	defer aramaKilidi.Unlock()
 
 	kaynak := a.Source()
-	t := &aramaToplayici{q: q, kodlar: map[int]int64{}, ipler: map[string]int64{}, yollar: map[string]int64{},
-		cf: a.isCloudflare}
+	t := &aramaToplayici{q: q, gerekli: q.onEleme(), kodlar: map[int]int64{}, ipler: map[string]int64{},
+		yollar: map[string]int64{}, cf: a.isCloudflare}
 	if kaynak == "" {
 		t.res.Note = "Bu sunucuda okunabilir bir HAProxy log'u bulunamadı."
 		t.bitir()
@@ -276,30 +328,38 @@ func (t *aramaToplayici) aramaDosya(yol string, parser *LogParser, bitis time.Ti
 		t.aramaGz(yol, parser, bitis)
 		return
 	}
+	// Ön eleme satırların çoğunu ayrıştırmadan atar. Zaman sınırını bilmek için
+	// zamana ihtiyaç olduğundan her 500 satırda bir örnek satır tam ayrıştırılır.
 	n, eski := 0, 0
 	geriSatirlar(yol, func(satir string) bool {
 		t.res.Scanned++
 		t.res.Bytes += int64(len(satir)) + 1
-		if n++; n%2000 == 0 {
-			if time.Now().After(bitis) || t.res.Bytes > aramaBaytSiniri {
-				t.res.Truncated = true
-				return false
-			}
+		n++
+		if n%2000 == 0 && (time.Now().After(bitis) || t.res.Bytes > aramaBaytSiniri) {
+			t.res.Truncated = true
+			return false
+		}
+		gecer := t.elemedenGecer(satir)
+		zamanBak := !t.q.Since.IsZero() && n%500 == 0
+		if !gecer && !zamanBak {
+			return true
 		}
 		rec, ok := parser.Parse(satir)
 		if !ok {
 			return true
 		}
-		// Sondan başa okunduğu için aranan aralığın öncesine geçilmiştir; satırlar
-		// tam sıralı olmayabileceğinden bir süre daha bakılıp sonra durulur.
-		if !t.q.Since.IsZero() && rec.At.Before(t.q.Since) {
-			if eski++; eski > 5000 {
-				return false
+		if !t.q.Since.IsZero() {
+			if rec.At.Before(t.q.Since) {
+				// Sondan başa okunuyor: aralığın öncesine geçilmiş olabilir. Satırlar
+				// tam sıralı olmayabileceği için birkaç örnek üst üste eski olmalı.
+				if eski++; eski >= 3 {
+					return false
+				}
+				return true
 			}
-			return true
+			eski = 0
 		}
-		eski = 0
-		if t.q.uyuyor(rec) {
+		if gecer && t.q.uyuyor(rec) {
 			t.ekle(rec)
 		}
 		return true
@@ -320,6 +380,9 @@ func (t *aramaToplayici) aramaGz(yol string, parser *LogParser, bitis time.Time)
 		if n++; n%2000 == 0 && (time.Now().After(bitis) || t.res.Bytes > aramaBaytSiniri) {
 			t.res.Truncated = true
 			return
+		}
+		if !t.elemedenGecer(satir) {
+			continue
 		}
 		rec, ok := parser.Parse(satir)
 		if !ok {

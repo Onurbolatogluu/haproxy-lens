@@ -313,3 +313,45 @@ func TestAramaDosyaSirasinaBagliDegil(t *testing.T) {
 		t.Fatalf("her iki dosya da taranmalıydı: %v", res.Files)
 	}
 }
+
+// Ön eleme, eşleşmeyen satırları ayrıştırmadan attığı için arama kat kat hızlanır.
+// Bu test hem hızı hem de sonucun değişmediğini korur.
+func TestAramaOnElemeHizi(t *testing.T) {
+	if testing.Short() {
+		t.Skip("uzun süren ölçüm")
+	}
+	dir := t.TempDir()
+	f, err := os.Create(filepath.Join(dir, "haproxy.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := bufio.NewWriterSize(f, 1<<20)
+	simdi := time.Now()
+	const toplam = 500000
+	for i := toplam; i > 0; i-- {
+		yol := "/cmsapi/webanalytics/LogHit"
+		if i%1000 == 0 {
+			yol = "/api/v1/config"
+		}
+		fmt.Fprintln(w, logSatiri(simdi.Add(-time.Duration(i)*80*time.Millisecond), "172.69.251.5", yol, 200))
+	}
+	w.Flush()
+	f.Close()
+
+	a := NewLogAnalyzer("file:"+filepath.Join(dir, "haproxy.log"), "")
+	basla := time.Now()
+	res := a.Search(SearchQuery{Path: "/api/v1"})
+	hiz := float64(res.Scanned) / time.Since(basla).Seconds()
+	t.Logf("%d satır tarandı, %d eşleşme, %.0f satır/sn", res.Scanned, res.Matches, hiz)
+
+	if res.Matches != 500 {
+		t.Fatalf("eşleşme: %d, beklenen 500", res.Matches)
+	}
+	if res.Truncated {
+		t.Fatal("süre sınırına takılmamalıydı")
+	}
+	// Ön eleme olmadan bu hız ~200 bin satır/sn seviyesindeydi
+	if hiz < 600000 {
+		t.Fatalf("arama beklenenden yavaş: %.0f satır/sn", hiz)
+	}
+}
