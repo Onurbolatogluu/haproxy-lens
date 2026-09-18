@@ -163,10 +163,16 @@ func TestWindowAndDownsample(t *testing.T) {
 	if st := p.State(60); st.Window.Seconds != 1200 {
 		t.Fatalf("kapsanan süre %v", st.Window.Seconds)
 	}
-	// HAProxy yeniden başlarsa (uptime küçülür) pencere sıfırdan başlar, eksi değer çıkmaz
+	// HAProxy yeniden başlarsa (uptime küçülür) sayaçları sıfırlanır. Dakikalık birikim
+	// ayrı tutulduğu için önceki trafik pencerede görünmeye devam eder; burada önemli
+	// olan eksi ya da şişmiş bir değer çıkmaması.
 	p.store(snap(1_210_000, "5", "10", "1"))
-	if w := p.State(60).Window.Rows["be|s1"]; w.N != 0 || w.Codes[4] != 0 {
-		t.Fatalf("yeniden başlatma sonrası: %+v", w)
+	w2 := p.State(60).Window.Rows["be|s1"]
+	if w2.N < 0 || w2.Codes[4] < 0 {
+		t.Fatalf("yeniden başlatma sonrası eksi değer: %+v", w2)
+	}
+	if w2.N > 12100 || w2.Codes[4] > 610 { // 20 dakikada en fazla 12.000 istek, 600 hata
+		t.Fatalf("yeniden başlatma sonrası şişme: %+v", w2)
 	}
 	pts := make([]Point, 1800)
 	for i := range pts {
@@ -777,5 +783,48 @@ func TestIPKodSiniri(t *testing.T) {
 	}
 	if ip.Other != 30 { // listeye girmeyen 3 kod x 10 istek
 		t.Fatalf("diğer: %d", ip.Other)
+	}
+}
+
+// Ajan yeniden başladığında 10 saniyelik ölçümler sıfırlanır (diske yazılmazlar).
+// Kısa aralıklar bu durumda diskten gelen dakikalık veriye düşmeli, yoksa panel
+// "5 dakika" seçiliyken "son 1 dk" gibi çok kısa bir aralık gösterir.
+func TestKisaAralikDiskVerisineDuser(t *testing.T) {
+	dir := t.TempDir()
+	row := func(req string) map[string]string {
+		return map[string]string{"pxname": "be", "svname": "BACKEND", "type": "1", "req_tot": req, "hrsp_2xx": req}
+	}
+	// Birinci ajan: 20 dakikalık trafik biriktirip diske yazıyor
+	a := NewStatsPoller("", 2*time.Second, 1800, 1440)
+	basla := (time.Now().UnixMilli()/60_000 - 20) * 60_000
+	for i := int64(0); i <= 20*6; i++ {
+		at := basla + i*10_000
+		a.store(&Snapshot{At: at, Info: map[string]string{"Uptime_sec": strconv.FormatInt(1000+i*10, 10)},
+			Rows: []map[string]string{row(strconv.FormatInt(i*100, 10))}})
+	}
+	if err := NewStore(dir, a, nil).Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// İkinci ajan: diskten yükledi, henüz tek ölçüm aldı
+	b := NewStatsPoller("", 2*time.Second, 1800, 1440)
+	if err := NewStore(dir, b, nil).Load(); err != nil {
+		t.Fatal(err)
+	}
+	b.store(&Snapshot{At: time.Now().UnixMilli(), Info: map[string]string{"Uptime_sec": "5000"},
+		Rows: []map[string]string{row("999999")}})
+
+	st := b.State(15) // 15 dakika: ince ölçümler yok, dakikalık veri var
+	if st.Window == nil {
+		t.Fatal("15 dakikalık pencere boş")
+	}
+	if st.Window.Seconds < 600 {
+		t.Fatalf("pencere yalnızca %.0f saniyeyi kapsıyor; diskteki dakikalık veriye düşmeliydi", st.Window.Seconds)
+	}
+	if st.Window.Rows["be|BACKEND"].N == 0 {
+		t.Fatal("pencere boş geldi")
+	}
+	if len(st.History) == 0 {
+		t.Fatal("grafik noktası yok")
 	}
 }

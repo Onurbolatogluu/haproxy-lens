@@ -454,30 +454,53 @@ func (p *StatsPoller) State(minutes int) StateResponse {
 		return resp
 	}
 	from := p.cur.At - int64(minutes)*60_000
-	var pts []Point
-	kaynak := p.hist // 1 saate kadar 2 saniyelik noktalar
-	if minutes > fineWindowMin {
-		kaynak = make([]Point, 0, len(p.minutes)) // ötesinde dakikalık ortalamalar
-		for _, m := range p.minutes {
-			kaynak = append(kaynak, m.P)
-		}
+	// Grafik: 1 saate kadar 2 saniyelik noktalar, ötesinde dakikalık ortalamalar.
+	// Ajan yeni başladıysa ince noktalar henüz birikmemiştir (diske yazılmazlar);
+	// o durumda dakikalık noktalar daha geniş bir aralığı kapsar.
+	ince := p.noktalar(p.hist, from)
+	if minutes > fineWindowMin || len(ince) == 0 {
+		ince = p.dakikaNoktalari(from)
+	} else if k := p.dakikaNoktalari(from); len(k) > 0 && k[0].T < ince[0].T-60_000 {
+		ince = k
 	}
-	for _, pt := range kaynak {
-		if pt.T >= from {
-			pts = append(pts, pt)
-		}
-	}
-	resp.History = downsample(pts, maxChartPts)
+	resp.History = downsample(ince, maxChartPts)
+
+	resp.Window = p.window(from, minutes)
 	if minutes > fineWindowMin {
 		resp.Window = p.windowFromMinutes(from, minutes)
-	} else {
-		resp.Window = p.window(from, minutes)
+	} else if dw := p.windowFromMinutes(from, minutes); dw != nil {
+		// Kısa aralıklarda 10 saniyelik ölçümler kullanılır ama bunlar diske
+		// yazılmaz. Yeniden başlatmadan sonra aralığı kapsamadıklarında,
+		// diskten gelen dakikalık veriye düşülür.
+		if resp.Window == nil || dw.Seconds > resp.Window.Seconds+30 {
+			resp.Window = dw
+		}
 	}
 	resp.Retention = p.retention
 	return resp
 }
 
 // Uzun aralıklar: dakikalık artışların toplamı
+func (p *StatsPoller) noktalar(kaynak []Point, from int64) []Point {
+	var out []Point
+	for _, pt := range kaynak {
+		if pt.T >= from {
+			out = append(out, pt)
+		}
+	}
+	return out
+}
+
+func (p *StatsPoller) dakikaNoktalari(from int64) []Point {
+	out := make([]Point, 0, len(p.minutes))
+	for _, m := range p.minutes {
+		if m.P.T >= from {
+			out = append(out, m.P)
+		}
+	}
+	return out
+}
+
 func (p *StatsPoller) windowFromMinutes(from int64, minutes int) *Window {
 	toplam := map[string][]float64{}
 	var ilk int64
