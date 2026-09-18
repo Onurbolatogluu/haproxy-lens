@@ -398,14 +398,15 @@ func (p *StatsPoller) store(s *Snapshot) {
 }
 
 type StateResponse struct {
-	OK        bool      `json:"ok"`
-	Error     string    `json:"error,omitempty"`
-	ErrorAt   int64     `json:"errorAt,omitempty"`
-	Cur       *Snapshot `json:"cur"`
-	Prev      *Snapshot `json:"prev"`
-	History   []Point   `json:"history"`
-	Window    *Window   `json:"window"`
-	Retention int       `json:"retention"` // dakika cinsinden saklama süresi
+	OK        bool         `json:"ok"`
+	Error     string       `json:"error,omitempty"`
+	ErrorAt   int64        `json:"errorAt,omitempty"`
+	Cur       *Snapshot    `json:"cur"`
+	Prev      *Snapshot    `json:"prev"`
+	History   []Point      `json:"history"`
+	Window    *Window      `json:"window"`
+	Retention int          `json:"retention"` // dakika cinsinden saklama süresi
+	System    *SystemState `json:"system,omitempty"`
 }
 
 // Seçilen aralıkta her satırın sayaç farkı: kaç istek, kaçı hangi yanıt sınıfı, kaç bağlantı hatası.
@@ -443,6 +444,15 @@ func (p *StatsPoller) Ranges() []int {
 		}
 	}
 	return out
+}
+
+// İstenen aralık, saklama süresine göre kırpılmış hâliyle; sistem grafikleri de
+// aynı aralığı kullansın diye.
+func (r StateResponse) Minutes() int {
+	if r.Window != nil {
+		return r.Window.Minutes
+	}
+	return 60
 }
 
 func (p *StatsPoller) State(minutes int) StateResponse {

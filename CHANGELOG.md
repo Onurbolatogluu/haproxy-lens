@@ -4,6 +4,23 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.16.0
+
+- **Yeni: "Sunucu" bölümü.** HAProxy'nin çalıştığı makinenin kendi ölçümleri: işlemci kullanımı, işlemcinin disk beklediği süre (iowait), bellek, yük ortalaması, disk doluluğu ve disk okuma/yazma hızı. İki canlı grafik ve bir özet şeridi.
+- Disk doluluğu ayrı bir panelde, çubuklarla: kök dizin, HAProxy'nin log yazdığı bölüm ve ajanın geçmişi sakladığı bölüm. %80'den sonra sarı, %90'dan sonra kırmızı. Log bölümü dolarsa panelin log kısmının da boşalacağı yazıyor.
+- Veriler `/proc` altından okunur: ek yetki, ek araç ya da ek servis gerekmez, kabuk komutu çalıştırılmaz, HAProxy'ye dokunulmaz.
+- Disk G/Ç'de yalnızca fiziksel aygıtlar sayılır; bölümler ve `dm-`, `loop`, `ram` gibi eşlemeler atlanır, yoksa aynı okuma iki kez toplanırdı.
+- Geçmiş, HAProxy ölçümleriyle aynı mantıkta: son 1 saat ince, ötesi dakikalık ortalama, diske yazıldığı için yeniden başlatmada kaybolmaz. Zaman aralığı seçici bu grafikleri de etkiler.
+- Ölçümler testle korunuyor: değerler makul aralıkta mı, disk aygıtı seçimi doğru mu, diske yazıp geri yükleme çalışıyor mu.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.15.7
 
 - **Düzeltme: listeler her yenilemede yeniden diziliyordu.** Eşit sayıdaki satırların (özellikle birer kez görülen tarama istekleri) sırası rastgele belirleniyordu; "Engellenen ve karşılıksız kalan istekler" gibi bölümlerde satırlar sürekli yer değiştiriyordu. Artık eşitlik durumunda adrese göre sabit bir sıra kullanılıyor.

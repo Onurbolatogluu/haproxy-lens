@@ -21,6 +21,7 @@ type stateDump struct {
 	Version int         `json:"version"`
 	SavedAt int64       `json:"savedAt"`
 	Minutes []MinuteAgg `json:"minutes"`
+	Sys     []SysPoint  `json:"sys,omitempty"`
 	Log     []logMinute `json:"log"`
 }
 
@@ -167,10 +168,11 @@ type Store struct {
 	dir   string
 	stats *StatsPoller
 	logs  *LogAnalyzer
+	sys   *SysPoller
 }
 
-func NewStore(dir string, stats *StatsPoller, logs *LogAnalyzer) *Store {
-	return &Store{dir: dir, stats: stats, logs: logs}
+func NewStore(dir string, stats *StatsPoller, logs *LogAnalyzer, sys *SysPoller) *Store {
+	return &Store{dir: dir, stats: stats, logs: logs, sys: sys}
 }
 
 func (s *Store) path() string { return filepath.Join(s.dir, stateFile) }
@@ -199,6 +201,9 @@ func (s *Store) Load() error {
 	if s.logs != nil {
 		s.logs.loadBuckets(d.Log)
 	}
+	if s.sys != nil {
+		s.sys.loadDakika(d.Sys)
+	}
 	log.Printf("Geçmiş diskten yüklendi: %d dakika istatistik, %d dakika log", len(d.Minutes), len(d.Log))
 	return nil
 }
@@ -210,6 +215,9 @@ func (s *Store) Save() error {
 	}
 	if s.logs != nil {
 		d.Log = s.logs.dumpBuckets()
+	}
+	if s.sys != nil {
+		d.Sys = s.sys.dumpDakika()
 	}
 	if err := os.MkdirAll(s.dir, 0o750); err != nil {
 		return err
@@ -247,7 +255,10 @@ func (s *Store) Run() {
 	defer t.Stop()
 	var hata int
 	for range t.C {
-		if s.stats != nil && !s.stats.isDirty() && s.logs != nil && !s.logs.isDirty() {
+		temiz := s.stats == nil || !s.stats.isDirty()
+		temiz = temiz && (s.logs == nil || !s.logs.isDirty())
+		temiz = temiz && (s.sys == nil || !s.sys.isDirty())
+		if temiz {
 			continue
 		}
 		if err := s.Save(); err != nil {

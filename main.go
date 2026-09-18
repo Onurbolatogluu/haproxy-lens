@@ -10,7 +10,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -106,9 +108,22 @@ func main() {
 		logs.SetBudget(int64(*budgetMB) << 20)
 		go logs.Run()
 	}
+	// Sunucunun kendi ölçümleri (CPU, bellek, disk); /proc altından okunur
+	var sysYollar []string
+	if logs != nil {
+		if p := strings.TrimPrefix(logs.Source(), "file:"); p != "" {
+			sysYollar = append(sysYollar, filepath.Dir(p))
+		}
+	}
+	if *stateDir != "" {
+		sysYollar = append(sysYollar, *stateDir)
+	}
+	sys := NewSysPoller(*interval, retMin, sysYollar...)
+	go sys.Run()
+
 	// Geçmişi diske yaz: ajan yeniden başladığında (sürüm güncellemesi gibi) veriler kaybolmasın
 	if *stateDir != "" {
-		store := NewStore(*stateDir, stats, logs)
+		store := NewStore(*stateDir, stats, logs, sys)
 		if err := store.Load(); err != nil {
 			log.Printf("Kayıtlı geçmiş yüklenemedi, sıfırdan başlanıyor: %v", err)
 		}
@@ -124,7 +139,9 @@ func main() {
 		if err != nil {
 			m = 60
 		}
-		writeJSON(w, stats.State(m))
+		st := stats.State(m)
+		st.System = sys.State(st.Minutes())
+		writeJSON(w, st)
 	})
 	mux.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
 		if logs == nil {

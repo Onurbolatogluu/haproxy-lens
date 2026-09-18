@@ -22,6 +22,7 @@ Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur
 - **HAProxy config'ine ve servisine dokunmaz.** Reload ve restart yapmaz.
 - **Her sunucuya kendini uydurur.** Ajan, çalışan HAProxy'nin config'ini sadece okuyarak stats socket'ini, log kaynağını ve her frontend'in log biçimini kendisi bulur. Özel `log-format` tanımları da okunur.
 - **Geçmişi saklar.** Grafikler ve oranlar varsayılan olarak 24 saat geriye gider. Veriler `/var/lib/haproxy-lens` altına yazılır (24 saat için birkaç yüz KB), böylece ajan yeniden başladığında geçmiş kaybolmaz.
+- **Sunucunun kendi ölçümleri.** İşlemci, disk beklemesi, bellek, yük ortalaması, disk doluluğu ve disk okuma/yazma hızı; canlı grafiklerle. Veriler `/proc` altından okunur: ek yetki, ek araç ya da ek servis gerekmez.
 - **Log'da arama.** Panelden bağımsız olarak log dosyalarında (döndürülmüş ve sıkıştırılmış dahil) arama yapar; saklama süresinin ötesine bakabilir.
 - **Çalışırken izler, yeniden kurulum istemez.** Config değişip HAProxy reload edilince (yeni log biçimi, yeni Host yakalaması, yeni backend) ajan bunu en geç 30 saniyede fark eder ve kendini günceller. Log kaynağı susarsa yenisini arar; stats socket çalışmazsa config'teki başka bir socket'e geçer.
 - **Eksiği panelde söyler.** Config'te veriyi kısıtlayan bir şey varsa (log kapalı, `dontlog-normal`, alan adı yakalanmıyor, sağlık kontrolü yok, okunamayan log satırları...) panelin üstündeki "Yapılandırma notları" bölümünde ne olduğunu, neyi etkilediğini ve eklenebilecek config satırını yazar.
@@ -253,6 +254,16 @@ Tüm kademeleri aynı yapmak da mümkün: `RETENTION=24h DETAIL=24h LISTS=24h BU
 
 **Panel ne gördüğünü söyler.** Log bölümü, ayrıntının ve listelerin ayarlanan değil *gerçekte* kapsadığı süreyi yazar. Bir tarama saldırısında bellek bütçesi devreye girip ayrıntıyı kısaltırsa bunu orada görürsünüz.
 
+## Sunucu ölçümleri
+
+Panelde "Sunucu" bölümü, HAProxy'nin çalıştığı makinenin kendi durumunu gösterir: işlemci kullanımı, işlemcinin disk beklediği süre, bellek, yük ortalaması, disk doluluğu ve disk okuma/yazma hızı. Bir yavaşlamanın sebebi çoğu zaman HAProxy'de değil buradadır.
+
+Veriler `/proc/stat`, `/proc/meminfo`, `/proc/diskstats` ve dosya sistemi bilgisinden okunur. Bu dosyalar herkese açık olduğu için ek yetki gerekmez; kabuk komutu da çalıştırılmaz. Disk doluluğu için kök dizin, HAProxy'nin log yazdığı bölüm ve ajanın geçmişi sakladığı bölüm izlenir (aynı dosya sistemiyse bir kez gösterilir).
+
+Disk G/Ç hesaplanırken yalnızca fiziksel aygıtlar sayılır (`sda`, `vda`, `nvme0n1` gibi); bölümler ve `dm-`, `loop` gibi eşlemeler atlanır, yoksa aynı okuma iki kez toplanır.
+
+Geçmiş, HAProxy ölçümleriyle aynı şekilde saklanır: son 1 saat ince, ötesi dakikalık ortalama, ve dakikalık özet diske yazıldığı için ajan yeniden başlasa da kaybolmaz.
+
 ## Bellek
 
 Geçmiş bellekte tutulur (disk yalnızca yeniden başlatma için yedektir), bu yüzden asıl sınır diskte değil bellektedir. Varsayılan ayarlarda (24 saat sayı, 6 saat yol/IP listesi, 1 saat tam ayrıntı) yoğun bir LB'de **~51 MB** kullanılır.
@@ -314,6 +325,7 @@ Dosyalar:
 | Dosya | İçerik |
 |---|---|
 | `main.go` | Parametreler, web sunucusu, `/api/*` uçları |
+| `system.go` | Sunucu ölçümleri (`/proc/stat`, `/proc/meminfo`, `/proc/diskstats`, disk doluluğu) |
 | `store.go` | Geçmişin diske yazılması ve yeniden başlatmada yüklenmesi |
 | `haproxy.go` | Stats socket'inden okuma (izin verilen komutlar burada), zaman aralığı hesabı |
 | `config.go` | haproxy.cfg'yi okuma: bölümler, `defaults` mirası, log hedefleri, Host yakalama |

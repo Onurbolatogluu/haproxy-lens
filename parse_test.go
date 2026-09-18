@@ -540,14 +540,14 @@ func TestUzunAralikVeDiskeKayit(t *testing.T) {
 	}
 
 	// Diske yaz, yeni ajanlara yükle
-	st1 := NewStore(dir, p, a)
+	st1 := NewStore(dir, p, a, nil)
 	if err := st1.Save(); err != nil {
 		t.Fatal(err)
 	}
 	p2 := NewStatsPoller("", 2*time.Second, 1800, 1440)
 	a2 := NewLogAnalyzer("file:/yok", "")
 	a2.SetRetention(1440)
-	if err := NewStore(dir, p2, a2).Load(); err != nil {
+	if err := NewStore(dir, p2, a2, nil).Load(); err != nil {
 		t.Fatal(err)
 	}
 	if len(p2.minutes) != len(p.minutes) {
@@ -574,7 +574,7 @@ func TestBozukKayitDosyasi(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := NewStatsPoller("", 2*time.Second, 1800, 1440)
-	if err := NewStore(dir, p, nil).Load(); err == nil {
+	if err := NewStore(dir, p, nil, nil).Load(); err == nil {
 		t.Fatal("bozuk dosya hata vermeliydi")
 	}
 	if len(p.minutes) != 0 {
@@ -680,11 +680,11 @@ func TestIPDokumuDiskeYaziliyor(t *testing.T) {
 		a.add(logRecord{At: time.Now(), Client: "198.51.100.9", Frontend: "fe", Backend: "be", Server: "s1",
 			Status: 404, Method: "POST", Path: "/api/kayit", RawPath: "/api/kayit", Kind: KindServed})
 	}
-	if err := NewStore(dir, nil, a).Save(); err != nil {
+	if err := NewStore(dir, nil, a, nil).Save(); err != nil {
 		t.Fatal(err)
 	}
 	a2 := NewLogAnalyzer("file:/yok", "")
-	if err := NewStore(dir, nil, a2).Load(); err != nil {
+	if err := NewStore(dir, nil, a2, nil).Load(); err != nil {
 		t.Fatal(err)
 	}
 	rep := a2.Report(60)
@@ -728,7 +728,7 @@ func TestKayitDosyasiBoyutu(t *testing.T) {
 				Backend: "be_web", Server: "s1", Status: 200, Method: "GET", Path: yol, RawPath: yol, Kind: KindServed})
 		}
 	}
-	if err := NewStore(dir, nil, a).Save(); err != nil {
+	if err := NewStore(dir, nil, a, nil).Save(); err != nil {
 		t.Fatal(err)
 	}
 	fi, err := os.Stat(filepath.Join(dir, stateFile))
@@ -802,13 +802,13 @@ func TestKisaAralikDiskVerisineDuser(t *testing.T) {
 		a.store(&Snapshot{At: at, Info: map[string]string{"Uptime_sec": strconv.FormatInt(1000+i*10, 10)},
 			Rows: []map[string]string{row(strconv.FormatInt(i*100, 10))}})
 	}
-	if err := NewStore(dir, a, nil).Save(); err != nil {
+	if err := NewStore(dir, a, nil, nil).Save(); err != nil {
 		t.Fatal(err)
 	}
 
 	// İkinci ajan: diskten yükledi, henüz tek ölçüm aldı
 	b := NewStatsPoller("", 2*time.Second, 1800, 1440)
-	if err := NewStore(dir, b, nil).Load(); err != nil {
+	if err := NewStore(dir, b, nil, nil).Load(); err != nil {
 		t.Fatal(err)
 	}
 	b.store(&Snapshot{At: time.Now().UnixMilli(), Info: map[string]string{"Uptime_sec": "5000"},
@@ -873,5 +873,64 @@ func TestRaporSirasiKararli(t *testing.T) {
 	// En sık görülen yine başta olmalı
 	if ilk[0] != "HEAD /" {
 		t.Fatalf("en sık satır başta değil: %v", ilk[0])
+	}
+}
+
+// Sunucu ölçümleri /proc'tan okunur; değerler makul aralıkta olmalı ve
+// geçmiş diske yazılıp geri yüklenebilmeli.
+func TestSistemOlcumleri(t *testing.T) {
+	s := NewSysPoller(10*time.Millisecond, 1440, "/tmp")
+	s.tick()
+	time.Sleep(60 * time.Millisecond)
+	s.tick()
+
+	st := s.State(60)
+	if st == nil || !st.OK {
+		t.Fatalf("ölçüm alınamadı: %+v", st)
+	}
+	if st.CPUs < 1 {
+		t.Fatalf("çekirdek sayısı: %d", st.CPUs)
+	}
+	if st.MemTotal <= 0 || st.MemUsed <= 0 || st.MemUsed > st.MemTotal {
+		t.Fatalf("bellek: %d / %d", st.MemUsed, st.MemTotal)
+	}
+	if st.Cur.CPU < 0 || st.Cur.CPU > 100 || st.Cur.MemPct < 0 || st.Cur.MemPct > 100 {
+		t.Fatalf("yüzdeler aralık dışında: %+v", st.Cur)
+	}
+	if len(st.Disks) == 0 {
+		t.Fatal("disk doluluğu okunamadı")
+	}
+	for _, d := range st.Disks {
+		if d.Total <= 0 || d.UsedPct < 0 || d.UsedPct > 100 {
+			t.Fatalf("disk değeri hatalı: %+v", d)
+		}
+	}
+	if len(st.History) == 0 {
+		t.Fatal("grafik noktası yok")
+	}
+
+	// Diske yazıp geri yükleme
+	dir := t.TempDir()
+	s.dakika = []SysPoint{{T: time.Now().UnixMilli() - 60_000, CPU: 12, MemPct: 40}}
+	if err := NewStore(dir, nil, nil, s).Save(); err != nil {
+		t.Fatal(err)
+	}
+	s2 := NewSysPoller(time.Second, 1440)
+	if err := NewStore(dir, nil, nil, s2).Load(); err != nil {
+		t.Fatal(err)
+	}
+	if len(s2.dakika) != 1 || s2.dakika[0].CPU != 12 {
+		t.Fatalf("diskten yüklenen sistem geçmişi: %+v", s2.dakika)
+	}
+}
+
+func TestFizikselAygitSecimi(t *testing.T) {
+	for ad, bekle := range map[string]bool{
+		"sda": true, "sda1": false, "vda": true, "vda2": false, "nvme0n1": true, "nvme0n1p3": false,
+		"loop0": false, "dm-0": false, "ram0": false, "xvdb": true, "sr0": false,
+	} {
+		if fizikselAygit(ad) != bekle {
+			t.Errorf("%s: %v, beklenen %v", ad, fizikselAygit(ad), bekle)
+		}
 	}
 }
