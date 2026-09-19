@@ -4,6 +4,21 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 0.16.1
+
+- **Düzeltme: "Sunucu" özet şeridinde etiketler görünmüyordu.** Yanlış bileşen kullanmıştım; şerit yan yana dizilmiş, ne olduğu belirsiz sayılardan ibaret kalıyordu. Artık panelin üstündeki şeritle aynı biçimde: her değerin başlığı, açıklaması ve üzerine gelince ne anlama geldiğini yazan bir ipucu var.
+- **Grafikler ayrıldı.** Bellek ile disk okuma/yazma aynı grafikte, farklı birimlerle iç içeydi. Artık üç ayrı grafik var: işlemci kullanımı (%), bellek kullanımı (%) ve disk okuma/yazma (MB/sn).
+- Şerit dört değere indirildi ve sadeleşti: işlemci, bellek, disk beklemesi, yük. Disk okuma/yazma kendi grafiğinde.
+- Açıklamalar, konuyu bilmeyen birinin de anlayacağı şekilde yeniden yazıldı; örneğin disk beklemesi için "işlemcinin diski beklediği süre; yüksekse darboğaz işlemcide değil disktedir".
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.16.0
 
 - **Yeni: "Sunucu" bölümü.** HAProxy'nin çalıştığı makinenin kendi ölçümleri: işlemci kullanımı, işlemcinin disk beklediği süre (iowait), bellek, yük ortalaması, disk doluluğu ve disk okuma/yazma hızı. İki canlı grafik ve bir özet şeridi.

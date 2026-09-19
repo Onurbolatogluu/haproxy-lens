@@ -1284,9 +1284,11 @@ function SystemSection({ sys, minutes }) {
     t: new Date(p.t).toLocaleTimeString("tr-TR", minutes > 5
       ? { hour: "2-digit", minute: "2-digit" }
       : { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-    "İşlemci": Math.round(p.cpu * 10) / 10, "Disk beklemesi": Math.round(p.iowait * 10) / 10,
-    "Bellek %": Math.round(p.memPct * 10) / 10,
-    "Okuma MB/sn": Math.round((p.read / 1e6) * 100) / 100, "Yazma MB/sn": Math.round((p.write / 1e6) * 100) / 100,
+    "İşlemci": Math.round(p.cpu * 10) / 10,
+    "Disk beklemesi": Math.round(p.iowait * 10) / 10,
+    "Bellek": Math.round(p.memPct * 10) / 10,
+    "Okuma": Math.round((p.read / 1e6) * 100) / 100,
+    "Yazma": Math.round((p.write / 1e6) * 100) / 100,
   }));
   const tick = { fill: C.faint, fontSize: 11 };
   const Legend = ({ items }) => (
@@ -1296,62 +1298,53 @@ function SystemSection({ sys, minutes }) {
       ))}
     </div>
   );
-  const enDoluDisk = (sys.disks || []).reduce((a, d) => (a && a.usedPct > d.usedPct ? a : d), null);
   const diskRenk = (p) => (p >= 90 ? C.bad : p >= 80 ? C.warn : C.text);
-
+  // Özet kartları: her biri "ne olduğu" açıkça yazılı, altında sade bir açıklama
+  const kartlar = [
+    {
+      k: "İşlemci", value: `%${trDec(c.cpu || 0)}`,
+      sub: `${sys.cpus} çekirdek · ${trDec(sys.load?.[0] || 0)} yük`,
+      color: c.cpu >= 85 ? C.bad : c.cpu >= 60 ? C.warn : null,
+    },
+    {
+      k: "Bellek", value: `%${trDec(c.memPct || 0)}`,
+      sub: `${fmtBytes(sys.memUsed)} / ${fmtBytes(sys.memTotal)} kullanımda`,
+      color: c.memPct >= 90 ? C.bad : c.memPct >= 80 ? C.warn : null,
+    },
+    {
+      k: "Disk beklemesi", value: `%${trDec(c.iowait || 0)}`,
+      sub: "işlemcinin diski beklediği süre",
+      color: c.iowait >= 20 ? C.warn : null,
+    },
+    {
+      k: "Disk hızı", value: `${fmtBytes(c.write || 0)}/sn`,
+      sub: `yazma · ${fmtBytes(c.read || 0)}/sn okuma`,
+    },
+  ];
   return (
     <section id="system" className="mt-12">
       <SectionTitle title="Sunucu"
-        sub="HAProxy'nin çalıştığı makinenin kendi ölçümleri: işlemci, bellek, disk. Bir yavaşlamanın sebebi çoğu zaman burada görünür." />
+        sub="HAProxy'nin üzerinde çalıştığı makinenin durumu. Bir yavaşlamanın sebebi çoğu zaman HAProxy'de değil burada olur: işlemci tükenmiş, bellek dolmuş ya da disk yetişemiyordur." />
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-px rounded-lg overflow-hidden mb-4"
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-px rounded-lg overflow-hidden"
         style={{ background: C.line, border: `1px solid ${C.line}` }}>
-        <Metric label="İşlemci" value={`%${trDec(c.cpu || 0)}`} sub={`${sys.cpus} çekirdek`}
-          color={c.cpu >= 85 ? C.bad : c.cpu >= 60 ? C.warn : C.text} term="cpu" />
-        <Metric label="Disk beklemesi" value={`%${trDec(c.iowait || 0)}`} sub="işlemcinin disk beklediği süre"
-          color={c.iowait >= 20 ? C.warn : C.text} term="iowait" />
-        <Metric label="Bellek" value={`%${trDec(c.memPct || 0)}`}
-          sub={`${fmtBytes(sys.memUsed)} / ${fmtBytes(sys.memTotal)}`}
-          color={c.memPct >= 90 ? C.bad : c.memPct >= 80 ? C.warn : C.text} term="mem" />
-        <Metric label="Yük" value={trDec(sys.load?.[0] || 0)}
-          sub={`${trDec(sys.load?.[1] || 0)} / ${trDec(sys.load?.[2] || 0)} (5 dk / 15 dk)`}
-          color={sys.cpus > 0 && sys.load?.[0] > sys.cpus ? C.warn : C.text} term="load" />
-        <Metric label="Disk okuma" value={`${fmtBytes(c.read || 0)}/sn`} sub="tüm diskler" />
-        <Metric label="Disk yazma" value={`${fmtBytes(c.write || 0)}/sn`} sub="tüm diskler" />
-      </div>
-
-      {(sys.disks || []).length > 0 && (
-        <Panel title="Disk doluluğu"
-          note={enDoluDisk && enDoluDisk.usedPct >= 85
-            ? "Log yazılan bölüm dolarsa HAProxy log tutamaz ve panelin log bölümü boşalır."
-            : "HAProxy'nin log yazdığı ve ajanın geçmişi sakladığı bölümler."}>
-          <ul className="space-y-2">
-            {sys.disks.map((d) => (
-              <li key={d.path}>
-                <div className="flex items-baseline justify-between gap-3 text-sm">
-                  <span className="brk tnum">{d.path}</span>
-                  <span className="tnum nw" style={{ color: diskRenk(d.usedPct) }}>
-                    %{trDec(d.usedPct)} dolu
-                    <span className="text-xs ml-2" style={{ color: C.faint }}>{fmtBytes(d.free)} boş / {fmtBytes(d.total)}</span>
-                  </span>
-                </div>
-                <div className="mt-1" style={{ height: 4, background: C.line, borderRadius: 2 }}>
-                  <div style={{ width: `${Math.min(100, d.usedPct)}%`, height: 4, background: diskRenk(d.usedPct), borderRadius: 2 }} />
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Panel>
-      )}
+        {kartlar.map((it) => (
+          <div key={it.k} className="px-4 py-4" style={{ background: C.panel }}>
+            <div className="text-sm" style={{ color: C.muted }}>{it.k}</div>
+            <div className="text-2xl font-semibold tnum mt-1" style={{ color: it.color || C.text }}>{it.value}</div>
+            <div className="text-xs mt-1 brk" style={{ color: C.faint }}>{it.sub}</div>
+          </div>
+        ))}
+      </section>
 
       <div className="grid gap-4 md:grid-cols-2 mt-4">
-        <Panel title="İşlemci"
-          note={`${cap(label)}. Kırmızı alan, işlemcinin diski beklediği süredir; yüksekse darboğaz işlemcide değil diskte.`}>
-          <ResponsiveContainer width="100%" height={210}>
+        <Panel title="İşlemci kullanımı"
+          note={`${cap(label)}. Mavi alan işlemcinin çalıştığı, kırmızı alan ise diskin yanıtını beklediği süredir. Kırmızı yüksekse darboğaz işlemcide değil disktedir.`}>
+          <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={pts} margin={{ top: 6, right: 6, left: -14, bottom: 0 }}>
               <CartesianGrid stroke={C.line} vertical={false} />
               <XAxis dataKey="t" tick={tick} tickLine={false} axisLine={false} minTickGap={48} />
-              <YAxis domain={[0, 100]} tick={tick} tickLine={false} axisLine={false} width={48} />
+              <YAxis domain={[0, 100]} tick={tick} tickLine={false} axisLine={false} width={48} unit="%" />
               <Tooltip cursor={{ stroke: C.faint }} content={<ChartTip birim={(v) => `%${trDec(v)}`} />} />
               <Area type="monotone" dataKey="İşlemci" stroke={C.info} strokeWidth={1} fill={C.info} fillOpacity={0.35} isAnimationActive={false} dot={false} />
               <Area type="monotone" dataKey="Disk beklemesi" stroke={C.bad} strokeWidth={1} fill={C.bad} fillOpacity={0.35} isAnimationActive={false} dot={false} />
@@ -1360,19 +1353,55 @@ function SystemSection({ sys, minutes }) {
           <Legend items={[["İşlemci", C.info], ["Disk beklemesi", C.bad]]} />
         </Panel>
 
-        <Panel title="Bellek ve disk G/Ç" note={`${cap(label)}. Bellek yüzde olarak, disk okuma/yazma megabayt/saniye.`}>
-          <ResponsiveContainer width="100%" height={210}>
+        <Panel title="Bellek kullanımı"
+          note={`${cap(label)}. Gerçekten kullanılan bellek; önbellek hesaba katılmaz. Sürekli %90'ın üstündeyse sistem takılmaya başlar.`}>
+          <ResponsiveContainer width="100%" height={200}>
+            <AreaChart data={pts} margin={{ top: 6, right: 6, left: -14, bottom: 0 }}>
+              <CartesianGrid stroke={C.line} vertical={false} />
+              <XAxis dataKey="t" tick={tick} tickLine={false} axisLine={false} minTickGap={48} />
+              <YAxis domain={[0, 100]} tick={tick} tickLine={false} axisLine={false} width={48} unit="%" />
+              <Tooltip cursor={{ stroke: C.faint }} content={<ChartTip birim={(v) => `%${trDec(v)}`} />} />
+              <Area type="monotone" dataKey="Bellek" stroke={C.ok} strokeWidth={1} fill={C.ok} fillOpacity={0.3} isAnimationActive={false} dot={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+          <Legend items={[["Bellek", C.ok]]} />
+        </Panel>
+
+        <Panel title="Disk okuma ve yazma"
+          note={`${cap(label)}. Saniyede diske yazılan ve diskten okunan veri, megabayt cinsinden. Log yazımı bu grafikte görünür.`}>
+          <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={pts} margin={{ top: 6, right: 6, left: -14, bottom: 0 }}>
               <CartesianGrid stroke={C.line} vertical={false} />
               <XAxis dataKey="t" tick={tick} tickLine={false} axisLine={false} minTickGap={48} />
               <YAxis tick={tick} tickLine={false} axisLine={false} width={48} />
-              <Tooltip cursor={{ stroke: C.faint }} content={<ChartTip birim={(v) => trDec(v)} />} />
-              <Area type="monotone" dataKey="Bellek %" stroke={C.ok} strokeWidth={1} fill={C.ok} fillOpacity={0.25} isAnimationActive={false} dot={false} />
-              <Area type="monotone" dataKey="Okuma MB/sn" stroke={C.maint} strokeWidth={1} fill={C.maint} fillOpacity={0.2} isAnimationActive={false} dot={false} />
-              <Area type="monotone" dataKey="Yazma MB/sn" stroke={C.warn} strokeWidth={1} fill={C.warn} fillOpacity={0.2} isAnimationActive={false} dot={false} />
+              <Tooltip cursor={{ stroke: C.faint }} content={<ChartTip birim={(v) => `${trDec(v)} MB/sn`} />} />
+              <Area type="monotone" dataKey="Yazma" stroke={C.warn} strokeWidth={1} fill={C.warn} fillOpacity={0.25} isAnimationActive={false} dot={false} />
+              <Area type="monotone" dataKey="Okuma" stroke={C.maint} strokeWidth={1} fill={C.maint} fillOpacity={0.25} isAnimationActive={false} dot={false} />
             </AreaChart>
           </ResponsiveContainer>
-          <Legend items={[["Bellek %", C.ok], ["Okuma MB/sn", C.maint], ["Yazma MB/sn", C.warn]]} />
+          <Legend items={[["Yazma", C.warn], ["Okuma", C.maint]]} />
+        </Panel>
+
+        <Panel title="Disk doluluğu"
+          note="HAProxy'nin log yazdığı ve ajanın geçmişi sakladığı bölümler. Log bölümü dolarsa HAProxy log tutamaz ve panelin log kısmı boşalır.">
+          {(sys.disks || []).length === 0 ? (
+            <p className="text-sm" style={{ color: C.faint }}>Disk bilgisi okunamadı.</p>
+          ) : (
+            <ul className="space-y-3">
+              {sys.disks.map((d) => (
+                <li key={d.path}>
+                  <div className="flex items-baseline justify-between gap-3 text-sm">
+                    <span className="brk tnum">{d.path}</span>
+                    <span className="tnum nw" style={{ color: diskRenk(d.usedPct) }}>%{trDec(d.usedPct)} dolu</span>
+                  </div>
+                  <div className="mt-1" style={{ height: 6, background: C.line, borderRadius: 3 }}>
+                    <div style={{ width: `${Math.min(100, d.usedPct)}%`, height: 6, background: diskRenk(d.usedPct), borderRadius: 3 }} />
+                  </div>
+                  <div className="text-xs mt-1" style={{ color: C.faint }}>{fmtBytes(d.free)} boş / {fmtBytes(d.total)} toplam</div>
+                </li>
+              ))}
+            </ul>
+          )}
         </Panel>
       </div>
     </section>
