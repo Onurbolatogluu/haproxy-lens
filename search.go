@@ -273,10 +273,16 @@ func (t *aramaToplayici) bitir() {
 	t.budaHits()
 }
 
+// Aynı anda ikinci bir arama gelirse beklemez; kuyruğa giren her arama 20 saniyeye
+// kadar bağlantı tutup paneli yavaşlatıyordu.
+var ErrAramaSuruyor = fmt.Errorf("başka bir arama sürüyor; birkaç saniye sonra tekrar deneyin")
+
 // Log'da arama yapar. Panelin belleğine değil, doğrudan dosyalara bakar.
-func (a *LogAnalyzer) Search(q SearchQuery) SearchResult {
+func (a *LogAnalyzer) Search(q SearchQuery) (SearchResult, error) {
 	basla := time.Now()
-	aramaKilidi.Lock()
+	if !aramaKilidi.TryLock() {
+		return SearchResult{}, ErrAramaSuruyor
+	}
 	defer aramaKilidi.Unlock()
 
 	kaynak := a.Source()
@@ -285,7 +291,7 @@ func (a *LogAnalyzer) Search(q SearchQuery) SearchResult {
 	if kaynak == "" {
 		t.res.Note = "Bu sunucuda okunabilir bir HAProxy log'u bulunamadı."
 		t.bitir()
-		return t.res
+		return t.res, nil
 	}
 	parser := a.parser.Load()
 	bitis := basla.Add(aramaSureSiniri)
@@ -319,7 +325,7 @@ func (a *LogAnalyzer) Search(q SearchQuery) SearchResult {
 	if t.res.Truncated && t.res.Note == "" {
 		t.res.Note = "Süre sınırına ulaşıldı. Log en yeniden eskiye tarandığı için yukarıdaki sonuçlar en güncel kayıtları kapsar; daha eskiler taranamadı. Daha dar bir zaman aralığı seçerek tamamını tarayabilirsin."
 	}
-	return t.res
+	return t.res, nil
 }
 
 func (t *aramaToplayici) aramaDosya(yol string, parser *LogParser, bitis time.Time) {

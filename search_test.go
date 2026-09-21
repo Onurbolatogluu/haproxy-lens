@@ -82,7 +82,7 @@ func eskit(t *testing.T, yol string, ts time.Time) {
 
 func TestAramaDondurulmusDosyalar(t *testing.T) {
 	a := aramaOrtami(t)
-	res := a.Search(SearchQuery{Path: "/api/kayit"})
+	res := ara(t, a, SearchQuery{Path: "/api/kayit"})
 	// 50 + 1 (güncel) + 2 (döndürülmüş) + 1 (gz) = 54
 	if res.Matches != 54 {
 		t.Fatalf("eşleşme: %d, beklenen 54 (dosyalar: %v)", res.Matches, res.Files)
@@ -107,20 +107,20 @@ func TestAramaDondurulmusDosyalar(t *testing.T) {
 
 func TestAramaSuzgecleri(t *testing.T) {
 	a := aramaOrtami(t)
-	if res := a.Search(SearchQuery{Path: "/api/kayit", Status: "5xx"}); res.Matches != 2 {
+	if res := ara(t, a, SearchQuery{Path: "/api/kayit", Status: "5xx"}); res.Matches != 2 {
 		t.Fatalf("5xx: %d, beklenen 2", res.Matches)
 	}
-	if res := a.Search(SearchQuery{Path: "/api/kayit", Status: "503"}); res.Matches != 1 {
+	if res := ara(t, a, SearchQuery{Path: "/api/kayit", Status: "503"}); res.Matches != 1 {
 		t.Fatalf("503: %d, beklenen 1", res.Matches)
 	}
-	if res := a.Search(SearchQuery{IP: "198.51.100.9"}); res.Matches != 2 {
+	if res := ara(t, a, SearchQuery{IP: "198.51.100.9"}); res.Matches != 2 {
 		t.Fatalf("IP: %d, beklenen 2", res.Matches)
 	}
-	if res := a.Search(SearchQuery{IP: "192.0.2."}); res.Matches != 3 { // önek eşleşmesi
+	if res := ara(t, a, SearchQuery{IP: "192.0.2."}); res.Matches != 3 { // önek eşleşmesi
 		t.Fatalf("IP öneki: %d, beklenen 3", res.Matches)
 	}
 	// Zaman aralığı: yalnızca son 2 saat
-	res := a.Search(SearchQuery{Path: "/api/kayit", Since: time.Now().Add(-2 * time.Hour)})
+	res := ara(t, a, SearchQuery{Path: "/api/kayit", Since: time.Now().Add(-2 * time.Hour)})
 	if res.Matches != 51 {
 		t.Fatalf("son 2 saat: %d, beklenen 51", res.Matches)
 	}
@@ -158,7 +158,7 @@ func TestAramaBaskaDosyayiOkumaz(t *testing.T) {
 	yaz(t, filepath.Join(dir, "haproxy.log"), []string{logSatiri(time.Now(), "203.0.113.5", "/var", 200)}, false)
 	yaz(t, filepath.Join(dir, "gizli.log"), []string{logSatiri(time.Now(), "203.0.113.9", "/gizli", 200)}, false)
 	a := NewLogAnalyzer("file:"+filepath.Join(dir, "haproxy.log"), "")
-	res := a.Search(SearchQuery{Path: "/"})
+	res := ara(t, a, SearchQuery{Path: "/"})
 	for _, f := range res.Files {
 		if strings.Contains(f, "gizli") {
 			t.Fatalf("ilgisiz dosya okundu: %v", res.Files)
@@ -185,7 +185,7 @@ func TestAramaSinirlari(t *testing.T) {
 	}
 	f.Close()
 	a := NewLogAnalyzer("file:"+filepath.Join(dir, "haproxy.log"), "")
-	res := a.Search(SearchQuery{Path: "/api/kayit"})
+	res := ara(t, a, SearchQuery{Path: "/api/kayit"})
 	t.Logf("%d satır tarandı, %d eşleşme, %d ms", res.Scanned, res.Matches, res.Took)
 	if len(res.Hits) > aramaOrnekSiniri {
 		t.Fatalf("örnek sınırı aşıldı: %d", len(res.Hits))
@@ -219,7 +219,7 @@ func TestAramaEnYeniVeErkenDurma(t *testing.T) {
 	a := NewLogAnalyzer("file:"+filepath.Join(dir, "haproxy.log"), "")
 
 	// Tüm log: en yeni satır güncel dosyadan gelmeli
-	res := a.Search(SearchQuery{Path: "/api/kayit"})
+	res := ara(t, a, SearchQuery{Path: "/api/kayit"})
 	if res.Matches != 620 {
 		t.Fatalf("eşleşme: %d", res.Matches)
 	}
@@ -233,7 +233,7 @@ func TestAramaEnYeniVeErkenDurma(t *testing.T) {
 	}
 
 	// Son 2 saat: eski dosya taranmamalı (erken durma)
-	res = a.Search(SearchQuery{Path: "/api/kayit", Since: simdi.Add(-2 * time.Hour)})
+	res = ara(t, a, SearchQuery{Path: "/api/kayit", Since: simdi.Add(-2 * time.Hour)})
 	if res.Matches != 20 {
 		t.Fatalf("son 2 saat eşleşme: %d, beklenen 20", res.Matches)
 	}
@@ -270,7 +270,7 @@ func TestAramaBuyukDosyadaSonSaat(t *testing.T) {
 
 	a := NewLogAnalyzer("file:"+filepath.Join(dir, "haproxy.log"), "")
 	basla := time.Now()
-	res := a.Search(SearchQuery{Path: "/api/yeni", Since: simdi.Add(-time.Hour)})
+	res := ara(t, a, SearchQuery{Path: "/api/yeni", Since: simdi.Add(-time.Hour)})
 	sure := time.Since(basla)
 	t.Logf("%d eşleşme, %d satır tarandı, %v sürdü (dosyada 860.000 satır var)", res.Matches, res.Scanned, sure.Round(time.Millisecond))
 
@@ -305,7 +305,7 @@ func TestAramaDosyaSirasinaBagliDegil(t *testing.T) {
 	eskit(t, filepath.Join(dir, "haproxy.log.1"), ayni)
 
 	a := NewLogAnalyzer("file:"+filepath.Join(dir, "haproxy.log"), "")
-	res := a.Search(SearchQuery{Path: "/api/kayit", Since: simdi.Add(-2 * time.Hour)})
+	res := ara(t, a, SearchQuery{Path: "/api/kayit", Since: simdi.Add(-2 * time.Hour)})
 	if res.Matches != 3 {
 		t.Fatalf("eşleşme: %d, beklenen 3 (dosyalar: %v)", res.Matches, res.Files)
 	}
@@ -340,7 +340,7 @@ func TestAramaOnElemeHizi(t *testing.T) {
 
 	a := NewLogAnalyzer("file:"+filepath.Join(dir, "haproxy.log"), "")
 	basla := time.Now()
-	res := a.Search(SearchQuery{Path: "/api/v1"})
+	res := ara(t, a, SearchQuery{Path: "/api/v1"})
 	hiz := float64(res.Scanned) / time.Since(basla).Seconds()
 	t.Logf("%d satır tarandı, %d eşleşme, %.0f satır/sn", res.Scanned, res.Matches, hiz)
 
@@ -353,5 +353,29 @@ func TestAramaOnElemeHizi(t *testing.T) {
 	// Ön eleme olmadan bu hız ~200 bin satır/sn seviyesindeydi
 	if hiz < 600000 {
 		t.Fatalf("arama beklenenden yavaş: %.0f satır/sn", hiz)
+	}
+}
+
+// Testler için: aramayı yapar, "başka arama sürüyor" hatasını test hatası sayar
+func ara(t *testing.T, a *LogAnalyzer, q SearchQuery) SearchResult {
+	t.Helper()
+	res, err := a.Search(q)
+	if err != nil {
+		t.Fatalf("arama: %v", err)
+	}
+	return res
+}
+
+// Aynı anda ikinci bir arama gelirse beklemeden reddedilmeli
+func TestAramaAyniAndaTek(t *testing.T) {
+	a := aramaOrtami(t)
+	aramaKilidi.Lock() // bir arama sürüyormuş gibi
+	_, err := a.Search(SearchQuery{Path: "/api"})
+	aramaKilidi.Unlock()
+	if err != ErrAramaSuruyor {
+		t.Fatalf("ikinci arama beklemeden reddedilmeliydi, hata: %v", err)
+	}
+	if _, err := a.Search(SearchQuery{Path: "/api"}); err != nil {
+		t.Fatalf("kilit bırakıldıktan sonra arama çalışmalı: %v", err)
 	}
 }

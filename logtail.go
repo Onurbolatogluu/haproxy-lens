@@ -474,7 +474,8 @@ type LogAnalyzer struct {
 	stop       chan struct{} // kaynak değişince eski okuyucuyu durdurur
 	changed    chan struct{}
 	retention  int          // dakika
-	yuklenenDk int64        // diskten yüklenen en yeni dakika; o dakikaya kadarki satırlar tekrar sayılmaz
+	yuklenenAt int64        // diskten yüklenen geçmişin kapsadığı son satırın zamanı (ms); öncesi tekrar sayılmaz
+	sonSatirAt int64        // sayılan en yeni satırın zamanı (ms); diske yazılır
 	detay      int          // tam ayrıntının (tam adres, IP dökümü) saklandığı dakika
 	liste      int          // yol ve IP listelerinin saklandığı dakika
 	butce      int64        // ayrıntı için bellek bütçesi (bayt); aşılırsa en eski ayrıntı bırakılır
@@ -935,10 +936,16 @@ func (a *LogAnalyzer) add(r logRecord) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	// Ajan açılırken geçmişi diskten yükler, ayrıca panel boş başlamasın diye log
-	// dosyasının sonunu yeniden okur. O satırlar diskten gelen dakikalarda zaten
-	// sayılmıştır; tekrar sayılırsa son dakikalar iki katı görünür.
-	if min <= a.yuklenenDk {
+	// dosyasının sonunu yeniden okur. Diske yazılmış geçmişin kapsadığı satırlar
+	// tekrar sayılmaz. Sınır dakika değil satırın tam zamanıdır: böylece ajan aynı
+	// dakika içinde yeniden başlasa bile yeni satırlar kaybolmaz, ajan kapalıyken
+	// yazılan satırlar da açılışta sayılır.
+	ms := r.At.UnixMilli()
+	if ms <= a.yuklenenAt {
 		return
+	}
+	if ms > a.sonSatirAt {
+		a.sonSatirAt = ms
 	}
 	b := a.buckets[min]
 	if b == nil {

@@ -20,6 +20,7 @@ const stateFile = "history.json.gz"
 type stateDump struct {
 	Version int         `json:"version"`
 	SavedAt int64       `json:"savedAt"`
+	LogUpTo int64       `json:"logUpTo,omitempty"` // sayılmış en yeni log satırının zamanı (ms)
 	Minutes []MinuteAgg `json:"minutes"`
 	Sys     []SysPoint  `json:"sys,omitempty"`
 	Log     []logMinute `json:"log"`
@@ -122,13 +123,34 @@ func (a *LogAnalyzer) dumpBuckets() []logMinute {
 	return out
 }
 
+// Diske yazılan geçmişin kapsadığı son satırın zamanı
+func (a *LogAnalyzer) sonSatir() int64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.sonSatirAt
+}
+
+// Yeni kayıt dosyası tam sınırı taşıyorsa onu kullan (eski dosyalarda dakika sonu kalır)
+func (a *LogAnalyzer) sinirAyarla(ms int64) {
+	if ms <= 0 {
+		return
+	}
+	a.mu.Lock()
+	a.yuklenenAt = ms
+	if ms > a.sonSatirAt {
+		a.sonSatirAt = ms
+	}
+	a.mu.Unlock()
+}
+
 func (a *LogAnalyzer) loadBuckets(ms []logMinute) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	kesim := time.Now().Unix()/60 - int64(a.retention)
 	for _, lm := range ms {
-		if lm.T > a.yuklenenDk {
-			a.yuklenenDk = lm.T // diskten gelen en yeni dakika
+		// Eski kayıt dosyalarında tam zaman yok: en yeni dakikanın sonu sınır kabul edilir
+		if son := (lm.T+1)*60_000 - 1; son > a.yuklenenAt {
+			a.yuklenenAt = son
 		}
 		if lm.T < kesim || a.buckets[lm.T] != nil {
 			continue
@@ -200,6 +222,7 @@ func (s *Store) Load() error {
 	}
 	if s.logs != nil {
 		s.logs.loadBuckets(d.Log)
+		s.logs.sinirAyarla(d.LogUpTo)
 	}
 	if s.sys != nil {
 		s.sys.loadDakika(d.Sys)
@@ -215,6 +238,7 @@ func (s *Store) Save() error {
 	}
 	if s.logs != nil {
 		d.Log = s.logs.dumpBuckets()
+		d.LogUpTo = s.logs.sonSatir()
 	}
 	if s.sys != nil {
 		d.Sys = s.sys.dumpDakika()

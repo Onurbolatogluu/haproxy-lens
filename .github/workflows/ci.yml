@@ -34,8 +34,15 @@ jobs:
           go vet ./...
           go test ./...
 
+      - name: Yarış durumu denetimi
+        # Pollerlar, log okuyucu ve HTTP istekleri aynı anda çalışır; paylaşılan veriye
+        # kilitsiz erişim burada yakalanır.
+        run: go test -race -short ./...
+
       - name: Derleme denemesi
         run: CGO_ENABLED=0 go build -trimpath -o haproxy-lens . && ./haproxy-lens -version
 
-      - name: Betik sözdizimi
-        run: bash -n deploy/install.sh && bash -n deploy/uninstall.sh
+      - name: Betik denetimi
+        run: |
+          bash -n deploy/install.sh && bash -n deploy/uninstall.sh
+          shellcheck -S info deploy/install.sh deploy/uninstall.sh build.sh

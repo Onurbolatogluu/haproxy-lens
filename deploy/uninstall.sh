@@ -19,7 +19,7 @@ if [ -x "$BIN" ]; then
   eval "$("$BIN" -detect-env 2>/dev/null)" || true
   CFGS="${DET_CONFIG_FILES:-}"
 fi
-[ -n "$CFGS" ] || CFGS="$(ls /etc/haproxy/*.cfg 2>/dev/null | tr '\n' ' ')"
+[ -n "$CFGS" ] || CFGS="$(find /etc/haproxy -maxdepth 1 -name '*.cfg' 2>/dev/null | sort | tr '\n' ' ')"
 cfg_sum() { for f in $CFGS; do sha256sum "$f" 2>/dev/null || true; done; }
 ha_pids() { pgrep -x haproxy 2>/dev/null | sort -n | tr '\n' ' ' || true; }
 BEFORE_CFG="$(cfg_sum)"
@@ -48,7 +48,8 @@ LEFT=0
 [ -e "$UNIT" ] && { echo "UYARI: $UNIT hâlâ duruyor"; LEFT=1; }
 [ -e "$BIN" ] && { echo "UYARI: $BIN hâlâ duruyor"; LEFT=1; }
 id haproxy-lens >/dev/null 2>&1 && { echo "UYARI: haproxy-lens kullanıcısı hâlâ duruyor"; LEFT=1; }
-[ "$LEFT" -eq 0 ] && echo "haproxy-lens kaldırıldı: servis, program dosyası ve sistem kullanıcısı silindi. Geride dosya kalmadı."
+[ -e /var/lib/haproxy-lens ] && { echo "UYARI: /var/lib/haproxy-lens hâlâ duruyor"; LEFT=1; }
+[ "$LEFT" -eq 0 ] && echo "haproxy-lens kaldırıldı: servis, program dosyası, sistem kullanıcısı ve saklanan geçmiş silindi. Geride dosya kalmadı."
 
 if [ "$BEFORE_CFG" = "$(cfg_sum)" ]; then
   echo "Doğrulama: HAProxy config dosyaları değişmedi."

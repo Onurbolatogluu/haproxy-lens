@@ -4,6 +4,51 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 1.0.0
+
+İlk kararlı sürüm. Ürün baştan sona incelendi: yarış durumu dedektörü, statik analiz, betik denetimi, gerçek tarayıcıda görsel kontrol ve güvenlik taraması. Bulunan her sorun düzeltildi ve testle korunuyor.
+
+**Veri doğruluğu**
+
+- **Yeniden başlatmada veri kaybı düzeltildi.** Çift sayımı önleyen sınır dakika bazındaydı: ajan aynı dakika içinde yeniden başlarsa o dakikanın yeni satırları da atılıyordu. Testte 20 satırın 10'u kayboluyordu. Sınır artık son sayılan satırın tam zamanı; ne çift sayım ne kayıp var, üstelik ajan kapalıyken log'a yazılan satırlar da açılışta sayılıyor.
+- **Kapanırken geçmiş kaydediliyor.** Servis durdurulurken (her güncellemede) ajan hiçbir şey kaydetmeden kapanıyordu; son dakikalık kayıttan sonraki veri kayboluyordu. Artık durdurma sinyalinde geçmişi diske yazıp temiz kapanıyor.
+- **Sunucu grafikleri taze kurulumda tek noktaya iniyordu.** Kısa aralıkta ince ölçümler yetersiz görününce tamamen dakikalık veriye geçiliyordu. Artık ikisi birleştiriliyor: eski kısım dakikalık veriden, yakın kısım ince ölçümden.
+
+**Kurulum ve ayarlar**
+
+- **Parametreler sisteme dokunulmadan önce doğrulanıyor.** En tehlikelisi: `MEMMAX=512` gibi birimsiz bir değeri systemd bayt sayar ve servis açılır açılmaz öldürülürdü. Artık kurulum port, süre biçimi, bellek tavanı birimi ve bütçeyle ilişkisini kontrol ediyor; hatalı değerde ne yanlışsa Türkçe yazıp hiçbir şeye dokunmadan duruyor.
+- **Hatalı ayarlar artık sessizce düzeltilmiyor.** `RETENTION=30m` hiçbir şey söylenmeden 1 saate çekiliyor, negatif bellek bütçesi kabul ediliyordu. Ajan artık geçersiz değeri açık bir mesajla reddediyor. Kurallar README'de.
+- **Güncellemede ayarlar korunuyor.** Eskiden yalnızca erişim listesi korunuyordu: `DETAIL=6h LISTS=24h BUDGET=500` ile kurup standart tek satırlık komutla güncelleyen biri sessizce varsayılanlara dönüyordu (oysa sürüm notları "ayarların korunur" diyordu). Artık komutta verilmeyen her ayar (port, adres, log kaynağı, süreler, bütçe, bellek tavanı) önceki kurulumdan alınıyor ve kurulum hangilerini koruduğunu yazıyor. Yalnızca değiştirmek istediğini vermek yeterli: `DETAIL=12h ./install.sh` gerisine dokunmaz.
+- Kurulum sonunda servis çöküyorsa bunu açıkça söylüyor ve son log satırlarını gösteriyor; eskiden "henüz veri gelmedi" diyordu.
+- Kaldırma betiği saklanan geçmişin de silindiğini doğruluyor.
+
+**Güvenlik ve dayanıklılık**
+
+- **Tarayıcı korumaları eklendi:** panel başka bir siteye gömülemiyor, yalnızca kendi dosyalarını yüklüyor (Content-Security-Policy), içerik türü tahmin edilmiyor. Gerçek bir tarayıcıda denendi: sıfır ihlal, sıfır hata.
+- **HTTP sunucusuna zaman aşımları eklendi** (yavaş bağlantılarla kaynak tüketmeye karşı).
+- **Geçersiz portta "başladı" yazıp çöküyordu.** Artık önce port açılıyor; açılamazsa anlaşılır bir hatayla duruluyor.
+- **Aramalar kuyruğa girmiyor.** Aynı anda gelen her arama 20 saniyeye kadar bağlantı tutup bekliyordu. Artık ikinci arama hemen "başka bir arama sürüyor" yanıtı alıyor. Eşzamanlı yük testinde 150 aramanın 130'u beklemeden yanıtlandı.
+
+**Arayüz**
+
+- İşlemci ve bellek grafiklerinde yüzde ekseninin en üst değeri kesiliyordu ("100%" yerine "00%"); ayrıca panelin geri kalanı "%21,6" diye yazarken eksen "25%" diyordu. Artık "%100" biçiminde ve tam görünüyor.
+- Arama sonuçları 200 satırı sayfaya döküp alttaki bölümleri kaybettiriyordu. Artık kendi içinde kaydırılan bir kutuda, başlığı sabit.
+- Üst şeritte trafik değeri iki satıra kayıyordu ("21 Mbit/sn giden"). "giden" alt satıra alındı, değer tek satıra sığıyor.
+
+**Belgeler ve denetim**
+
+- README'deki eski bilgiler düzeltildi: bellek tavanı 128 MB değil 512 MB; "her şey tam ayrıntı" örneğindeki bütçe ölçülen ihtiyacın altındaydı (600 MB verilmiş, gereken ~664 MB). Eksik dosya satırı (`search.go`) eklendi.
+- CI artık her değişiklikte yarış durumu dedektörünü (`go test -race`) ve betik denetimini (`shellcheck`) de çalıştırıyor.
+- Önceki bir sürümde yayına girmemiş bir test daha güçlüsüyle değiştirildi; test dosyası adları anlamlı hâle getirildi.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 0.16.1
 
 - **Düzeltme: "Sunucu" özet şeridinde etiketler görünmüyordu.** Yanlış bileşen kullanmıştım; şerit yan yana dizilmiş, ne olduğu belirsiz sayılardan ibaret kalıyordu. Artık panelin üstündeki şeritle aynı biçimde: her değerin başlığı, açıklaması ve üzerine gelince ne anlama geldiğini yazan bir ipucu var.

@@ -1212,8 +1212,8 @@ function PulseStrip({ model, rates, info }) {
   servers.forEach((s) => { const k = kindOf(s.status); if (!HEALTHY.has(k)) others[k] = (others[k] || 0) + 1; });
   const othersText = Object.entries(others).map(([k, n]) => `${n} ${STATUS_LABEL[k].toLocaleLowerCase("tr-TR")}`).join(", ");
   const traffic = live
-    ? { value: `${fmtBits(sum(fes.map((f) => rates[keyOf(f)]?.bout)))} giden`, sub: `${fmtBits(sum(fes.map((f) => rates[keyOf(f)]?.bin)))} gelen` }
-    : { value: `${fmtBytes(sum(fes.map((f) => num(f.bout))))} giden`, sub: `${fmtBytes(sum(fes.map((f) => num(f.bin))))} gelen, açıldığından beri` };
+    ? { value: fmtBits(sum(fes.map((f) => rates[keyOf(f)]?.bout))), sub: `giden · ${fmtBits(sum(fes.map((f) => rates[keyOf(f)]?.bin)))} gelen` }
+    : { value: fmtBytes(sum(fes.map((f) => num(f.bout)))), sub: `giden · ${fmtBytes(sum(fes.map((f) => num(f.bin))))} gelen, açıldığından beri` };
   const items = [
     { k: "_reqps", value: fmtRate(reqps), sub: `Toplam ${fmtNum(totReq)} istek` },
     { k: "scur", value: fmtNum(scur), sub: maxconn ? `Genel sınırın ${fmtPct(scur / maxconn)} kadarı` : "Tüm frontend'lerde" },
@@ -1344,7 +1344,7 @@ function SystemSection({ sys, minutes }) {
             <AreaChart data={pts} margin={{ top: 6, right: 6, left: -14, bottom: 0 }}>
               <CartesianGrid stroke={C.line} vertical={false} />
               <XAxis dataKey="t" tick={tick} tickLine={false} axisLine={false} minTickGap={48} />
-              <YAxis domain={[0, 100]} tick={tick} tickLine={false} axisLine={false} width={48} unit="%" />
+              <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tick={tick} tickLine={false} axisLine={false} width={54} tickFormatter={(v) => `%${v}`} />
               <Tooltip cursor={{ stroke: C.faint }} content={<ChartTip birim={(v) => `%${trDec(v)}`} />} />
               <Area type="monotone" dataKey="İşlemci" stroke={C.info} strokeWidth={1} fill={C.info} fillOpacity={0.35} isAnimationActive={false} dot={false} />
               <Area type="monotone" dataKey="Disk beklemesi" stroke={C.bad} strokeWidth={1} fill={C.bad} fillOpacity={0.35} isAnimationActive={false} dot={false} />
@@ -1359,7 +1359,7 @@ function SystemSection({ sys, minutes }) {
             <AreaChart data={pts} margin={{ top: 6, right: 6, left: -14, bottom: 0 }}>
               <CartesianGrid stroke={C.line} vertical={false} />
               <XAxis dataKey="t" tick={tick} tickLine={false} axisLine={false} minTickGap={48} />
-              <YAxis domain={[0, 100]} tick={tick} tickLine={false} axisLine={false} width={48} unit="%" />
+              <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tick={tick} tickLine={false} axisLine={false} width={54} tickFormatter={(v) => `%${v}`} />
               <Tooltip cursor={{ stroke: C.faint }} content={<ChartTip birim={(v) => `%${trDec(v)}`} />} />
               <Area type="monotone" dataKey="Bellek" stroke={C.ok} strokeWidth={1} fill={C.ok} fillOpacity={0.3} isAnimationActive={false} dot={false} />
             </AreaChart>
@@ -1829,11 +1829,11 @@ function SearchResult({ res }) {
       <div className="text-sm font-medium mt-5 mb-1">
         Eşleşen istekler <span className="font-normal text-xs" style={{ color: C.faint }}>(en yeniden eskiye, en fazla {fmtNum((res.hits || []).length)} satır)</span>
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-auto rounded-md" style={{ maxHeight: 420, border: `1px solid ${C.line}` }}>
         <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
-          <thead>
+          <thead style={{ position: "sticky", top: 0, background: C.panel, zIndex: 1 }}>
             <tr className="text-xs" style={{ color: C.muted }}>
-              <th className="py-2 pr-3 font-normal text-left">Zaman</th>
+              <th className="py-2 pl-3 pr-3 font-normal text-left">Zaman</th>
               <th className="py-2 pr-3 font-normal text-left">IP</th>
               <th className="py-2 pr-3 font-normal text-right">Kod</th>
               <th className="py-2 pr-3 font-normal text-left">Adres</th>
@@ -1844,7 +1844,7 @@ function SearchResult({ res }) {
           <tbody>
             {(res.hits || []).map((h, i) => (
               <tr key={i} style={{ borderTop: `1px solid ${C.line}` }}>
-                <td className="py-2 pr-3 align-top tnum nw text-xs">{zaman(h.at)}</td>
+                <td className="py-2 pl-3 pr-3 align-top tnum nw text-xs">{zaman(h.at)}</td>
                 <td className="py-2 pr-3 align-top tnum brk">{h.ip}</td>
                 <td className="py-2 pr-3 align-top tnum nw text-right" style={{ color: codeColor(h.status) }}>{h.status}</td>
                 <td className="py-2 pr-3 align-top brk">
@@ -1940,7 +1940,7 @@ function LogSection({ logs, minutes }) {
           return (
             <div key={k} className="px-4 py-4" style={{ background: C.panel }} title={desc}>
               <div className="text-sm inline-flex items-center gap-2" style={{ color: C.muted }}>
-                <span style={{ width: 8, height: 8, borderRadius: 2, background: col }} />{label}
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: col, flexShrink: 0 }} />{label}
               </div>
               <div className="text-2xl font-semibold tnum mt-1" style={{ color: n && (k === "nomatch" || k === "noserver") ? C.bad : C.text }}>{fmtNum(n)}</div>
               <div className="text-xs mt-1" style={{ color: C.faint }}>{total ? fmtPct(n / total) : "—"}, {perMin(n)}</div>

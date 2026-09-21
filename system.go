@@ -345,11 +345,24 @@ func (s *SysPoller) State(minutes int) *SystemState {
 	st := &SystemState{OK: s.hata == "", Error: s.hata, Cur: s.son, MemTotal: s.memTotal, MemUsed: s.memUsed,
 		SwapTotal: s.swapTot, CPUs: s.cpus, Load: s.load, Disks: s.disks}
 	from := time.Now().UnixMilli() - int64(minutes)*60_000
-	kaynak := s.hist
-	if minutes > fineWindowMin || len(kaynak) == 0 || kaynak[0].T > from+60_000 {
-		if len(s.dakika) > 0 {
-			kaynak = s.dakika
+	// Uzun aralıklarda dakikalık ortalama; kısa aralıklarda ince ölçüm. İnce ölçüm
+	// aralığın başına yetişmiyorsa (ajan yeni başladıysa) eksik kalan eski kısım
+	// diskten gelen dakikalık veriyle doldurulur. Eskiden bu durumda ince veri tamamen
+	// bırakılıyordu; taze kurulumda grafik tek noktaya iniyordu.
+	var kaynak []SysPoint
+	if minutes > fineWindowMin {
+		kaynak = s.dakika
+	} else {
+		ilkInce := int64(1<<62 - 1)
+		if len(s.hist) > 0 {
+			ilkInce = s.hist[0].T
 		}
+		for _, p := range s.dakika {
+			if p.T < ilkInce-60_000 {
+				kaynak = append(kaynak, p)
+			}
+		}
+		kaynak = append(kaynak, s.hist...)
 	}
 	for _, p := range kaynak {
 		if p.T >= from {

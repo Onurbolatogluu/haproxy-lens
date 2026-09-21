@@ -18,6 +18,41 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BIN="$HERE/haproxy-lens"
 UNIT=/etc/systemd/system/haproxy-lens.service
+
+# Güncellemede önceki ayarlar korunur: komutta verilmeyen her değer eski servis
+# dosyasından okunur. (Eskiden yalnızca ALLOW korunuyordu; DETAIL=6h ile kurup
+# standart komutla güncelleyen biri sessizce varsayılana dönüyordu.)
+KORUNAN=""
+if [ -f "$UNIT" ]; then
+  eski_env() { sed -n "s/^Environment=\"LENS_$1=\(.*\)\"\$/\1/p" "$UNIT" | head -1; }
+  for v in RETENTION DETAIL LISTS BUDGET; do
+    if [ -z "${!v+x}" ]; then
+      deger="$(eski_env "$v")"
+      [ -n "$deger" ] && { printf -v "$v" '%s' "$deger"; KORUNAN="$KORUNAN $v=$deger"; }
+    fi
+  done
+  if [ -z "${LOG+x}" ]; then
+    deger="$(eski_env LOG)"
+    [ -n "$deger" ] && [ "$deger" != auto ] && { LOG="$deger"; KORUNAN="$KORUNAN LOG=$deger"; }
+  fi
+  if [ -z "${MEMMAX+x}" ]; then
+    deger="$(sed -n 's/^MemoryMax=\(.*\)$/\1/p' "$UNIT" | head -1)"
+    [ -n "$deger" ] && { MEMMAX="$deger"; KORUNAN="$KORUNAN MEMMAX=$deger"; }
+  fi
+  # Panel adresi ve portu: ExecStart'taki -listen değerinden
+  eski_listen="$(sed -n 's/^ExecStart=.* -listen \([^ ]*\) .*/\1/p' "$UNIT" | head -1)"
+  if [ -n "$eski_listen" ]; then
+    if [ -z "${PORT+x}" ]; then
+      PORT="${eski_listen##*:}"
+      [ "$PORT" != 8405 ] && KORUNAN="$KORUNAN PORT=$PORT"
+    fi
+    eski_ip="${eski_listen%:*}"; eski_ip="${eski_ip#[}"; eski_ip="${eski_ip%]}"
+    # IP hâlâ bu sunucudaysa korunur; değiştiyse yeniden tespit edilir
+    if [ -z "${LISTEN+x}" ] && { [ "$eski_ip" = 127.0.0.1 ] || { command -v ip >/dev/null && ip -o addr show | grep -qF " $eski_ip/"; }; }; then
+      LISTEN="$eski_ip"
+    fi
+  fi
+fi
 PORT="${PORT:-8405}"
 MODE=install
 YES=0
@@ -32,6 +67,39 @@ done
 die() { echo "HATA: $*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || die "root olarak çalıştır (sudo $0 $*)"
 [ -x "$BIN" ] || die "haproxy-lens dosyası bu klasörde yok"
+
+# 0) Parametre doğrulaması: sisteme hiçbir şey dokunulmadan önce.
+#    Hatalı bir değer servisi açılışta çökertir; burada yakalanıp anlaşılır bir mesajla durulur.
+RETENTION="${RETENTION:-24h}"
+DETAIL="${DETAIL:-1h}"
+LISTS="${LISTS:-6h}"
+BUDGET="${BUDGET:-250}"
+MEMMAX="${MEMMAX:-512M}"
+# Süreler birimiyle yazılır: 30m, 6h, 1h30m. Birimsiz "6" anlaşılmaz.
+for pair in "RETENTION=$RETENTION" "DETAIL=$DETAIL" "LISTS=$LISTS"; do
+  echo "${pair#*=}" | grep -Eq '^([0-9]+[hm])+$' \
+    || die "${pair%%=*} süre birimiyle yazılmalı (örnek: ${pair%%=*}=6h ya da ${pair%%=*}=30m), verilen: ${pair#*=}"
+done
+case "$PORT" in
+  ''|*[!0-9]*) die "PORT bir sayı olmalı (örnek: PORT=8405), verilen: $PORT" ;;
+esac
+[ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "PORT 1 ile 65535 arasında olmalı, verilen: $PORT"
+case "$BUDGET" in
+  ''|*[!0-9]*) die "BUDGET megabayt cinsinden bir sayı olmalı (örnek: BUDGET=250), verilen: $BUDGET" ;;
+esac
+# systemd birimsiz sayıyı BAYT sayar: MEMMAX=512 servisi açılır açılmaz öldürürdü
+case "$MEMMAX" in
+  *[0-9]K) MEMMAX_MB=$(( ${MEMMAX%K} / 1024 )) ;;
+  *[0-9]M) MEMMAX_MB=${MEMMAX%M} ;;
+  *[0-9]G) MEMMAX_MB=$(( ${MEMMAX%G} * 1024 )) ;;
+  *) die "MEMMAX birimiyle yazılmalı (örnek: MEMMAX=512M ya da MEMMAX=1G), verilen: $MEMMAX" ;;
+esac
+case "$MEMMAX_MB" in ''|*[!0-9]*) die "MEMMAX anlaşılamadı: $MEMMAX" ;; esac
+[ "$MEMMAX_MB" -ge $(( BUDGET + 128 )) ] || die "MEMMAX ($MEMMAX), bellek bütçesinden (BUDGET=${BUDGET} MB) en az 128 MB büyük olmalı; yoksa servis bütçeye ulaşmadan öldürülür. Örnek: MEMMAX=$(( BUDGET + 256 ))M"
+# Süre ve bütçe kuralları ajanın kendisinde; aynı mantık iki yerde tutulmasın
+"$BIN" -validate -retention "$RETENTION" -detail "$DETAIL" -lists "$LISTS" -memory-budget "$BUDGET" >/dev/null \
+  || die "Ayarlar geçersiz; yukarıdaki mesaja bakın. Hiçbir şey değiştirilmedi."
+[ -n "$KORUNAN" ] && echo "Önceki kurulumdan korunan ayarlar:$KORUNAN (değiştirmek için komutta yeniden verin)"
 
 # 1) Tespit: config sadece okunur, bulunan socket ve log denenir
 if ! "$BIN" -detect; then
@@ -61,15 +129,10 @@ GROUPS_ALL="$DET_GROUPS"
 for g in adm systemd-journal; do
   getent group "$g" >/dev/null 2>&1 && case " $GROUPS_ALL " in *" $g "*) ;; *) GROUPS_ALL="$GROUPS_ALL $g" ;; esac
 done
-GROUPS_ALL="$(echo $GROUPS_ALL)"
+GROUPS_ALL="$(echo "$GROUPS_ALL" | xargs)"
 # Log kaynağı: elle verilmediyse ajan kendisi bulur ve çalışırken izler
 LOG_SRC="${LOG:-auto}"
 # Geçmişin saklama süresi; veriler /var/lib/haproxy-lens altına yazılır
-RETENTION="${RETENTION:-24h}"
-DETAIL="${DETAIL:-1h}"
-LISTS="${LISTS:-6h}"
-BUDGET="${BUDGET:-250}"
-MEMMAX="${MEMMAX:-512M}"
 
 # Erişim listesi: elle verilmediyse güncellemede önceki kurulumunki korunur
 if [ -z "${ALLOW+x}" ] && [ -f "$UNIT" ]; then
@@ -184,8 +247,12 @@ if command -v curl >/dev/null; then
   done
   if [ "$OK" -eq 1 ]; then
     echo "$(/usr/local/bin/haproxy-lens -version) çalışıyor ve HAProxy'den veri okuyor."
+  elif ! systemctl is-active -q haproxy-lens; then
+    echo "HATA: Servis kuruldu ama çalışmıyor. Son kayıtlar:"
+    journalctl -u haproxy-lens -n 8 --no-pager 2>/dev/null | sed 's/^/  /'
+    exit 1
   else
-    echo "Servis kuruldu ama henüz veri gelmedi. Kontrol: journalctl -u haproxy-lens -n 20"
+    echo "Servis çalışıyor ama henüz HAProxy'den veri gelmedi. Kontrol: journalctl -u haproxy-lens -n 20"
   fi
 else
   systemctl is-active -q haproxy-lens && echo "Servis çalışıyor." || echo "Servis başlamadı. Kontrol: journalctl -u haproxy-lens -n 20"

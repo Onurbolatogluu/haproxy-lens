@@ -29,7 +29,9 @@ Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur
 - **Emin olamazsa kurmaz.** Çalışan bir stats socket bulamazsa hiçbir şey değiştirmeden durur ve sebebini yazar.
 - **Sadece okur.** HAProxy'ye yalnızca `show info` ve `show stat` komutlarını gönderir. Başka komut gönderen kod yoktur (bkz. `haproxy.go` içindeki `allowedCommands`).
 - **Hassas veri tutmaz.** Log'daki sorgu parametreleri (`?token=...` gibi) hafızada bile tutulmaz.
-- **Kaynak tavanı var.** CPU %10 ve RAM 128 MB sınırıyla, düşük öncelikte çalışır; `/etc` ve `/usr` altına yazamaz.
+- **Kaynak tavanı var.** CPU %10 ve RAM varsayılan 512 MB sınırıyla (`MEMMAX` ile ayarlanır), düşük öncelikte çalışır; `/etc` ve `/usr` altına yazamaz. Normal kullanımda ~50 MB tutar.
+- **Kapanırken kaydeder.** Servis durdurulurken ya da yeniden başlatılırken (güncellemede olduğu gibi) geçmişi diske yazıp kapanır; yeniden açıldığında kaldığı yerden devam eder, aynı satırı iki kez saymaz, kapalıyken yazılan satırları da atlamaz.
+- **Tarayıcı korumaları açık.** Panel başka bir siteye gömülemez (`frame-ancestors 'none'`), yalnızca kendi dosyalarını yükler (Content-Security-Policy), içerik türü tahmin edilmez.
 - **İnternete açılmaz.** Panel sunucunun kendi iç IP'sinde açılır (keepalived VIP'inde değil) ve sadece izin verilen ağlardan gelen isteklere cevap verir. Varsayılan liste özel ağlardır (10.x, 172.16-31.x, 192.168.x). Sunucunun ana IP'si herkese açık bir adresse panel `127.0.0.1`'de kalır.
 - **Kanıtlar.** Kurulum ve kaldırma sonunda config dosyalarının sha256 özetinin ve HAProxy süreç numaralarının değişmediğini kendisi kontrol edip yazar.
 
@@ -104,7 +106,7 @@ Değiştirmek için satırın sonundaki `./install.sh` yerine kullanabilirsin:
 
 Son dördü ne kadar geriye ne kadar ayrıntı göreceğini belirler; [aşağıdaki bölüme](#ne-kadar-geriye-ne-kadar-ayrıntı) bakın.
 
-Güncellemede `ALLOW` verilmezse önceki kurulumdaki liste korunur; diğer parametreler verilmezse yukarıdaki varsayılanlara döner. Kurulum, sonunda hangi değerlerle çalıştığını ekrana yazar.
+Güncellemede komutta vermediğin her ayar önceki kurulumdan korunur (port, adres, erişim listesi, log kaynağı, saklama süreleri, bellek bütçesi ve tavanı); kurulum hangilerini koruduğunu ekrana yazar. Yalnızca değiştirmek istediğini vermen yeterli: `DETAIL=12h ./install.sh` gerisine dokunmaz. Önceki panel adresi artık sunucuda yoksa (IP değiştiyse) adres yeniden tespit edilir. Kurulum, sonunda hangi değerlerle çalıştığını ekrana yazar.
 
 ### 4. Paneli aç
 
@@ -250,7 +252,7 @@ DETAIL=6h LISTS=24h BUDGET=500 MEMMAX=768M ./install.sh
 
 Bu örnekte ayrıntı 6 saat, listeler 24 saat geriye gider. Bellek maliyeti için aşağıdaki tabloya bakın; ayrıntıyı uzatırsanız bütçeyi ve servis tavanını da yükseltin.
 
-Tüm kademeleri aynı yapmak da mümkün: `RETENTION=24h DETAIL=24h LISTS=24h BUDGET=600 MEMMAX=1G ./install.sh` ile 24 saatin tamamı tam ayrıntılı olur (yoğun bir LB'de ~476 MB).
+Tüm kademeleri aynı yapmak da mümkün: `RETENTION=24h DETAIL=24h LISTS=24h BUDGET=750 MEMMAX=1G ./install.sh` ile 24 saatin tamamı tam ayrıntılı olur (yoğun bir LB'de ~664 MB; bütçe bunun altında kalırsa ajan en eski ayrıntıyı bırakır ve panel bunu yazar).
 
 **Panel ne gördüğünü söyler.** Log bölümü, ayrıntının ve listelerin ayarlanan değil *gerçekte* kapsadığı süreyi yazar. Bir tarama saldırısında bellek bütçesi devreye girip ayrıntıyı kısaltırsa bunu orada görürsünüz.
 
@@ -298,6 +300,18 @@ Ayarlar: `DETAIL=6h LISTS=24h BUDGET=500 MEMMAX=768M ./install.sh`. Bütçeyi y�
 | Sayfa hiç açılmıyor, zaman aşımı | Güvenlik duvarı (ufw/firewalld) portu kapatıyor olabilir; kurulum bunu fark ederse uyarır ama kendisi dokunmaz |
 | Log bölümü boş ya da eksik | Panelin üstündeki "Yapılandırma notları" sebebini ve varsa eklenebilecek config satırını yazar |
 | Ayarları değiştirmek istiyorsun | Aynı paketten `ALLOW=... LISTEN=... ./install.sh` çalıştırmak yeterli; servis dosyası yeniden yazılır |
+| Kurulum "HATA: ... olmalı" diyerek durdu | Verdiğin parametrelerden biri geçersiz; mesaj hangisi olduğunu ve örneğini yazar. Bu durumda sisteme hiçbir şey dokunulmamıştır |
+| Aramada "başka bir arama sürüyor" | Ajan aynı anda tek arama yapar (işlemci tavanı düşük olduğu için); birkaç saniye sonra tekrar dene |
+
+### Kurulum hangi değerleri kabul eder
+
+Kurulum, sisteme dokunmadan önce parametreleri kontrol eder ve hatalı bir değerde anlaşılır bir mesajla durur. Kurallar:
+
+- Süreler birimiyle yazılır: `30m`, `6h`, `1h30m`. Birimsiz `6` kabul edilmez.
+- `RETENTION` en az 1 saat, en fazla 30 gün. `DETAIL` en az 5 dakika. Sıra şöyle olmalı: `DETAIL` ≤ `LISTS` ≤ `RETENTION`.
+- `BUDGET` megabayt cinsinden, en az 16.
+- `MEMMAX` birimiyle yazılır (`512M`, `1G`) ve `BUDGET`'tan en az 128 MB büyük olmalı; yoksa servis bütçeye ulaşmadan öldürülür. (systemd birimsiz sayıyı bayt sayar; `MEMMAX=512` servisi açılır açılmaz öldürürdü.)
+- `PORT` 1 ile 65535 arasında.
 
 Ajan çalışırken config'i 30 saniyede bir kontrol eder. HAProxy'de yaptığın bir değişiklikten sonra reload ettiysen panelin kendini güncellemesi için bir şey yapmana gerek yok.
 
@@ -337,7 +351,8 @@ Dosyalar:
 | `listen.go` | Panelin dinleyeceği IP'nin seçimi (keepalived VIP hariç) |
 | `access.go` | Panele erişebilecek ağların kontrolü |
 | `cloudflare.go` | Yerleşik Cloudflare IP aralıkları (etiketleme için) |
-| `*_test.go` | Ayrıştırıcı, config uyumu, düzen ve erişim testleri |
+| `search.go` | Log'da arama: döndürülmüş ve sıkıştırılmış dosyalar dahil, sondan başa okuma |
+| `*_test.go` | Ayrıştırıcı, config uyumu, bellek, saldırı dayanıklılığı, arama, ayar doğrulama ve erişim testleri |
 | `webapp/` | Panel arayüzü (React) ve simge (`favicon.svg`, `favicon.png`); `build.sh` derleyip programa gömer |
 | `deploy/` | `install.sh` ve `uninstall.sh` |
 

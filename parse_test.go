@@ -934,3 +934,73 @@ func TestFizikselAygitSecimi(t *testing.T) {
 		}
 	}
 }
+
+// Ajan aynı dakika içinde yeniden başlarsa, o dakikanın yeni satırları kaybolmamalı;
+// ajan kapalıyken log'a yazılan satırlar da açılışta sayılmalı. Sayılmış olanlar ise
+// ikinci kez sayılmamalı.
+func TestYenidenBaslatmaSatirSiniri(t *testing.T) {
+	dir := t.TempDir()
+	// Dakikanın ortası: yeniden başlatma aynı dakika içinde oluyor
+	taban := time.Now().Truncate(time.Minute).Add(-2 * time.Minute).Add(10 * time.Second)
+	kayit := func(ts time.Time) logRecord {
+		return logRecord{At: ts, Client: "203.0.113.5", Frontend: "fe", Backend: "be_web", Server: "s1",
+			Status: 200, Method: "GET", Path: "/x", RawPath: "/x", Kind: KindServed}
+	}
+	// Birinci ajan: taban+0 .. taban+9 sn arası 10 satır sayıyor, sonra kapanıyor
+	a := NewLogAnalyzer("file:/yok", "")
+	for i := 0; i < 10; i++ {
+		a.add(kayit(taban.Add(time.Duration(i) * time.Second)))
+	}
+	if err := NewStore(dir, nil, a, nil).Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// İkinci ajan: diskten yüklüyor, log'un sonunu yeniden okuyor. Log'da:
+	//  - sayılmış 10 satır (tekrar sayılmamalı)
+	//  - ajan kapalıyken yazılmış 5 satır (taban+10..14 sn, sayılmalı)
+	// ardından aynı dakika içinde canlı 5 satır geliyor (taban+20..24 sn, sayılmalı)
+	b := NewLogAnalyzer("file:/yok", "")
+	if err := NewStore(dir, nil, b, nil).Load(); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 15; i++ {
+		b.add(kayit(taban.Add(time.Duration(i) * time.Second)))
+	}
+	for i := 20; i < 25; i++ {
+		b.add(kayit(taban.Add(time.Duration(i) * time.Second)))
+	}
+	if got := b.Report(60).Kinds[KindServed]; got != 20 {
+		t.Fatalf("sayım: %d, beklenen 20 (10 önceki + 5 kapalıyken yazılan + 5 canlı)", got)
+	}
+}
+
+// Kısa aralıkta sistem grafiği: ince ölçümler kullanılmalı; ince ölçüm aralığın
+// başına yetişmiyorsa eski kısım dakikalık veriyle doldurulmalı.
+func TestSistemGecmisiBirlestirme(t *testing.T) {
+	s := NewSysPoller(2*time.Second, 1440)
+	simdi := time.Now().UnixMilli()
+	// Taze kurulum: dakikalık veri yok, 5 ince ölçüm var
+	for i := 5; i > 0; i-- {
+		s.hist = append(s.hist, SysPoint{T: simdi - int64(i)*2000, CPU: 10})
+	}
+	s.oncekiAt = time.Now()
+	if n := len(s.State(60).History); n != 5 {
+		t.Fatalf("taze kurulumda %d nokta, beklenen 5 (ince ölçümler kaybolmamalı)", n)
+	}
+	// Yeniden başlatma sonrası: diskten 30 dakikalık veri + birkaç ince ölçüm
+	for i := 30; i > 0; i-- {
+		s.dakika = append(s.dakika, SysPoint{T: simdi - int64(i)*60_000, CPU: 50})
+	}
+	h := s.State(60).History
+	if len(h) < 30 {
+		t.Fatalf("birleşik geçmiş %d nokta, eski kısım eksik", len(h))
+	}
+	for i := 1; i < len(h); i++ {
+		if h[i].T < h[i-1].T {
+			t.Fatal("birleşik geçmiş zaman sırasında değil")
+		}
+	}
+	if h[len(h)-1].CPU != 10 {
+		t.Fatal("en yeni nokta ince ölçümden gelmeli")
+	}
+}

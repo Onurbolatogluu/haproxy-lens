@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"flag"
@@ -10,9 +11,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -39,6 +42,7 @@ func main() {
 	detectEnv := flag.Bool("detect-env", false, "Tespit sonucunu kurulum betiği için yaz ve çık")
 	showAllow := flag.Bool("show-allow", false, "-allow listesini doğrula, anlaşılır hâlini yaz ve çık")
 	showVersion := flag.Bool("version", false, "Sürümü yaz ve çık")
+	validate := flag.Bool("validate", false, "Süre ve bellek parametrelerini doğrula ve çık (kurulum betiği kullanır)")
 	flag.Parse()
 
 	if *showVersion {
@@ -76,6 +80,16 @@ func main() {
 		return
 	}
 
+	if err := ayarlariDogrula(*retention, *detailWin, *listWin, *budgetMB, *interval); err != nil {
+		fmt.Fprintln(os.Stderr, "Hatalı ayar:", err)
+		os.Exit(1)
+	}
+	if *validate {
+		fmt.Printf("Ayarlar geçerli: sayılar %s, listeler %s, tam ayrıntı %s, bellek bütçesi %d MB\n",
+			sureYaz(*retention), sureYaz(*listWin), sureYaz(*detailWin), *budgetMB)
+		return
+	}
+
 	allowNets, err := parseAllow(*allow)
 	if err != nil {
 		log.Fatalf("-allow hatalı: %v", err)
@@ -89,9 +103,6 @@ func main() {
 	}
 
 	retMin := int(retention.Minutes())
-	if retMin < 60 {
-		retMin = 60
-	}
 	stats := NewStatsPoller(*socket, *interval, int(time.Hour / *interval), retMin)
 	go stats.Run()
 
@@ -122,8 +133,9 @@ func main() {
 	go sys.Run()
 
 	// Geçmişi diske yaz: ajan yeniden başladığında (sürüm güncellemesi gibi) veriler kaybolmasın
+	var store *Store
 	if *stateDir != "" {
-		store := NewStore(*stateDir, stats, logs, sys)
+		store = NewStore(*stateDir, stats, logs, sys)
 		if err := store.Load(); err != nil {
 			log.Printf("Kayıtlı geçmiş yüklenemedi, sıfırdan başlanıyor: %v", err)
 		}
@@ -169,7 +181,13 @@ func main() {
 			writeJSON(w, map[string]string{"error": err.Error()})
 			return
 		}
-		writeJSON(w, logs.Search(q))
+		res, err := logs.Search(q)
+		if err != nil {
+			w.WriteHeader(http.StatusTooManyRequests)
+			writeJSON(w, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, res)
 	})
 	mux.HandleFunc("/api/ranges", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ranges": stats.Ranges(), "retention": retMin})
@@ -186,9 +204,91 @@ func main() {
 		mux.Handle("/", http.FileServer(http.FS(sub)))
 	}
 
-	srv := &http.Server{Addr: *listen, Handler: allowOnly(allowNets, listenIP, mux), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{
+		Handler:           guvenlikBasliklari(allowOnly(allowNets, listenIP, mux)),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      aramaSureSiniri + 20*time.Second, // en uzun iş: log araması
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    64 << 10,
+	}
+	// Önce portu aç: açılamazsa "başladı" yazmadan, anlaşılır bir hatayla çık.
+	ln, err := net.Listen("tcp", *listen)
+	if err != nil {
+		log.Fatalf("Panel %s adresinde açılamadı: %v", *listen, err)
+	}
 	log.Printf("haproxy-lens %s başladı: http://%s (socket: %s, log: %q)", version, *listen, *socket, *logSrc)
-	log.Fatal(srv.ListenAndServe())
+
+	// systemd durdururken (yeniden başlatma, güncelleme) geçmişi diske yazıp çık.
+	// Eskiden süreç kaydetmeden kapanıyordu; son kayıttan sonraki veri kayboluyordu.
+	durdur := make(chan os.Signal, 1)
+	signal.Notify(durdur, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-durdur
+		log.Printf("Durdurma sinyali alındı; geçmiş kaydediliyor ve kapanıyor")
+		if store != nil {
+			if err := store.Save(); err != nil {
+				log.Printf("Kapanışta geçmiş kaydedilemedi: %v", err)
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}()
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
+}
+
+// Panel yalnızca iç ağda açılıyor ama tarayıcı tarafı korumaları yine de açık:
+// başka bir siteye gömülmesin (clickjacking), içerik türü tahmin edilmesin, yalnızca
+// kendi kaynaklarını yüklesin.
+func guvenlikBasliklari(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hd := w.Header()
+		hd.Set("X-Content-Type-Options", "nosniff")
+		hd.Set("X-Frame-Options", "DENY")
+		hd.Set("Referrer-Policy", "no-referrer")
+		hd.Set("Content-Security-Policy",
+			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "+
+				"connect-src 'self'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		h.ServeHTTP(w, r)
+	})
+}
+
+// Parametreleri doğrular. Eskiden hatalı değerler sessizce düzeltiliyordu
+// (örneğin 30 dakikalık saklama 1 saate çekiliyordu) ve kullanıcı ayarladığını
+// sanıyordu. Artık ne yanlışsa açıkça söylenir.
+func ayarlariDogrula(ret, detay, liste time.Duration, butceMB int, aralik time.Duration) error {
+	switch {
+	case ret < time.Hour:
+		return fmt.Errorf("saklama süresi (RETENTION) en az 1 saat olmalı, verilen: %s", sureYaz(ret))
+	case ret > 30*24*time.Hour:
+		return fmt.Errorf("saklama süresi (RETENTION) en fazla 30 gün olabilir, verilen: %s", sureYaz(ret))
+	case detay < 5*time.Minute:
+		return fmt.Errorf("tam ayrıntı süresi (DETAIL) en az 5 dakika olmalı, verilen: %s", sureYaz(detay))
+	case liste < detay:
+		return fmt.Errorf("liste süresi (LISTS=%s) tam ayrıntı süresinden (DETAIL=%s) kısa olamaz", sureYaz(liste), sureYaz(detay))
+	case liste > ret:
+		return fmt.Errorf("liste süresi (LISTS=%s) saklama süresinden (RETENTION=%s) uzun olamaz", sureYaz(liste), sureYaz(ret))
+	case butceMB < 16:
+		return fmt.Errorf("bellek bütçesi (BUDGET) en az 16 MB olmalı, verilen: %d", butceMB)
+	case aralik < time.Second || aralik > time.Minute:
+		return fmt.Errorf("ölçüm aralığı 1 saniye ile 1 dakika arasında olmalı, verilen: %s", aralik)
+	}
+	return nil
+}
+
+func sureYaz(d time.Duration) string {
+	switch {
+	case d >= 24*time.Hour && d%(24*time.Hour) == 0:
+		return fmt.Sprintf("%d gün", d/(24*time.Hour))
+	case d >= time.Hour && d%time.Hour == 0:
+		return fmt.Sprintf("%d saat", d/time.Hour)
+	case d >= time.Minute && d%time.Minute == 0:
+		return fmt.Sprintf("%d dakika", d/time.Minute)
+	}
+	return d.String()
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
