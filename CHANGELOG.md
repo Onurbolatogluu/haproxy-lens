@@ -4,6 +4,22 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 1.0.4
+
+- **Açılış sırası düzeltildi.** Log okuyucu ve ölçümler, geçmiş diskten yüklenmeden önce başlıyordu. "Aynı satırı iki kez sayma, arada kaybetme" koruması yüklemenin önce bittiğini varsayar; bu sırayla koruma geç devreye giriyor ve yükleme sürdükçe okuyucunun işlediği dakikaların kayıtlı verisi atlanıyordu. Artık önce geçmiş yükleniyor, okuyucular ondan sonra başlıyor.
+- **Açılışta panel artık cevapsız kalmıyor.** Geçmişin yüklenmesi büyük bir geçmişte ve düşük işlemci tavanında birkaç saniye sürebiliyor (gerçek bir LB'de 13 saniye ölçüldü). Bu sürede port hiç açılmıyordu; kurulum betiği birkaç saniye bekleyip "henüz veri gelmedi" diyordu. Artık port hemen açılıyor, panel "geçmiş yükleniyor" diyor, kurulum da bunu tanıyıp bitmesini bekliyor (en fazla 60 saniye).
+- **Yükleme sırasında durdurulursa diskteki geçmiş korunuyor.** Yarım yüklenmiş geçmişin kaydedilip sağlam dosyanın üzerine yazılması engellendi; bu durumda ajan kaydetmeden hemen çıkıyor.
+- Log'daki "Geçmiş diskten yüklendi" satırı artık yüklemenin kaç saniye sürdüğünü de yazıyor.
+- Log kaynağı otomatik bulunurken (varsayılan ayar) disk doluluğu panelinde log klasörü eksik kalıyordu; artık `/var/log` da izleniyor (kök diskle aynıysa bir kez gösterilir).
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 1.0.3
 
 - **Log bölümünün başı sadeleşti: iki şerit yerine tek blok.** Eskiden "Hangi yanıt kodu döndü" ve "İsteğe ne oldu" diye iki ayrı şerit vardı; ikisi aynı istekleri farklı açılardan sayıyordu ve aradaki farkı anlamak için açıklama paragrafı okumak gerekiyordu. İkinci şerit de çoğu zaman "%98 sunucu yanıtladı" ile bir sürü sıfırdan ibaretti.

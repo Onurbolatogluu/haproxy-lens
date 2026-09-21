@@ -2193,6 +2193,8 @@ export default function App() {
       try {
         const r = await fetch(`/api/state?minutes=${minutes}`, { cache: "no-store" });
         const j = await r.json();
+        // Ajan yeni açıldıysa geçmişi yüklüyor olabilir; bu bir hata değil, birkaç saniye sürer
+        if (j.loading) { if (alive) setFetchErr(j.error); return; }
         if (alive) { setState(j); setFetchErr(null); }
       } catch (e) {
         if (alive) setFetchErr("Ajana ulaşılamıyor. Servis çalışıyor mu, SSH tüneli açık mı?");

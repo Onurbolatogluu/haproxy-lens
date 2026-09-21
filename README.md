@@ -30,7 +30,7 @@ Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur
 - **Sadece okur.** HAProxy'ye yalnızca `show info` ve `show stat` komutlarını gönderir. Başka komut gönderen kod yoktur (bkz. `haproxy.go` içindeki `allowedCommands`).
 - **Hassas veri tutmaz.** Log'daki sorgu parametreleri (`?token=...` gibi) hafızada bile tutulmaz.
 - **Kaynak tavanı var.** CPU %10 ve RAM varsayılan 512 MB sınırıyla (`MEMMAX` ile ayarlanır), düşük öncelikte çalışır; `/etc` ve `/usr` altına yazamaz. Normal kullanımda ~50 MB tutar.
-- **Kapanırken kaydeder.** Servis durdurulurken ya da yeniden başlatılırken (güncellemede olduğu gibi) geçmişi diske yazıp kapanır; yeniden açıldığında kaldığı yerden devam eder, aynı satırı iki kez saymaz, kapalıyken yazılan satırları da atlamaz.
+- **Kapanırken kaydeder.** Servis durdurulurken ya da yeniden başlatılırken (güncellemede olduğu gibi) geçmişi diske yazıp kapanır; yeniden açıldığında kaldığı yerden devam eder, aynı satırı iki kez saymaz, kapalıyken yazılan satırları da atlamaz. Açılışta geçmişi yüklemek birkaç saniye sürebilir; bu sürede panel açıktır ve "geçmiş yükleniyor" der.
 - **Tarayıcı korumaları açık.** Panel başka bir siteye gömülemez (`frame-ancestors 'none'`), yalnızca kendi dosyalarını yükler (Content-Security-Policy), içerik türü tahmin edilmez.
 - **İnternete açılmaz.** Panel sunucunun kendi iç IP'sinde açılır (keepalived VIP'inde değil) ve sadece izin verilen ağlardan gelen isteklere cevap verir. Varsayılan liste özel ağlardır (10.x, 172.16-31.x, 192.168.x). Sunucunun ana IP'si herkese açık bir adresse panel `127.0.0.1`'de kalır.
 - **Kanıtlar.** Kurulum ve kaldırma sonunda config dosyalarının sha256 özetinin ve HAProxy süreç numaralarının değişmediğini kendisi kontrol edip yazar.

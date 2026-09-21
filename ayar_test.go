@@ -85,3 +85,26 @@ func TestGuvenlikBasliklari(t *testing.T) {
 		}
 	}
 }
+
+// Ajan geçmişi yüklerken veri uçları "yükleniyor" demeli, arayüz dosyaları ise açılmalı
+func TestHazirKapisi(t *testing.T) {
+	ic := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("tamam")) })
+	h := hazirKapisi(ic)
+	istek := func(yol string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", yol, nil))
+		return rec
+	}
+	hazir.Store(false)
+	defer hazir.Store(true)
+	if rec := istek("/api/state"); rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), `"loading":true`) {
+		t.Fatalf("yüklenirken /api/state: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := istek("/"); rec.Code != http.StatusOK {
+		t.Fatalf("yüklenirken arayüz açılmalı: %d", rec.Code)
+	}
+	hazir.Store(true)
+	if rec := istek("/api/state"); rec.Code != http.StatusOK || rec.Body.String() != "tamam" {
+		t.Fatalf("hazır olduktan sonra /api/state: %d %s", rec.Code, rec.Body.String())
+	}
+}

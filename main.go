@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -104,7 +105,6 @@ func main() {
 
 	retMin := int(retention.Minutes())
 	stats := NewStatsPoller(*socket, *interval, int(time.Hour / *interval), retMin)
-	go stats.Run()
 
 	var logs *LogAnalyzer
 	logAuto := *logSrc == "auto"
@@ -117,33 +117,30 @@ func main() {
 		logs.SetRetention(retMin)
 		logs.SetDetailWindows(int(detailWin.Minutes()), int(listWin.Minutes()))
 		logs.SetBudget(int64(*budgetMB) << 20)
-		go logs.Run()
 	}
 	// Sunucunun kendi ölçümleri (CPU, bellek, disk); /proc altından okunur
 	var sysYollar []string
 	if logs != nil {
 		if p := strings.TrimPrefix(logs.Source(), "file:"); p != "" {
 			sysYollar = append(sysYollar, filepath.Dir(p))
+		} else if logAuto {
+			// Kaynak henüz bulunmadı (otomatik); log'lar en sık burada. Aynı dosya
+			// sistemindeyse zaten bir kez gösterilir.
+			sysYollar = append(sysYollar, "/var/log")
 		}
 	}
 	if *stateDir != "" {
 		sysYollar = append(sysYollar, *stateDir)
 	}
 	sys := NewSysPoller(*interval, retMin, sysYollar...)
-	go sys.Run()
 
 	// Geçmişi diske yaz: ajan yeniden başladığında (sürüm güncellemesi gibi) veriler kaybolmasın
 	var store *Store
 	if *stateDir != "" {
 		store = NewStore(*stateDir, stats, logs, sys)
-		if err := store.Load(); err != nil {
-			log.Printf("Kayıtlı geçmiş yüklenemedi, sıfırdan başlanıyor: %v", err)
-		}
-		go store.Run()
 	}
 	// Config'i, log kaynağını ve socket'i çalışırken izler; değişiklikleri yeniden kurulum olmadan uygular
 	env := NewEnv(stats, logs, logAuto)
-	go env.Run()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/state", func(w http.ResponseWriter, r *http.Request) {
@@ -205,7 +202,7 @@ func main() {
 	}
 
 	srv := &http.Server{
-		Handler:           guvenlikBasliklari(allowOnly(allowNets, listenIP, mux)),
+		Handler:           guvenlikBasliklari(allowOnly(allowNets, listenIP, hazirKapisi(mux))),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      aramaSureSiniri + 20*time.Second, // en uzun iş: log araması
@@ -218,13 +215,17 @@ func main() {
 		log.Fatalf("Panel %s adresinde açılamadı: %v", *listen, err)
 	}
 	log.Printf("haproxy-lens %s başladı: http://%s (socket: %s, log: %q)", version, *listen, *socket, *logSrc)
-
-	// systemd durdururken (yeniden başlatma, güncelleme) geçmişi diske yazıp çık.
-	// Eskiden süreç kaydetmeden kapanıyordu; son kayıttan sonraki veri kayboluyordu.
 	durdur := make(chan os.Signal, 1)
 	signal.Notify(durdur, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		<-durdur
+		// Geçmiş daha yüklenirken durdurulursa kaydedilmez: diskteki dosya sağlam, yarım
+		// yüklenmiş hâliyle üzerine yazılırsa geçmiş kaybolurdu. Yüklemenin bitmesi de
+		// beklenmez; hemen çıkılır.
+		if !hazir.Load() {
+			log.Printf("Durdurma sinyali alındı; geçmiş henüz yükleniyordu, diskteki kayıt olduğu gibi korunuyor")
+			os.Exit(0)
+		}
 		log.Printf("Durdurma sinyali alındı; geçmiş kaydediliyor ve kapanıyor")
 		if store != nil {
 			if err := store.Save(); err != nil {
@@ -235,9 +236,50 @@ func main() {
 		defer cancel()
 		_ = srv.Shutdown(ctx)
 	}()
-	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+	sunucuHata := make(chan error, 1)
+	go func() { sunucuHata <- srv.Serve(ln) }()
+
+	// Açılış sırası önemli: önce geçmiş diskten yüklenir, ancak ondan sonra log okuyucu
+	// ve ölçümler başlar. Tersi olursa okuyucunun yeniden okuduğu satırlar yüklenecek
+	// geçmişle çakışır (çift sayım koruması yüklemenin önce bittiğini varsayar).
+	// Port bu sırada açıktır: panel "geçmiş yükleniyor" der, kurulum da bunu bekler.
+	if store != nil {
+		if err := store.Load(); err != nil {
+			log.Printf("Kayıtlı geçmiş yüklenemedi, sıfırdan başlanıyor: %v", err)
+		}
+	}
+	go stats.Run()
+	if logs != nil {
+		go logs.Run()
+	}
+	go sys.Run()
+	go env.Run()
+	if store != nil {
+		go store.Run()
+	}
+	hazir.Store(true)
+
+	// systemd durdururken (yeniden başlatma, güncelleme) geçmişi diske yazıp çık.
+	// Eskiden süreç kaydetmeden kapanıyordu; son kayıttan sonraki veri kayboluyordu.
+	if err := <-sunucuHata; err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+}
+
+// Ajan açılırken geçmişi diskten yükler; bu birkaç saniye sürebilir (büyük geçmiş,
+// düşük işlemci tavanı). Bu sürede panel açılır ama veri uçları "yükleniyor" der.
+var hazir atomic.Bool
+
+func hazirKapisi(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !hazir.Load() && strings.HasPrefix(r.URL.Path, "/api/") {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			writeJSON(w, map[string]any{"loading": true,
+				"error": "Ajan açılıyor: geçmiş diskten yükleniyor. Bu birkaç saniye sürer."})
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 // Panel yalnızca iç ağda açılıyor ama tarayıcı tarafı korumaları yine de açık:

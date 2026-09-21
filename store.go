@@ -200,6 +200,7 @@ func NewStore(dir string, stats *StatsPoller, logs *LogAnalyzer, sys *SysPoller)
 func (s *Store) path() string { return filepath.Join(s.dir, stateFile) }
 
 func (s *Store) Load() error {
+	yuklemeBasi := time.Now()
 	f, err := os.Open(s.path())
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -227,7 +228,7 @@ func (s *Store) Load() error {
 	if s.sys != nil {
 		s.sys.loadDakika(d.Sys)
 	}
-	log.Printf("Geçmiş diskten yüklendi: %d dakika istatistik, %d dakika log", len(d.Minutes), len(d.Log))
+	log.Printf("Geçmiş diskten yüklendi: %d dakika istatistik, %d dakika log (%.1f sn)", len(d.Minutes), len(d.Log), time.Since(yuklemeBasi).Seconds())
 	return nil
 }
 

@@ -245,8 +245,16 @@ systemctl restart haproxy-lens
 echo
 OK=0
 if command -v curl >/dev/null; then
-  for _ in $(seq 1 10); do
-    if curl -s "http://$LISTEN_HOST:$PORT/api/state" | grep -q '"ok":true'; then OK=1; break; fi
+  # Ajan açılışta geçmişi diskten yükler (büyük geçmişte ve düşük işlemci tavanında
+  # birkaç saniye sürebilir); bu sürede "loading" der. Bitmesini en fazla 60 sn bekle.
+  YAZILDI=0
+  for _ in $(seq 1 60); do
+    YANIT="$(curl -s "http://$LISTEN_HOST:$PORT/api/state" || true)"
+    if echo "$YANIT" | grep -q '"ok":true'; then OK=1; break; fi
+    if [ "$YAZILDI" -eq 0 ] && echo "$YANIT" | grep -q '"loading":true'; then
+      echo "Ajan açıldı, kayıtlı geçmişi yüklüyor; bitmesi bekleniyor..."
+      YAZILDI=1
+    fi
     sleep 1
   done
   if [ "$OK" -eq 1 ]; then
