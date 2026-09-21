@@ -4,6 +4,19 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 1.0.1
+
+- **CI düzeltmesi:** Kurulum betiğindeki üç satır `A && B || C` kalıbındaydı. GitHub'daki shellcheck sürümü (0.9) bunu işaretliyor, yereldeki (0.11) işaretlemiyordu; CI bu yüzden başarısız oldu. Satırlar açık `if` yapısına çevrildi; her iki sürümde de temiz. Davranış değişmedi.
+- CI'da shellcheck sürümü sabitlendi (0.11.0). Kurallar sürümler arasında değiştiği için yerel denetim ile CI artık aynı sonucu veriyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 1.0.0
 
 İlk kararlı sürüm. Ürün baştan sona incelendi: yarış durumu dedektörü, statik analiz, betik denetimi, gerçek tarayıcıda görsel kontrol ve güvenlik taraması. Bulunan her sorun düzeltildi ve testle korunuyor.

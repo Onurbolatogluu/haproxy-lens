@@ -45,4 +45,7 @@ jobs:
       - name: Betik denetimi
         run: |
           bash -n deploy/install.sh && bash -n deploy/uninstall.sh
-          shellcheck -S info deploy/install.sh deploy/uninstall.sh build.sh
+          # Sürüm sabit: kurallar sürümler arasında değişiyor (0.9 ile 0.11 aynı dosyaya
+          # farklı notlar veriyor); yerel denetim ile CI aynı sonucu versin.
+          curl -sSL https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz | tar xJ
+          ./shellcheck-v0.11.0/shellcheck -S info deploy/install.sh deploy/uninstall.sh build.sh

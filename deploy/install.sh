@@ -83,7 +83,9 @@ done
 case "$PORT" in
   ''|*[!0-9]*) die "PORT bir sayı olmalı (örnek: PORT=8405), verilen: $PORT" ;;
 esac
-[ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || die "PORT 1 ile 65535 arasında olmalı, verilen: $PORT"
+if [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+  die "PORT 1 ile 65535 arasında olmalı, verilen: $PORT"
+fi
 case "$BUDGET" in
   ''|*[!0-9]*) die "BUDGET megabayt cinsinden bir sayı olmalı (örnek: BUDGET=250), verilen: $BUDGET" ;;
 esac
@@ -180,7 +182,9 @@ BEFORE_PID="$(ha_pids)"
 
 # 4) Kurulum
 id haproxy-lens >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin haproxy-lens
-[ "$UPDATE" -eq 1 ] && systemctl stop haproxy-lens 2>/dev/null || true
+if [ "$UPDATE" -eq 1 ]; then
+  systemctl stop haproxy-lens 2>/dev/null || true
+fi
 install -m 0755 "$BIN" /usr/local/bin/haproxy-lens
 
 esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/%/%%/g'; }
@@ -255,7 +259,11 @@ if command -v curl >/dev/null; then
     echo "Servis çalışıyor ama henüz HAProxy'den veri gelmedi. Kontrol: journalctl -u haproxy-lens -n 20"
   fi
 else
-  systemctl is-active -q haproxy-lens && echo "Servis çalışıyor." || echo "Servis başlamadı. Kontrol: journalctl -u haproxy-lens -n 20"
+  if systemctl is-active -q haproxy-lens; then
+    echo "Servis çalışıyor."
+  else
+    echo "Servis başlamadı. Kontrol: journalctl -u haproxy-lens -n 20"
+  fi
 fi
 
 # 6) Kanıt: "sonra" karşılaştırması
