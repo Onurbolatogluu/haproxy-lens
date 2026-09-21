@@ -683,7 +683,7 @@ function ErrorBox({ st, idx, label }) {
   return (
     <p className="rounded-md px-4 py-3 text-sm leading-relaxed" style={{ background: C.panel2, boxShadow: `inset 3px 0 0 ${isSrv ? C.bad : C.warn}` }}>
       {cap(label)} içinde bu backend'den {fmtNum(st.total)} {adi} döndü.
-      {top && top.e > 0 && st.sum > 0 && <> En çok <b className="brk">{top.s.svname}</b> sunucusundan: {fmtNum(top.e)} tane, sunuculardan dönenlerin {fmtPct(top.e / st.sum)} kadarı.</>}
+      {top && top.e > 0 && st.sum > 0 && <> Bu hataların {fmtPct(top.e / st.sum)} kadarı ({fmtNum(top.e)} tane) <b className="brk">{top.s.svname}</b> sunucusundan geliyor{top.tot > 0 ? <>; bu sunucunun kendi hata oranı {fmtPct(top.e / top.tot)}.</> : "."}</>}
       {isSrv && even && <> Hata oranları sunucular arasında birbirine yakın; sorun büyük ihtimalle tek bir sunucuda değil, hepsinin kullandığı ortak bir yerde (uygulama, veritabanı, dış servis).</>}
       {isSrv && fromProxy > Math.max(5, st.beN * 0.1) && <> {fmtNum(fromProxy)} tanesi hiçbir sunucuya ulaşmadan HAProxy tarafından üretildi (ör. çalışan sunucu yokken 503).</>}
       {!isSrv && <> 4xx genelde istemci kaynaklıdır (404 bulunamadı, 401/403 yetki, 429 çok istek); her zaman sunucu sorunu değildir.</>}
@@ -1028,12 +1028,24 @@ function buildFindings(model, rates, logs, wrates = {}, label = "") {
     const wn = (wrates[keyOf(b)]?.codes || []).reduce((a, x) => a + x, 0);
     if (er != null && er > 0.02 && wn >= 50) {
       let top = null, sum = 0;
+      const oranlar = [];
       for (const s of sv) {
-        const e = wrates[keyOf(s)]?.codes?.[4] || 0;
+        const kodlar = wrates[keyOf(s)]?.codes || [];
+        const e = kodlar[4] || 0;
+        const tot = kodlar.reduce((a, x) => a + x, 0);
         sum += e;
-        if (!top || e > top.e) top = { s, e };
+        if (tot >= 20) oranlar.push(e / tot);
+        if (!top || e > top.e) top = { s, e, tot };
       }
-      const who = top && top.e > 0 && sv.length > 1 ? ` En çok ${top.s.svname} sunucusundan (${fmtPct(top.e / sum)}).` : "";
+      // İki ayrı sayı karıştırılmasın: hataların yüzde kaçı bu sunucudan geliyor (pay)
+      // ve bu sunucunun kendi yanıtlarının yüzde kaçı hata (oran).
+      let who = "";
+      if (top && top.e > 0 && sv.length > 1) {
+        who = ` Bu hataların ${fmtPct(top.e / sum)} kadarı ${top.s.svname} sunucusundan geliyor`;
+        who += top.tot > 0 ? `; bu sunucunun kendi hata oranı ${fmtPct(top.e / top.tot)}.` : ".";
+        const yakin = oranlar.length >= 2 && Math.min(...oranlar) > 0 && Math.max(...oranlar) / Math.min(...oranlar) < 1.5;
+        if (yakin) who += " Sunucuların hata oranları birbirine yakın; sorun büyük ihtimalle tek bir sunucuda değil, hepsinin kullandığı ortak bir yerde (uygulama, veritabanı, dış servis).";
+      }
       add("warn", name, `${cap(label)} içinde ${name} yanıtlarının ${fmtPct(er)} kadarı sunucu hatası (5xx).${who}`);
     }
     const rt = num(b.rtime);
