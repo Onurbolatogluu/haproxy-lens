@@ -4,6 +4,20 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 1.0.3
+
+- **Log bölümünün başı sadeleşti: iki şerit yerine tek blok.** Eskiden "Hangi yanıt kodu döndü" ve "İsteğe ne oldu" diye iki ayrı şerit vardı; ikisi aynı istekleri farklı açılardan sayıyordu ve aradaki farkı anlamak için açıklama paragrafı okumak gerekiyordu. İkinci şerit de çoğu zaman "%98 sunucu yanıtladı" ile bir sürü sıfırdan ibaretti.
+- Yeni blokta üstte renkli bir çubuk isteklerin dağılımını tek bakışta gösteriyor. Altındaki dört kutunun her birinde ne anlama geldiği yazıyor ("sorunsuz yanıtlandı", "sunucu tarafında hata" gibi).
+- İsteklerin nereye gittiği artık düz cümlelerle, sıfır olanlar yazılmadan: "34.010 istek sunuculara ulaştı. 494 isteği HAProxy, sunucuya göndermeden kendisi yanıtladı: 453 yönlendirme, 40 engelleme (403), 1 diğer." Hiçbir sunucuya ulaşamayan istek varsa sebebiyle birlikte kırmızı bir satır ekleniyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 1.0.2
 
 - **Hata bulgusu daha anlaşılır.** Sayfanın üstündeki cümle "En çok X sunucusundan (%43,2)" diyordu; parantezdeki sayı o sunucunun hata oranı gibi okunuyordu, oysa hataların içindeki payıydı. Tablodaki oran (%16,4) ile çelişiyor gibi görünüyordu. Artık iki sayı ayrı ve açık yazılıyor: "Bu hataların %43,2 kadarı X sunucusundan geliyor; bu sunucunun kendi hata oranı %16,4."

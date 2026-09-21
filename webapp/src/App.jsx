@@ -1596,31 +1596,87 @@ const CLASSES = [
   { id: 5, key: "s5", ad: "Sunucu hatası (5xx)", kisa: "5xx", col: C.bad },
 ];
 
-// Üstteki iki şerit farklı soruları cevaplar: bu şerit "hangi yanıt kodu döndü",
-// diğeri "isteğe ne oldu". Bir 500, HAProxy açısından "sunucu yanıtladı"dır.
+// Log bölümünün özeti, tek blok. Üstte isteklerin yanıt koduna göre dağılımı (renkli
+// çubuk ve dört kutu, her birinde ne anlama geldiği), altta düz cümlelerle isteklerin
+// nereye gittiği. Eskiden iki ayrı şerit aynı istekleri iki farklı açıdan sayıyordu ve
+// aradaki farkı anlamak için açıklama okumak gerekiyordu.
 const CLASS_CELLS = [
-  ["Başarılı (2xx)", 0, C.ok],
-  ["Yönlendirme (3xx)", 1, C.info],
-  ["İstemci hatası (4xx)", 2, C.warn],
-  ["Sunucu hatası (5xx)", 3, C.bad],
+  ["Başarılı (2xx)", 0, C.ok, "sorunsuz yanıtlandı"],
+  ["Yönlendirme (3xx)", 1, C.info, "yönlendirme ya da önbellek"],
+  ["İstemci hatası (4xx)", 2, C.warn, "bulunamadı, yetki yok…"],
+  ["Sunucu hatası (5xx)", 3, C.bad, "sunucu tarafında hata"],
 ];
 
-function ClassStrip({ classes, minutes }) {
+function RequestSummary({ classes, kinds, minutes }) {
   const c = classes || [0, 0, 0, 0];
   const toplam = c.reduce((a, b) => a + b, 0);
+  const k = (x) => kinds?.[x] || 0;
+  const tumu = KIND_ORDER.reduce((a, x) => a + k(x), 0);
+  const haproxy = k("redirect") + k("denied") + k("proxy");
+  const ulasamadi = k("nomatch") + k("noserver");
+  // Sıfır olan kalemler yazılmaz. Tek kalem varsa sayı tekrarlanmaz: her kalemin tek
+  // başına ([n, tek]) ve diğerleriyle birlikte ([n, tek, cok(n)]) okunuşu ayrı verilir.
+  const dokum = (xs, tekBas, cokBas) => {
+    const v = xs.filter(([n]) => n > 0);
+    if (v.length === 1) return `${tekBas}${v[0][1]}.`;
+    return `${cokBas}${v.map(([n, tek, cok]) => (cok ? cok(n) : `${fmtNum(n)} ${tek}`)).join(", ")}.`;
+  };
+  const Madde = ({ renk, children }) => (
+    <li className="flex items-baseline gap-2">
+      <span style={{ width: 8, height: 8, borderRadius: 2, background: renk, flexShrink: 0 }} />
+      <span>{children}</span>
+    </li>
+  );
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-px rounded-lg overflow-hidden" style={{ background: C.line, border: `1px solid ${C.line}` }}>
-      {CLASS_CELLS.map(([ad, i, col]) => (
-        <div key={ad} className="px-4 py-4" style={{ background: C.panel }}>
-          <div className="text-sm inline-flex items-center gap-2" style={{ color: C.muted }}>
-            <span style={{ width: 8, height: 8, borderRadius: 2, background: col }} />{ad}
-          </div>
-          <div className="text-2xl font-semibold tnum mt-1" style={{ color: i === 3 && c[i] > 0 ? C.bad : C.text }}>{fmtNum(c[i])}</div>
-          <div className="text-xs mt-1" style={{ color: C.faint }}>
-            {toplam ? fmtPct(c[i] / toplam) : "—"}, {fmtRate(c[i] / minutes)}/dk
-          </div>
+    <div className="rounded-lg overflow-hidden" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+      {toplam > 0 && (
+        <div className="flex" style={{ height: 8, background: C.line }}
+          title={CLASS_CELLS.map(([ad, i]) => `${ad}: ${fmtPct(c[i] / toplam)}`).join(" · ")}>
+          {CLASS_CELLS.map(([ad, i, col]) => (c[i] > 0 ? <div key={ad} style={{ width: `${(100 * c[i]) / toplam}%`, background: col }} /> : null))}
         </div>
-      ))}
+      )}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: C.line }}>
+        {CLASS_CELLS.map(([ad, i, col, ipucu]) => (
+          <div key={ad} className="px-4 py-4" style={{ background: C.panel }}>
+            <div className="text-sm inline-flex items-center gap-2" style={{ color: C.muted }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: col }} />{ad}
+            </div>
+            <div className="text-2xl font-semibold tnum mt-1" style={{ color: i === 3 && c[i] > 0 ? C.bad : C.text }}>{fmtNum(c[i])}</div>
+            <div className="text-xs mt-1" style={{ color: C.faint }}>
+              {toplam ? fmtPct(c[i] / toplam) : "—"}, {fmtRate(c[i] / minutes)}/dk
+            </div>
+            <div className="text-xs mt-1" style={{ color: C.faint }}>{ipucu}</div>
+          </div>
+        ))}
+      </div>
+      {tumu > 0 && (
+        <ul className="px-4 py-3 text-sm space-y-1.5" style={{ borderTop: `1px solid ${C.line}`, color: C.muted }}>
+          <Madde renk={C.ok}>
+            <b className="tnum" style={{ color: C.text }}>{fmtNum(k("served"))}</b> istek sunuculara ulaştı ({fmtPct(k("served") / tumu)}).
+          </Madde>
+          {haproxy > 0 && (
+            <Madde renk={C.info}>
+              <b className="tnum" style={{ color: C.text }}>{fmtNum(haproxy)}</b> isteği HAProxy, sunucuya göndermeden kendisi yanıtladı
+              {dokum([
+                [k("redirect"), "yönlendirme (ör. http'den https'e)"],
+                [k("denied"), "engelleme (403)"],
+                [k("proxy"), "diğer (hatalı istek, zaman aşımı…)"],
+              ], "; hepsi ", ": ")}
+            </Madde>
+          )}
+          {ulasamadi > 0 && (
+            <Madde renk={C.bad}>
+              <span style={{ color: C.bad }}>
+                <b className="tnum">{fmtNum(ulasamadi)}</b> istek hiçbir sunucuya ulaşamadı (503)
+                {dokum([
+                  [k("noserver"), "backend'de çalışan sunucu yoktu", (n) => `${fmtNum(n)} tanesinde backend'de çalışan sunucu yoktu`],
+                  [k("nomatch"), "hiçbir backend kuralına uymadı", (n) => `${fmtNum(n)} tanesi hiçbir backend kuralına uymadı`],
+                ], ", çünkü ", ": ")}
+              </span>
+            </Madde>
+          )}
+        </ul>
+      )}
     </div>
   );
 }
@@ -1937,29 +1993,7 @@ function LogSection({ logs, minutes }) {
           Log dosyası okunamıyor: {logs.error}
         </div>
       )}
-      <h3 className="text-sm font-medium mb-2">Hangi yanıt kodu döndü</h3>
-      <ClassStrip classes={logs.classes} minutes={minutes} />
-
-      <h3 className="text-sm font-medium mb-2 mt-6">İsteğe ne oldu</h3>
-      <p className="text-xs mb-2" style={{ color: C.muted }}>
-        Bu şerit isteğin nereye gittiğini anlatır, hangi kodu aldığını değil: sunucu 500 döndürdüyse istek yine
-        "Sunucu yanıtladı" sayılır. Kod dökümü için yukarıdaki şeride ve aşağıdaki "Hangi adres ne döndürüyor" bölümüne bak.
-      </p>
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-px rounded-lg overflow-hidden" style={{ background: C.line, border: `1px solid ${C.line}` }}>
-        {KIND_ORDER.map((k) => {
-          const [label, col, desc] = KIND[k];
-          const n = kinds[k] || 0;
-          return (
-            <div key={k} className="px-4 py-4" style={{ background: C.panel }} title={desc}>
-              <div className="text-sm inline-flex items-center gap-2" style={{ color: C.muted }}>
-                <span style={{ width: 8, height: 8, borderRadius: 2, background: col, flexShrink: 0 }} />{label}
-              </div>
-              <div className="text-2xl font-semibold tnum mt-1" style={{ color: n && (k === "nomatch" || k === "noserver") ? C.bad : C.text }}>{fmtNum(n)}</div>
-              <div className="text-xs mt-1" style={{ color: C.faint }}>{total ? fmtPct(n / total) : "—"}, {perMin(n)}</div>
-            </div>
-          );
-        })}
-      </div>
+      <RequestSummary classes={logs.classes} kinds={kinds} minutes={minutes} />
 
       <div className="grid gap-4 lg:grid-cols-2 mt-4">
         <Panel title="En çok istenen adresler" note="Tüm istekler: sunucuya ulaşanlar, yönlendirilenler ve engellenenler. Satıra tıklayınca o adrese en çok istek yapan IP'ler açılır. Sayı içeren yol parçaları {id} olarak birleştirildi.">
