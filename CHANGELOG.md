@@ -4,6 +4,22 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 1.0.14
+
+- **Şeritlerde başlık ve değerler iki satıra kaymıyor.** Üst şeritte "Sunucu hatası oranı" başlığı ve "1 gün 2 saat" gibi değerler, tablette de log özetindeki "Yönlendirme (3xx)" gibi başlıklar iki satıra bölünüp komşu kutularla hizayı bozuyordu. Yazı boyutu artık kutunun genişliğine göre ayarlanıyor; geniş ekranda eski boyutunda. Üst şerit, sunucu şeridi ve log özeti birlikte düzeltildi.
+- **Uzun yollar kelime ortasından kırılmıyor.** "/" içermeyen uzun parçalar ("Cok-Uzun-Bir-Dosya-Adi.pdf") artık tire, alt çizgi ya da noktadan bölünüyor. Telefonda arama sonuçları ve en çok istenen adresler tablolarında adres sütunu çok daralıyordu; artık en az bir genişliği var, tablo sığmazsa kendi kutusunda yana kayıyor. Engellenen istekler listesinde de dar ekranda sağdaki etiket yolun altına geçiyor.
+- **"listeye girmeyen diğer IP'ler" yerine "diğer IP'ler"**; dar tabloda iki satıra bölünüyordu.
+- Satır dar kaldığında (tablet genişliğinde iki sütunlu listeler) "Cloudflare" etiketi listenin tamamında birden gizleniyor; hiza bozulmuyor, satırlar taşmıyor.
+- Önceki denetimde ölçülmeyen bu konular için ölçüm eklendi ve altı ekran genişliğinde (1600, 1440, 1280, 1024, 768, 390) zor veriyle doğrulandı: iki satıra kayan başlık ya da değer, kelime ortasından kırılan yol ve sayfa taşması sıfır.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 1.0.13
 
 - **Adres ayrıntısındaki yanıt etiketleri tutarlı.** Tek kodlu satırlar kutusuz, karışık satırlar kutulu yazılıyordu; ayrıca "304 değişmemiş (önbellek)" gibi uzun etiketler kutunun içinde iki satıra bölünüyordu. Artık her satırda aynı kısa kutular var ("● 304 ×22"), anlamı üzerine gelince görünüyor.

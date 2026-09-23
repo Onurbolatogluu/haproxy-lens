@@ -15,6 +15,17 @@ const TICK_SEC = 2;
 const CSS = `
 .hl-root{font-family:${FONT}}
 .tnum{font-variant-numeric:tabular-nums}
+/* Şerit hücreleri: yazı boyutu hücrenin genişliğine göre ölçeklenir, başlık ve değer hiç
+   iki satıra kaymaz (eskiden "1 gün 2 saat" ve "Sunucu hatası oranı" dar hücrede bölünüyordu) */
+.hl-hucre{container-type:inline-size}
+/* IP satırları: satır dar kaldığında ağ adı (Cloudflare) o listenin tamamında gizlenir;
+   hepsinde birden gizlendiği için hiza bozulmaz. IP'nin üzerine gelince başlıkta görünür. */
+.hl-satir{container-type:inline-size}
+@container (max-width: 380px){.hl-ag{display:none !important}}
+/* Dar satırda sağdaki etiket ("Çalışan sunucu yok (503)") yolu sıkıştırmasın, altına geçsin */
+@container (max-width: 420px){.hl-yigin{flex-direction:column;align-items:flex-start;gap:4px}}
+.hl-etiket{white-space:nowrap;font-size:clamp(0.7rem,8cqi,0.875rem)}
+.hl-deger{white-space:nowrap;font-size:clamp(1rem,13.5cqi,1.5rem);line-height:1.3}
 .hl-arama-satir + .hl-arama-satir > td{border-top:1px solid ${C.line}}
 /* Yol, alan adı gibi boşluksuz uzun metinler kutudan taşmasın (sadece gerektiğinde kırılır) */
 .brk{overflow-wrap:anywhere;min-width:0}
@@ -476,7 +487,7 @@ function IPAg({ ip, ag, soluk }) {
     <span className="inline-flex items-baseline tnum" title={ag ? `${ag} üzerinden geldi` : undefined}>
       <span style={{ display: "inline-block", minWidth: "15ch", color: soluk ? C.faint : C.text }}>{ipKir(ip)}</span>
       {/* Dar ekranda yer açmak için gizlenir; üzerine gelince başlıkta görünür */}
-      {ag ? <span className="text-xs ml-3 nw hidden sm:inline" style={{ color: C.faint }}>{ag}</span> : null}
+      {ag ? <span className="text-xs ml-3 nw hidden sm:inline hl-ag" style={{ color: C.faint }}>{ag}</span> : null}
     </span>
   );
 }
@@ -488,10 +499,20 @@ function IPAg({ ip, ag, soluk }) {
 // yerine "…asmx/ | GetUniform…"). Her "/" sonrasına kırılma fırsatı eklenir; tek bir parça
 // bile sığmazsa tarayıcı yine kelime içinden kırar.
 function yolKir(path) {
-  const parcalar = String(path || "").split("/");
-  return parcalar.map((x, i) => (
-    <Fragment key={i}>{x}{i < parcalar.length - 1 ? <>/<wbr /></> : null}</Fragment>
-  ));
+  // Önce "/" sonra, ayrıca "-", "_", ".", "?", "&", "=" sonrasında kırılma fırsatı. Böylece
+  // "Cok-Uzun-Bir-Dosya-Adi.pdf" gibi "/" içermeyen parçalar da kelime ortasından değil tire ya
+  // da noktadan bölünür. (Geriye bakan düzenli ifade eski Safari'de desteklenmediği için elle.)
+  const s = String(path || "");
+  const out = [];
+  let bas = 0;
+  for (let i = 0; i < s.length; i++) {
+    if ("/-_.?&=".includes(s[i])) {
+      out.push(<Fragment key={i}>{s.slice(bas, i + 1)}<wbr /></Fragment>);
+      bas = i + 1;
+    }
+  }
+  if (bas < s.length) out.push(<Fragment key="son">{s.slice(bas)}</Fragment>);
+  return out;
 }
 
 function YontemYol({ method, path, host, alt }) {
@@ -596,7 +617,7 @@ function ReqDetail({ d, path, method, status }) {
         <Head>Bu istekleri gönderen IP'ler</Head>
         <ul className="grid gap-x-6 md:grid-cols-2">
           {(d.ips || []).map((c) => (
-            <li key={c.ip} className="flex items-baseline justify-between gap-3 py-0.5">
+            <li key={c.ip} className="flex items-baseline justify-between gap-3 py-0.5 hl-satir">
               <IPAg ip={c.ip === "(diğer)" ? "(diğer IP'ler)" : c.ip} ag={agAdi(c)} soluk={c.ip === "(diğer)"} />
               <span className="tnum nw" style={{ color: C.muted }}>×{fmtNum(c.n)}</span>
             </li>
@@ -613,7 +634,7 @@ function ExpandRow({ open, onToggle, head, children, first }) {
     <div style={{ borderTop: first ? "none" : `1px solid ${C.line}` }}>
       <button type="button" onClick={onToggle} aria-expanded={open} className="hl-row w-full text-left flex gap-2 items-start py-2 px-1 rounded">
         <span className="mt-0.5" style={{ color: C.muted, flexShrink: 0 }}>{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
-        <span className="flex-1" style={{ minWidth: 0 }}>{head}</span>
+        <span className="flex-1 hl-satir" style={{ minWidth: 0 }}>{head}</span>
       </button>
       {open && <div className="pl-6 pb-2">{children}</div>}
     </div>
@@ -844,7 +865,7 @@ function BackendTraffic({ name }) {
           {satirlar.map((x) => {
             const ad = ip ? x.ip : x.name;
             return (
-              <li key={ad} className="flex items-baseline justify-between gap-3">
+              <li key={ad} className="flex items-baseline justify-between gap-3 hl-satir">
                 {ip ? (
                   <IPAg ip={ad === "(diğer)" ? "(diğer IP'ler)" : ad} ag={agAdi(x)} soluk={ad === "(diğer)"} />
                 ) : (
@@ -1335,9 +1356,9 @@ function PulseStrip({ model, rates, info }) {
   return (
     <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-px rounded-lg overflow-hidden" style={{ background: C.line, border: `1px solid ${C.line}` }}>
       {items.map((it) => (
-        <div key={it.k} className="px-4 py-4" style={{ background: C.panel }}>
-          <div className="text-sm" style={{ color: C.muted }}><Term k={it.k} /></div>
-          <div className="text-2xl font-semibold tnum mt-1" style={{ color: it.color || C.text }}>{it.value}</div>
+        <div key={it.k} className="px-4 py-4 hl-hucre" style={{ background: C.panel }}>
+          <div className="hl-etiket" style={{ color: C.muted }}><Term k={it.k} /></div>
+          <div className="hl-deger font-semibold tnum mt-1" style={{ color: it.color || C.text }}>{it.value}</div>
           <div className="text-xs mt-1" style={{ color: C.faint }}>{it.sub}</div>
         </div>
       ))}
@@ -1439,9 +1460,9 @@ function SystemSection({ sys, minutes }) {
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-px rounded-lg overflow-hidden"
         style={{ background: C.line, border: `1px solid ${C.line}` }}>
         {kartlar.map((it) => (
-          <div key={it.k} className="px-4 py-4" style={{ background: C.panel }}>
-            <div className="text-sm" style={{ color: C.muted }}>{it.k}</div>
-            <div className="text-2xl font-semibold tnum mt-1" style={{ color: it.color || C.text }}>{it.value}</div>
+          <div key={it.k} className="px-4 py-4 hl-hucre" style={{ background: C.panel }}>
+            <div className="hl-etiket" style={{ color: C.muted }}>{it.k}</div>
+            <div className="hl-deger font-semibold tnum mt-1" style={{ color: it.color || C.text }}>{it.value}</div>
             <div className="text-xs mt-1 brk" style={{ color: C.faint }}>{it.sub}</div>
           </div>
         ))}
@@ -1735,11 +1756,11 @@ function RequestSummary({ classes, kinds, minutes }) {
       )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-px" style={{ background: C.line }}>
         {CLASS_CELLS.map(([ad, i, col, ipucu]) => (
-          <div key={ad} className="px-4 py-4" style={{ background: C.panel }}>
-            <div className="text-sm inline-flex items-center gap-2" style={{ color: C.muted }}>
-              <span style={{ width: 8, height: 8, borderRadius: 2, background: col }} />{ad}
+          <div key={ad} className="px-4 py-4 hl-hucre" style={{ background: C.panel }}>
+            <div className="hl-etiket inline-flex items-center gap-2" style={{ color: C.muted }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: col, flexShrink: 0 }} />{ad}
             </div>
-            <div className="text-2xl font-semibold tnum mt-1" style={{ color: i === 3 && c[i] > 0 ? C.bad : C.text }}>{fmtNum(c[i])}</div>
+            <div className="hl-deger font-semibold tnum mt-1" style={{ color: i === 3 && c[i] > 0 ? C.bad : C.text }}>{fmtNum(c[i])}</div>
             <div className="text-xs mt-1" style={{ color: C.faint }}>
               {toplam ? fmtPct(c[i] / toplam) : "—"}, {fmtRate(c[i] / minutes)}/dk
             </div>
@@ -2000,7 +2021,7 @@ function SearchResult({ res }) {
           <div className="text-sm font-medium mb-1">En çok istek yapan IP'ler</div>
           <ul className="text-sm">
             {(res.ips || []).map((c) => (
-              <li key={c.ip} className="flex items-baseline justify-between gap-3 py-0.5" style={{ borderTop: `1px solid ${C.line}` }}>
+              <li key={c.ip} className="flex items-baseline justify-between gap-3 py-0.5 hl-satir" style={{ borderTop: `1px solid ${C.line}` }}>
                 <IPAg ip={c.ip} ag={agAdi(c)} />
                 <span className="tnum nw" style={{ color: C.muted }}>{fmtNum(c.n)}</span>
               </li>
@@ -2030,10 +2051,12 @@ function SearchResult({ res }) {
         <table className="w-full text-sm" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
           <thead>
             <tr className="text-xs" style={{ color: C.muted }}>
-              {[["Zaman", "left", "pl-3 pr-3"], ["IP", "left", "pr-3"], ["Kod", "right", "pr-3"], ["Adres", "left", "pr-3"],
-                ["Sunucu", "left", "pr-3"], ["Süre", "right", "pr-4"]].map(([ad, hiza, bosluk]) => (
+              {/* Adres sütununa en az genişlik: dar ekranda yollar kelime ortasından kırılmasın;
+                  tablo sığmazsa sayfayı değil kendi kutusunu yana kaydırır */}
+              {[["Zaman", "left", "pl-3 pr-3"], ["IP", "left", "pr-3"], ["Kod", "right", "pr-3"], ["Adres", "left", "pr-3", "12rem"],
+                ["Sunucu", "left", "pr-3"], ["Süre", "right", "pr-4"]].map(([ad, hiza, bosluk, enAz]) => (
                 <th key={ad} className={`py-2 ${bosluk} font-normal text-${hiza}`}
-                  style={{ position: "sticky", top: 0, zIndex: 1, background: C.panel, borderBottom: `1px solid ${C.line}` }}>
+                  style={{ position: "sticky", top: 0, zIndex: 1, background: C.panel, borderBottom: `1px solid ${C.line}`, minWidth: enAz }}>
                   {ad}
                 </th>
               ))}
@@ -2133,7 +2156,8 @@ function LogSection({ logs, minutes }) {
               <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
                 <thead>
                   <tr className="text-xs" style={{ color: C.muted }}>
-                    <th className="py-2 pr-3 font-normal text-left">Adres</th>
+                    {/* En az genişlik: telefonda yollar kelime ortasından kırılmasın; tablo sığmazsa kendi kutusunda kayar */}
+                    <th className="py-2 pr-3 font-normal text-left" style={{ minWidth: "11rem" }}>Adres</th>
                     <th className="py-2 pr-2 font-normal text-right">İstek</th>
                     <th className="py-2 pr-2 font-normal text-right">2xx</th>
                     <th className="py-2 pr-2 font-normal text-right">3xx</th>
@@ -2196,7 +2220,7 @@ function LogSection({ logs, minutes }) {
                                         <tr key={c.ip} style={{ borderTop: `1px solid ${C.line}` }}>
                                           <td className="py-1.5 pr-3 align-middle">
                                             {c.ip === "(diğer)" ? (
-                                              <span style={{ color: C.faint }}>listeye girmeyen diğer IP'ler</span>
+                                              <span className="nw" style={{ color: C.faint }} title="Listeye girmeyen diğer IP'lerin toplamı">diğer IP'ler</span>
                                             ) : (
                                               <span className={`tnum ${c.ip.includes(":") ? "" : "nw"}`} title={agAdi(c) ? `${agAdi(c)} üzerinden geldi` : undefined}>{ipKir(c.ip)}</span>
                                             )}
@@ -2232,7 +2256,7 @@ function LogSection({ logs, minutes }) {
                 return (
                   <ExpandRow key={key} first={i === 0} open={openRows.has(key)} onToggle={() => toggleRow(key)}
                     head={
-                      <span className="flex items-baseline justify-between gap-3">
+                      <span className="flex items-baseline justify-between gap-3 hl-yigin">
                         <YontemYol method={b.method} path={b.path} />
                         <span className="flex items-baseline gap-3 whitespace-nowrap">
                           <span className="inline-flex items-center gap-2 text-xs" style={{ color: C.muted }}>
