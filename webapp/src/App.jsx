@@ -15,6 +15,7 @@ const TICK_SEC = 2;
 const CSS = `
 .hl-root{font-family:${FONT}}
 .tnum{font-variant-numeric:tabular-nums}
+.hl-arama-satir + .hl-arama-satir > td{border-top:1px solid ${C.line}}
 /* Yol, alan adı gibi boşluksuz uzun metinler kutudan taşmasın (sadece gerektiğinde kırılır) */
 .brk{overflow-wrap:anywhere;min-width:0}
 /* Sayı + birim ("218 ms", "1,5 sn") alt satıra bölünmesin */
@@ -2019,21 +2020,25 @@ function SearchResult({ res }) {
       <div className="text-sm font-medium mt-5 mb-1">
         Eşleşen istekler <span className="font-normal text-xs" style={{ color: C.faint }}>(en yeniden eskiye, en fazla {fmtNum((res.hits || []).length)} satır)</span>
       </div>
-      <div className="overflow-auto rounded-md" style={{ maxHeight: 420, border: `1px solid ${C.line}` }}>
-        <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
-          <thead style={{ position: "sticky", top: 0, background: C.panel, zIndex: 1 }}>
+      {/* Kendi içinde kayan kutu. Başlık hücreleri tek tek sabitlenir (thead'i sabitlemek
+          Safari'de tutmuyor, satırlar başlığın arkasından sızıyordu). Sağda boşluk: macOS'un
+          kaydırma çubuğu içeriğin üstüne çizilir, son sütunla üst üste binmesin. */}
+      <div className="overflow-auto rounded-md" style={{ maxHeight: 420, border: `1px solid ${C.line}`, scrollbarGutter: "stable" }}>
+        <table className="w-full text-sm" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
+          <thead>
             <tr className="text-xs" style={{ color: C.muted }}>
-              <th className="py-2 pl-3 pr-3 font-normal text-left">Zaman</th>
-              <th className="py-2 pr-3 font-normal text-left">IP</th>
-              <th className="py-2 pr-3 font-normal text-right">Kod</th>
-              <th className="py-2 pr-3 font-normal text-left">Adres</th>
-              <th className="py-2 pr-3 font-normal text-left">Sunucu</th>
-              <th className="py-2 font-normal text-right">Süre</th>
+              {[["Zaman", "left", "pl-3 pr-3"], ["IP", "left", "pr-3"], ["Kod", "right", "pr-3"], ["Adres", "left", "pr-3"],
+                ["Sunucu", "left", "pr-3"], ["Süre", "right", "pr-4"]].map(([ad, hiza, bosluk]) => (
+                <th key={ad} className={`py-2 ${bosluk} font-normal text-${hiza}`}
+                  style={{ position: "sticky", top: 0, zIndex: 1, background: C.panel, borderBottom: `1px solid ${C.line}` }}>
+                  {ad}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {(res.hits || []).map((h, i) => (
-              <tr key={i} style={{ borderTop: `1px solid ${C.line}` }}>
+              <tr key={i} className="hl-arama-satir">
                 <td className="py-2 pl-3 pr-3 align-top tnum nw text-xs">{zaman(h.at)}</td>
                 <td className="py-2 pr-3 align-top tnum brk">{h.ip}</td>
                 <td className="py-2 pr-3 align-top tnum nw text-right" style={{ color: codeColor(h.status) }}>{h.status}</td>
@@ -2041,7 +2046,7 @@ function SearchResult({ res }) {
                   <YontemYol method={h.method} host={h.host} path={h.path} />
                 </td>
                 <td className="py-2 pr-3 align-top brk text-xs" style={{ color: C.faint }}>{h.backend}/{h.server}</td>
-                <td className="py-2 align-top tnum nw text-right text-xs">{h.ms >= 0 ? fmtMs(h.ms) : "—"}</td>
+                <td className="py-2 pr-4 align-top tnum nw text-right text-xs">{h.ms >= 0 ? fmtMs(h.ms) : "—"}</td>
               </tr>
             ))}
           </tbody>
