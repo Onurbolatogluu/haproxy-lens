@@ -464,6 +464,21 @@ function IPKodlari({ codes, other }) {
   );
 }
 
+// IP ve ağ bilgisi. IP sabit genişlikte bir alana yazılır (en uzun IPv4 adresi 15
+// karakter), böylece ağ adı IP'nin uzunluğundan bağımsız olarak her satırda aynı
+// hizadan başlar. Ağ adı tek yerden gelir: ileride başka sağlayıcılar (ör. bir internet
+// servis sağlayıcısının adı) eklenirse yalnızca agAdi değişir.
+const agAdi = (c) => (c?.cloudflare ? "Cloudflare" : "");
+function IPAg({ ip, ag, soluk }) {
+  return (
+    <span className="inline-flex items-baseline tnum" title={ag ? `${ag} üzerinden geldi` : undefined}>
+      <span className="brk" style={{ display: "inline-block", minWidth: "15ch", color: soluk ? C.faint : C.text }}>{ip}</span>
+      {/* Dar ekranda yer açmak için gizlenir; üzerine gelince başlıkta görünür */}
+      {ag ? <span className="text-xs ml-3 nw hidden sm:inline" style={{ color: C.faint }}>{ag}</span> : null}
+    </span>
+  );
+}
+
 function CodeChip({ code, n }) {
   return (
     <span className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs tnum" style={{ background: C.panel2, border: `1px solid ${C.line}` }} title={CODE_TEXT[code] || ""}>
@@ -530,7 +545,7 @@ function ReqDetail({ d, path }) {
         <ul className="grid gap-x-6 md:grid-cols-2">
           {(d.ips || []).map((c) => (
             <li key={c.ip} className="flex items-baseline justify-between gap-3 py-0.5">
-              <span className="tnum brk" style={{ color: c.ip === "(diğer)" ? C.faint : C.text }}>{c.ip === "(diğer)" ? "(diğer IP'ler)" : c.ip}{c.cloudflare && <span className="text-xs ml-2" style={{ color: C.faint }}>Cloudflare</span>}</span>
+              <IPAg ip={c.ip === "(diğer)" ? "(diğer IP'ler)" : c.ip} ag={agAdi(c)} soluk={c.ip === "(diğer)"} />
               <span className="tnum nw" style={{ color: C.muted }}>×{fmtNum(c.n)}</span>
             </li>
           ))}
@@ -778,10 +793,11 @@ function BackendTraffic({ name }) {
             const ad = ip ? x.ip : x.name;
             return (
               <li key={ad} className="flex items-baseline justify-between gap-3">
-                <span className="brk tnum">
-                  {ad === "(diğer)" ? (ip ? "(diğer IP'ler)" : "(diğer adresler)") : ad}
-                  {ip && x.cloudflare && <span className="text-xs ml-2" style={{ color: C.faint }}>Cloudflare</span>}
-                </span>
+                {ip ? (
+                  <IPAg ip={ad === "(diğer)" ? "(diğer IP'ler)" : ad} ag={agAdi(x)} soluk={ad === "(diğer)"} />
+                ) : (
+                  <span className="brk tnum">{ad === "(diğer)" ? "(diğer adresler)" : ad}</span>
+                )}
                 <span className="tnum nw" style={{ color: C.muted }}>×{fmtNum(x.n)}</span>
               </li>
             );
@@ -1905,7 +1921,7 @@ function SearchResult({ res }) {
           <ul className="text-sm">
             {(res.ips || []).map((c) => (
               <li key={c.ip} className="flex items-baseline justify-between gap-3 py-0.5" style={{ borderTop: `1px solid ${C.line}` }}>
-                <span className="tnum brk">{c.ip}{c.cloudflare && <span className="text-xs ml-2" style={{ color: C.faint }}>Cloudflare</span>}</span>
+                <IPAg ip={c.ip} ag={agAdi(c)} />
                 <span className="tnum nw" style={{ color: C.muted }}>{fmtNum(c.n)}</span>
               </li>
             ))}
@@ -2086,6 +2102,7 @@ function LogSection({ logs, minutes }) {
                                     <thead>
                                       <tr className="text-xs" style={{ color: C.muted }}>
                                         <th className="py-1.5 pr-3 font-normal text-left">IP</th>
+                                        <th className="py-1.5 pr-3 font-normal text-left hidden sm:table-cell">Ağ</th>
                                         <th className="py-1.5 pr-3 font-normal text-left">Aldığı yanıtlar</th>
                                         <th className="py-1.5 font-normal text-right">İstek</th>
                                       </tr>
@@ -2097,12 +2114,10 @@ function LogSection({ logs, minutes }) {
                                             {c.ip === "(diğer)" ? (
                                               <span style={{ color: C.faint }}>listeye girmeyen diğer IP'ler</span>
                                             ) : (
-                                              <span className="tnum nw" title={c.cloudflare ? "Cloudflare üzerinden geldi" : undefined}>
-                                                {c.ip}
-                                                {c.cloudflare && <span className="text-xs ml-2 hidden sm:inline" style={{ color: C.faint }}>Cloudflare</span>}
-                                              </span>
+                                              <span className="tnum nw" title={agAdi(c) ? `${agAdi(c)} üzerinden geldi` : undefined}>{c.ip}</span>
                                             )}
                                           </td>
+                                          <td className="py-1.5 pr-3 align-middle text-xs nw hidden sm:table-cell" style={{ color: C.faint }}>{agAdi(c)}</td>
                                           <td className="py-1.5 pr-3 align-middle"><IPKodlari codes={c.codes} other={c.other} /></td>
                                           <td className="py-1.5 text-right tnum nw align-middle">{fmtNum(c.n)}</td>
                                         </tr>
@@ -2167,7 +2182,7 @@ function LogSection({ logs, minutes }) {
                   <ExpandRow key={key} first={i < 2} open={openRows.has(key)} onToggle={() => toggleRow(key)}
                     head={
                       <span className="flex items-baseline justify-between gap-3">
-                        <span className="tnum brk">{c.ip}{c.cloudflare && <span className="text-xs ml-2" style={{ color: C.faint }}>Cloudflare</span>}</span>
+                        <IPAg ip={c.ip} ag={agAdi(c)} />
                         <span className="tnum nw">
                           {fmtNum(c.n)}
                           {c.blocked ? <span className="text-xs ml-2" style={{ color: C.warn }}>{fmtNum(c.blocked)} engellenen</span> : null}
