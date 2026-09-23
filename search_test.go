@@ -379,3 +379,19 @@ func TestAramaAyniAndaTek(t *testing.T) {
 		t.Fatalf("kilit bırakıldıktan sonra arama çalışmalı: %v", err)
 	}
 }
+
+// Tam adres araması: "/" yalnızca ana sayfayı bulmalı, içinde "/" geçen her şeyi değil
+func TestAramaTamAdres(t *testing.T) {
+	a := aramaOrtami(t)
+	hepsi := ara(t, a, SearchQuery{Path: "/"})
+	tam := ara(t, a, SearchQuery{Path: "/baska/yol", Exact: true})
+	if tam.Matches != 1 {
+		t.Fatalf("tam adres eşleşmesi: %d, beklenen 1", tam.Matches)
+	}
+	if kok := ara(t, a, SearchQuery{Path: "/", Exact: true}); kok.Matches != 0 || hepsi.Matches == 0 {
+		t.Fatalf("'/' tam aramada hiçbir şey bulmamalı (ortamda ana sayfa isteği yok): %d, içinde geçen: %d", kok.Matches, hepsi.Matches)
+	}
+	if yarim := ara(t, a, SearchQuery{Path: "/baska", Exact: true}); yarim.Matches != 0 {
+		t.Fatalf("yolun bir kısmı tam aramada eşleşmemeli: %d", yarim.Matches)
+	}
+}

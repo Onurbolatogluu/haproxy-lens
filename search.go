@@ -38,6 +38,7 @@ const (
 
 type SearchQuery struct {
 	Path    string // yolun içinde geçen metin
+	Exact   bool   // Path tam adres olarak aranır (ör. "/" yalnızca ana sayfa; içinde geçen her şey değil)
 	IP      string // istemci IP'si (tam ya da önek)
 	Status  string // "500", "5xx" ya da boş
 	Method  string
@@ -125,9 +126,16 @@ func icerirFold(s, aranan string) bool {
 }
 
 func (q SearchQuery) uyuyor(r logRecord) bool {
-	if q.Path != "" && !strings.Contains(strings.ToLower(r.RawPath), strings.ToLower(q.Path)) &&
-		!strings.Contains(strings.ToLower(r.Path), strings.ToLower(q.Path)) {
-		return false
+	if q.Path != "" {
+		if q.Exact {
+			// Tam adres: birleştirilmiş ({id}) ya da gerçek yol birebir aynı olmalı
+			if r.Path != q.Path && r.RawPath != q.Path {
+				return false
+			}
+		} else if !strings.Contains(strings.ToLower(r.RawPath), strings.ToLower(q.Path)) &&
+			!strings.Contains(strings.ToLower(r.Path), strings.ToLower(q.Path)) {
+			return false
+		}
 	}
 	if q.IP != "" && !strings.HasPrefix(r.Client, q.IP) {
 		return false
@@ -447,6 +455,7 @@ func searchQueryFrom(get func(string) string) (SearchQuery, error) {
 		Status:  strings.TrimSpace(get("status")),
 		Method:  strings.TrimSpace(get("method")),
 		Backend: strings.TrimSpace(get("backend")),
+		Exact:   get("exact") == "1",
 	}
 	if q.bos() {
 		return q, fmt.Errorf("aranacak bir şey yazın: adres, IP, durum kodu, yöntem ya da backend")

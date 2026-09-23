@@ -516,10 +516,32 @@ function CodeChip({ code, n }) {
   );
 }
 
+// Paneldeki herhangi bir satırdan "Log'da ara" bölümünü doldurup aramayı başlatır
+function logdaAra({ path, method, status, minutes }) {
+  window.dispatchEvent(new CustomEvent("hl-ara", {
+    detail: { path, method: method || "", status: status || "", exact: true, hours: minutes && minutes <= 60 ? 1 : 24 },
+  }));
+}
+
 // Satıra tıklayınca açılan ayrıntı: tam adres (alan adı log'da varsa), gerçek yollar, IP'ler
-function ReqDetail({ d, path }) {
+function ReqDetail({ d, path, method, status }) {
+  const { logs, minutes } = useContext(WinCtx) || {};
   if (!d) {
-    return <p className="text-xs mt-2" style={{ color: C.faint }}>Bu satır için ayrıntı tutulmadı (o dakikada çok fazla farklı adres vardı).</p>;
+    // Ayrıntı panelde kısa süre tutulur. Eskiden burada "o dakikada çok fazla farklı adres
+    // vardı" yazıyordu; oysa çoğu zaman sebep kaydın eski olması ya da ajanın yeniden
+    // başlamasıydı. Doğru sebep yazılır ve çıkmaz sokak yerine log'da arama sunulur:
+    // arama log dosyasını doğrudan okuduğu için bu süre sınırına takılmaz.
+    const sure = logs?.detailMinutes ? araLabel(logs.detailMinutes) : "1 saat";
+    return (
+      <div className="text-xs mt-2 flex flex-wrap items-center gap-x-3 gap-y-2" style={{ color: C.faint }}>
+        <span>Bu satırın ayrıntısı panelde yok: ayrıntılar yalnızca son {sure} için tutulur ve ajan yeniden başladığında sıfırlanır.</span>
+        <button type="button" className="rounded px-2.5 py-1 nw"
+          style={{ background: C.panel2, border: `1px solid ${C.line}`, color: C.info }}
+          onClick={(e) => { e.stopPropagation(); logdaAra({ path, method, status, minutes }); }}>
+          IP'leri ve zamanları log'dan getir
+        </button>
+      </div>
+    );
   }
   const unknown = d.total - d.hostKnown;
   const samples = (d.samples || []).filter((x) => x.name !== path || d.samples.length > 1);
@@ -1813,7 +1835,7 @@ function CodePathsPanel({ logs, openRows, toggleRow, frozen }) {
                     </span>
                   </>
                 }>
-                <ReqDetail d={e.detail} path={e.path} />
+                <ReqDetail d={e.detail} path={e.path} method={e.method} status={aktif.kisa} />
               </ExpandRow>
             );
           })}
@@ -1829,13 +1851,14 @@ function CodePathsPanel({ logs, openRows, toggleRow, frozen }) {
 const ARAMA_ARALIK = [[1, "Son 1 saat"], [24, "Son 24 saat"], [168, "Son 7 gün"], [720, "Son 30 gün"], [0, "Tüm log"]];
 
 function SearchSection({ inputRef }) {
-  const [form, setForm] = useState({ path: "", ip: "", status: "", hours: 24 });
+  const [form, setForm] = useState({ path: "", ip: "", status: "", hours: 24, method: "", exact: false });
   const [durum, setDurum] = useState("hazir"); // hazir | araniyor | bitti | hata
   const [res, setRes] = useState(null);
   const [hata, setHata] = useState("");
 
-  const ara = async (e) => {
+  const ara = async (e, f = form) => {
     e?.preventDefault?.();
+    const form = f;
     if (!form.path && !form.ip && !form.status) {
       setHata("Aramak için adres, IP ya da durum kodu yazın.");
       setDurum("hata");
@@ -1845,7 +1868,8 @@ function SearchSection({ inputRef }) {
     setHata("");
     try {
       const p = new URLSearchParams();
-      for (const k of ["path", "ip", "status"]) if (form[k]) p.set(k, form[k]);
+      for (const k of ["path", "ip", "status", "method"]) if (form[k]) p.set(k, form[k]);
+      if (form.exact) p.set("exact", "1");
       if (form.hours) p.set("hours", String(form.hours));
       const r = await fetch(`/api/search?${p}`, { cache: "no-store" });
       const j = await r.json();
@@ -1862,6 +1886,18 @@ function SearchSection({ inputRef }) {
     }
   };
 
+  useEffect(() => {
+    const dinle = (ev) => {
+      const yeni = { path: ev.detail.path || "", ip: "", status: ev.detail.status || "", hours: ev.detail.hours || 24,
+        method: ev.detail.method || "", exact: !!ev.detail.exact };
+      setForm(yeni);
+      document.getElementById("search")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      ara(null, yeni);
+    };
+    window.addEventListener("hl-ara", dinle);
+    return () => window.removeEventListener("hl-ara", dinle);
+  });
+
   const alan = { background: C.bg, border: `1px solid ${C.line}`, color: C.text, borderRadius: 6, padding: "6px 10px" };
   return (
     <section id="search" className="mt-12">
@@ -1871,7 +1907,7 @@ function SearchSection({ inputRef }) {
         <form onSubmit={ara} className="flex flex-wrap items-end gap-3">
           <label className="text-sm">
             <div className="text-xs mb-1" style={{ color: C.muted }}>Adres (yolun içinde geçen)</div>
-            <input ref={inputRef} value={form.path} onChange={(e) => setForm({ ...form, path: e.target.value })}
+            <input ref={inputRef} value={form.path} onChange={(e) => setForm({ ...form, path: e.target.value, method: "", exact: false })}
               placeholder="/api/kayit" style={{ ...alan, width: 260 }} />
           </label>
           <label className="text-sm">
@@ -1897,6 +1933,16 @@ function SearchSection({ inputRef }) {
           </button>
         </form>
 
+        {form.exact && (
+          <p className="text-xs mt-3 flex flex-wrap items-center gap-2" style={{ color: C.muted }}>
+            Tam adres aranıyor:
+            <b className="tnum" style={{ color: C.text }}>{form.method ? `${form.method} ` : ""}{form.path}</b>
+            <button type="button" className="underline" style={{ color: C.info }}
+              onClick={() => setForm({ ...form, method: "", exact: false })}>
+              içinde geçenleri ara
+            </button>
+          </p>
+        )}
         {durum === "hata" && <p className="text-sm mt-3" style={{ color: C.warn }}>{hata}</p>}
         {durum === "araniyor" && (
           <p className="text-sm mt-3" style={{ color: C.muted }}>
@@ -2180,7 +2226,8 @@ function LogSection({ logs, minutes }) {
                         </span>
                       </span>
                     }>
-                    <ReqDetail d={b.detail} path={b.path} />
+                    <ReqDetail d={b.detail} path={b.path} method={b.method}
+                      status={b.kind === "denied" ? "403" : b.kind === "nomatch" || b.kind === "noserver" ? "503" : ""} />
                   </ExpandRow>
                 );
               })}
