@@ -442,28 +442,24 @@ const codeColor = (code) => (code >= 500 || code === 0 ? C.bad : code >= 400 ? C
 function IPKodlari({ codes, other }) {
   const k = codes || [];
   if (k.length === 0 && !other) return null;
+  // Tek kodlu satırlar sade yazı: yirmi satırın hepsinde kutulu etiket göz yoruyor ve
+  // asıl önemli olan istisnaları (farklı kod alan IP'leri) boğuyordu. Kutu yalnızca
+  // karışık satırlarda kalır, böylece onlar göze çarpar.
   if (k.length === 1 && !other) {
+    const kod = k[0].code;
     return (
-      <span className="inline-flex items-center gap-1.5 mt-1 text-xs" style={{ color: C.faint }}>
-        tümü <KodEtiketi code={k[0].code} />
+      <span className="inline-flex items-center gap-1.5 text-xs nw" style={{ color: C.faint }} title={CODE_TEXT[kod] || ""}>
+        tümü
+        <span style={{ width: 7, height: 7, borderRadius: 2, background: codeColor(kod) }} />
+        <b className="tnum" style={{ color: C.text }}>{kod}</b>
+        {CODE_TEXT[kod] ? <span className="hidden sm:inline">{CODE_TEXT[kod]}</span> : null}
       </span>
     );
   }
   return (
-    <span className="flex flex-wrap gap-1.5 mt-1">
+    <span className="flex flex-wrap gap-1.5">
       {k.map((x) => <CodeChip key={x.code} code={x.code} n={x.n} />)}
       {other > 0 && <CodeChip code={0} n={other} />}
-    </span>
-  );
-}
-
-// Adetsiz kod etiketi (renkli işaret, kod ve anlamı)
-function KodEtiketi({ code }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs tnum" style={{ background: C.panel2, border: `1px solid ${C.line}` }} title={CODE_TEXT[code] || ""}>
-      <span style={{ width: 7, height: 7, borderRadius: 2, background: codeColor(code) }} />
-      <b style={{ color: C.text }}>{code}</b>
-      {CODE_TEXT[code] ? <span style={{ color: C.faint }}>{CODE_TEXT[code]}</span> : null}
     </span>
   );
 }
@@ -473,7 +469,7 @@ function CodeChip({ code, n }) {
     <span className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs tnum" style={{ background: C.panel2, border: `1px solid ${C.line}` }} title={CODE_TEXT[code] || ""}>
       <span style={{ width: 7, height: 7, borderRadius: 2, background: codeColor(code) }} />
       <b style={{ color: C.text }}>{code === 0 ? "diğer" : code}</b>
-      {CODE_TEXT[code] && code !== 0 ? <span style={{ color: C.faint }}>{CODE_TEXT[code]}</span> : null}
+      {CODE_TEXT[code] && code !== 0 ? <span className="hidden sm:inline" style={{ color: C.faint }}>{CODE_TEXT[code]}</span> : null}
       <span style={{ color: C.muted }}>×{fmtNum(n)}</span>
     </span>
   );
@@ -2081,22 +2077,39 @@ function LogSection({ logs, minutes }) {
                             ) : (
                               <div className="rounded-md p-3" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
                                 <div className="text-xs mb-2" style={{ color: C.muted }}>
-                                  Bu adrese en çok istek yapan IP'ler. Sağdaki sayı IP'nin toplam isteği; altında hangi yanıt kodunu kaç kez aldığı.
+                                  Bu adrese en çok istek yapan IP'ler, kaç istek yaptıkları ve hangi yanıtları aldıkları.
                                 </div>
-                                <ul className="grid gap-x-6 md:grid-cols-2 text-sm">
-                                  {p.ips.map((c) => (
-                                    <li key={c.ip} className="py-1" style={{ borderTop: `1px solid ${C.line}` }}>
-                                      <span className="flex items-baseline justify-between gap-3">
-                                        <span className="tnum brk" style={{ color: c.ip === "(diğer)" ? C.faint : C.text }}>
-                                          {c.ip === "(diğer)" ? "(listeye girmeyen diğer IP'ler)" : c.ip}
-                                          {c.cloudflare && <span className="text-xs ml-2" style={{ color: C.faint }}>Cloudflare</span>}
-                                        </span>
-                                        <span className="tnum nw">{fmtNum(c.n)}</span>
-                                      </span>
-                                      <IPKodlari codes={c.codes} other={c.other} />
-                                    </li>
-                                  ))}
-                                </ul>
+                                {/* Tek sütun, hizalı tablo: her IP tek satır. İki sütunlu düzende yarım
+                                    genişlik kalıyordu; kodlar alta itiliyor, sayı yukarıda yalnız kalıyordu. */}
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-sm" style={{ borderCollapse: "collapse" }}>
+                                    <thead>
+                                      <tr className="text-xs" style={{ color: C.muted }}>
+                                        <th className="py-1.5 pr-3 font-normal text-left">IP</th>
+                                        <th className="py-1.5 pr-3 font-normal text-left">Aldığı yanıtlar</th>
+                                        <th className="py-1.5 font-normal text-right">İstek</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {p.ips.map((c) => (
+                                        <tr key={c.ip} style={{ borderTop: `1px solid ${C.line}` }}>
+                                          <td className="py-1.5 pr-3 align-middle">
+                                            {c.ip === "(diğer)" ? (
+                                              <span style={{ color: C.faint }}>listeye girmeyen diğer IP'ler</span>
+                                            ) : (
+                                              <span className="tnum nw" title={c.cloudflare ? "Cloudflare üzerinden geldi" : undefined}>
+                                                {c.ip}
+                                                {c.cloudflare && <span className="text-xs ml-2 hidden sm:inline" style={{ color: C.faint }}>Cloudflare</span>}
+                                              </span>
+                                            )}
+                                          </td>
+                                          <td className="py-1.5 pr-3 align-middle"><IPKodlari codes={c.codes} other={c.other} /></td>
+                                          <td className="py-1.5 text-right tnum nw align-middle">{fmtNum(c.n)}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
                               </div>
                             )}
                           </td>
