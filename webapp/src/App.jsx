@@ -479,6 +479,32 @@ function IPAg({ ip, ag, soluk }) {
   );
 }
 
+// Yöntem ve yol her zaman alt alta: üstte küçük yöntem etiketi, altında yol, varsa en
+// altta ek bilgi (backend). Yan yana yazıldığında kısa yollar tek satıra sığıyor, uzun
+// yollar kırılıp yöntem yukarıda yalnız kalıyordu; satırlar birbirine benzemiyordu.
+// Uzun yollar "/" işaretlerinden kırılsın, kelime ortasından değil ("…asmx/G | etUniform…"
+// yerine "…asmx/ | GetUniform…"). Her "/" sonrasına kırılma fırsatı eklenir; tek bir parça
+// bile sığmazsa tarayıcı yine kelime içinden kırar.
+function yolKir(path) {
+  const parcalar = String(path || "").split("/");
+  return parcalar.map((x, i) => (
+    <Fragment key={i}>{x}{i < parcalar.length - 1 ? <>/<wbr /></> : null}</Fragment>
+  ));
+}
+
+function YontemYol({ method, path, host, alt }) {
+  return (
+    <span className="block brk">
+      <span className="block text-xs tnum" style={{ color: C.faint, letterSpacing: "0.03em" }}>{method}</span>
+      <span className="block">
+        {host ? <span style={{ color: C.muted }}>{host}</span> : null}
+        {yolKir(path)}
+      </span>
+      {alt ? <span className="block text-xs" style={{ color: C.faint }}>{alt}</span> : null}
+    </span>
+  );
+}
+
 function CodeChip({ code, n }) {
   return (
     <span className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs tnum" style={{ background: C.panel2, border: `1px solid ${C.line}` }} title={CODE_TEXT[code] || ""}>
@@ -1776,10 +1802,7 @@ function CodePathsPanel({ logs, openRows, toggleRow, frozen }) {
                 head={
                   <>
                     <span className="flex items-baseline justify-between gap-3">
-                      <span className="brk">
-                        <span style={{ color: C.faint }}>{e.method} </span>{e.path}
-                        <span className="text-xs ml-2" style={{ color: C.faint }}>{etiket ? `${e.backend} · ${etiket}` : e.backend}</span>
-                      </span>
+                      <YontemYol method={e.method} path={e.path} alt={etiket ? `${e.backend} · ${etiket}` : e.backend} />
                       <span className="tnum nw" style={{ color: aktif.col }}>
                         {fmtNum(n)} {aktif.kisa}
                         <span className="text-xs ml-1" style={{ color: C.faint }}>/ {fmtNum(e.n)} ({fmtPct(oran)})</span>
@@ -1962,7 +1985,7 @@ function SearchResult({ res }) {
                 <td className="py-2 pr-3 align-top tnum brk">{h.ip}</td>
                 <td className="py-2 pr-3 align-top tnum nw text-right" style={{ color: codeColor(h.status) }}>{h.status}</td>
                 <td className="py-2 pr-3 align-top brk">
-                  <span style={{ color: C.faint }}>{h.method} </span>{h.host ? <span style={{ color: C.muted }}>{h.host}</span> : null}{h.path}
+                  <YontemYol method={h.method} host={h.host} path={h.path} />
                 </td>
                 <td className="py-2 pr-3 align-top brk text-xs" style={{ color: C.faint }}>{h.backend}/{h.server}</td>
                 <td className="py-2 align-top tnum nw text-right text-xs">{h.ms >= 0 ? fmtMs(h.ms) : "—"}</td>
@@ -2067,11 +2090,10 @@ function LogSection({ logs, minutes }) {
                       <Fragment key={key}>
                       <tr className="hl-row" style={{ borderTop: `1px solid ${C.line}`, cursor: "pointer" }} onClick={() => toggleRow(key)}>
                         <td className="py-2 pr-3 align-top brk">
-                          <span className="inline-flex items-start gap-1">
-                            <span style={{ color: C.muted, marginTop: 2 }}>{acik ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
-                            <span><span style={{ color: C.faint }}>{p.method} </span>{p.path}</span>
+                          <span className="flex items-start gap-1">
+                            <span style={{ color: C.muted, marginTop: 1 }}>{acik ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
+                            <YontemYol method={p.method} path={p.path} alt={p.backend} />
                           </span>
-                          <div className="text-xs" style={{ color: C.faint, paddingLeft: 18 }}>{p.backend}</div>
                         </td>
                         <td className="py-2 pr-2 text-right tnum nw align-top">{fmtNum(p.n)}<div className="text-xs" style={{ color: C.faint }}>{perMin(p.n)}</div></td>
                         <td className="py-2 pr-2 text-right text-xs tnum nw align-top" style={{ color: p.s2 ? C.ok : C.faint }}>{p.s2 ? fmtNum(p.s2) : "—"}</td>
@@ -2149,7 +2171,7 @@ function LogSection({ logs, minutes }) {
                   <ExpandRow key={key} first={i === 0} open={openRows.has(key)} onToggle={() => toggleRow(key)}
                     head={
                       <span className="flex items-baseline justify-between gap-3">
-                        <span className="brk"><span style={{ color: C.faint }}>{b.method} </span>{b.path}</span>
+                        <YontemYol method={b.method} path={b.path} />
                         <span className="flex items-baseline gap-3 whitespace-nowrap">
                           <span className="inline-flex items-center gap-2 text-xs" style={{ color: C.muted }}>
                             <span style={{ width: 8, height: 8, borderRadius: 2, background: KIND[b.kind]?.[1] }} />{KIND[b.kind]?.[0] || b.kind}

@@ -4,6 +4,20 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 1.0.8
+
+- **Yöntem ve yol her yerde alt alta.** Yan yana yazıldığında kısa yollar tek satıra sığıyor ("GET /WebResource.axd"), uzun yollar kırılıp yöntem yukarıda yalnız kalıyordu; satırlar birbirine benzemiyordu. Artık hepsi aynı düzende: üstte küçük yöntem etiketi (GET, POST), altında yol, varsa en altta backend.
+- Aynı düzen dört yerde birden uygulandı: en çok istenen adresler, hangi adres ne döndürüyor, engellenen ve karşılıksız kalan istekler, arama sonuçları.
+- Uzun yollar artık "/" işaretlerinden kırılıyor ("…asmx/" ve alt satırda "GetUniformBodySize"); eskiden kelime ortasından bölünebiliyordu. Telefonda dar tablolarda yer yetmediğinde tarayıcı yine kelime içinden kırar.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 1.0.7
 
 - **Ağ bilgisi ("Cloudflare") her yerde alt alta hizalı.** Etiket IP'nin hemen arkasına yazıldığı için IP'nin uzunluğuna göre girintili çıkıntılı duruyordu. Adres ayrıntısındaki tabloda artık ayrı bir "Ağ" sütunu var; listelerde (en çok istek atan IP'ler, arama sonuçları, backend ve hata ayrıntıları) IP sabit genişlikte bir alana yazılıyor ve ağ adı her satırda aynı hizadan başlıyor.
