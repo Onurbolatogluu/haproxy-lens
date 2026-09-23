@@ -424,6 +424,7 @@ function SectionTitle({ title, sub }) {
 const CODE_PARTS = [["Başarılı", 1, C.ok], ["Yönlendirme", 2, C.info], ["İstemci hatası", 3, C.warn], ["Sunucu hatası", 4, C.bad]];
 // HTTP kodunun kısa açıklaması (log'daki hata yollarında gösterilir)
 const CODE_TEXT = {
+  200: "başarılı", 201: "oluşturuldu", 204: "içerik yok", 206: "kısmi içerik",
   301: "kalıcı yönlendirme", 302: "geçici yönlendirme", 303: "başka adrese", 304: "değişmemiş (önbellek)",
   307: "geçici yönlendirme", 308: "kalıcı yönlendirme",
   400: "hatalı istek", 401: "yetki gerekli", 403: "erişim yok", 404: "bulunamadı", 405: "yöntem izinli değil",
@@ -434,6 +435,39 @@ const CODE_TEXT = {
   0: "diğer",
 };
 const codeColor = (code) => (code >= 500 || code === 0 ? C.bad : code >= 400 ? C.warn : code >= 300 ? C.info : C.ok);
+// Bir IP'nin aldığı yanıt kodları. "200 55" gibi yan yana iki sayı hangisinin kod,
+// hangisinin adet olduğunu belirsiz bırakıyordu; panelin diğer yerlerindeki kod
+// etiketiyle aynı biçim kullanılır (● 403 erişim yok ×3). Hepsi aynı kodu aldıysa adet
+// tekrarlanmaz ("tümü ● 200"), çünkü toplam zaten satırın sağında yazıyor.
+function IPKodlari({ codes, other }) {
+  const k = codes || [];
+  if (k.length === 0 && !other) return null;
+  if (k.length === 1 && !other) {
+    return (
+      <span className="inline-flex items-center gap-1.5 mt-1 text-xs" style={{ color: C.faint }}>
+        tümü <KodEtiketi code={k[0].code} />
+      </span>
+    );
+  }
+  return (
+    <span className="flex flex-wrap gap-1.5 mt-1">
+      {k.map((x) => <CodeChip key={x.code} code={x.code} n={x.n} />)}
+      {other > 0 && <CodeChip code={0} n={other} />}
+    </span>
+  );
+}
+
+// Adetsiz kod etiketi (renkli işaret, kod ve anlamı)
+function KodEtiketi({ code }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs tnum" style={{ background: C.panel2, border: `1px solid ${C.line}` }} title={CODE_TEXT[code] || ""}>
+      <span style={{ width: 7, height: 7, borderRadius: 2, background: codeColor(code) }} />
+      <b style={{ color: C.text }}>{code}</b>
+      {CODE_TEXT[code] ? <span style={{ color: C.faint }}>{CODE_TEXT[code]}</span> : null}
+    </span>
+  );
+}
+
 function CodeChip({ code, n }) {
   return (
     <span className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs tnum" style={{ background: C.panel2, border: `1px solid ${C.line}` }} title={CODE_TEXT[code] || ""}>
@@ -2047,7 +2081,7 @@ function LogSection({ logs, minutes }) {
                             ) : (
                               <div className="rounded-md p-3" style={{ background: C.bg, border: `1px solid ${C.line}` }}>
                                 <div className="text-xs mb-2" style={{ color: C.muted }}>
-                                  Bu adrese en çok istek yapan IP'ler ve her birinin aldığı yanıt kodları
+                                  Bu adrese en çok istek yapan IP'ler. Sağdaki sayı IP'nin toplam isteği; altında hangi yanıt kodunu kaç kez aldığı.
                                 </div>
                                 <ul className="grid gap-x-6 md:grid-cols-2 text-sm">
                                   {p.ips.map((c) => (
@@ -2059,14 +2093,7 @@ function LogSection({ logs, minutes }) {
                                         </span>
                                         <span className="tnum nw">{fmtNum(c.n)}</span>
                                       </span>
-                                      <span className="flex flex-wrap gap-x-3 text-xs" style={{ color: C.faint }}>
-                                        {(c.codes || []).map((k) => (
-                                          <span key={k.code} className="nw" style={{ color: codeColor(k.code) }}>
-                                            {k.code} {fmtNum(k.n)}
-                                          </span>
-                                        ))}
-                                        {c.other > 0 && <span className="nw">diğer {fmtNum(c.other)}</span>}
-                                      </span>
+                                      <IPKodlari codes={c.codes} other={c.other} />
                                     </li>
                                   ))}
                                 </ul>

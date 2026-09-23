@@ -4,6 +4,20 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 1.0.5
+
+- **Adres ayrıntısındaki yanıt kodları okunaklı.** IP'lerin altında "200 55" gibi yan yana iki sayı yazıyordu; hangisinin kod, hangisinin adet olduğu ilk bakışta belli değildi. Artık panelin diğer yerlerindeki kod etiketiyle aynı biçimde: "● 404 bulunamadı ×60". Bir IP'nin isteklerinin hepsi aynı kodu aldıysa adet tekrarlanmıyor: "tümü ● 200 başarılı" (toplam zaten satırın sağında).
+- Başlıktaki açıklama sağdaki sayının ve alt satırın ne olduğunu söylüyor.
+- 2xx kodlarının da anlamı yazılıyor (200 başarılı, 204 içerik yok gibi); eskiden yalnızca 3xx ve üstü için vardı.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 1.0.4
 
 - **Açılış sırası düzeltildi.** Log okuyucu ve ölçümler, geçmiş diskten yüklenmeden önce başlıyordu. "Aynı satırı iki kez sayma, arada kaybetme" koruması yüklemenin önce bittiğini varsayar; bu sırayla koruma geç devreye giriyor ve yükleme sürdükçe okuyucunun işlediği dakikaların kayıtlı verisi atlanıyordu. Artık önce geçmiş yükleniyor, okuyucular ondan sonra başlıyor.
