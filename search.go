@@ -29,7 +29,11 @@ import (
 )
 
 const (
-	aramaSureSiniri  = 20 * time.Second
+	// Az sonuç veren aramalar (belirli bir kod, IP, adres) hızlı elemeyle birkaç saniyede
+	// biter. Çok sonuç verenler (yalnızca "GET" ya da "2xx" gibi) satırların neredeyse
+	// hepsini ayrıntılı okumak zorunda; %10 işlemci tavanıyla günlük bir log (~1 milyon
+	// satır) yaklaşık 50 sn sürer. Sınır, bunlar da tamamlanabilsin diye 1 dakika.
+	aramaSureSiniri  = 60 * time.Second
 	aramaBaytSiniri  = 4 << 30 // en fazla 4 GB tara
 	aramaOrnekSiniri = 200     // gösterilecek en fazla satır
 	aramaIPSiniri    = 20
@@ -88,18 +92,84 @@ func (q SearchQuery) bos() bool {
 // satırları burada elemek aramayı kat kat hızlandırıyor. Eleme yalnızca "bu satır
 // kesinlikle eşleşmez" diyebildiğinde atlar; asıl süzgeç yine ayrıştırılmış kayıt
 // üzerinde çalıştığı için sonuç değişmez.
-func (q SearchQuery) onEleme() []string {
-	var gerekli []string
-	for _, v := range []string{q.Path, q.IP, q.Backend} {
-		if v != "" {
-			gerekli = append(gerekli, strings.ToLower(v))
+// Satırı ayrıştırmadan önceki hızlı eleme. Her kontrol yalnızca "bu satır kesinlikle
+// eşleşmez" diyebildiğinde satırı atar; asıl süzgeç (uyuyor) yine ayrıştırılmış kayıt
+// üzerinde çalışır. Kural: hiçbir kontrol, eşleşmesi gereken bir satırı atmamalı. Bu,
+// her alan kombinasyonuyla rastgele üretilen log'larda testle korunuyor.
+func (q SearchQuery) onEleme() []func(string) bool {
+	var k []func(string) bool
+	// Adres: panel yolları sayıları "{id}", uzunları "…" ile gösterir; bunlar ham satırda
+	// geçmez. Aranan metin bu işaretlerden bölünür, parçaların her biri satırda aranır.
+	if q.Path != "" && !strings.HasPrefix(q.Path, "(") {
+		yol := strings.ReplaceAll(strings.ToLower(q.Path), "…", "{id}")
+		for _, x := range strings.Split(yol, "{id}") {
+			if x != "" {
+				x := x
+				k = append(k, func(s string) bool { return icerirFold(s, x) })
+			}
 		}
 	}
-	// Yöntem log satırında istek satırının başında tırnakla durur: "POST /yol HTTP/1.1"
-	if q.Method != "" {
-		gerekli = append(gerekli, `"`+strings.ToLower(q.Method)+" ")
+	for _, v := range []string{q.IP, q.Backend} {
+		if v != "" {
+			x := strings.ToLower(v)
+			k = append(k, func(s string) bool { return icerirFold(s, x) })
+		}
 	}
-	return gerekli
+	// Yöntem: ayrı bir kelime olarak geçmeli ("GET", önünde ve arkasında harf olmadan).
+	// Log biçimi ne olursa olsun yöntem böyle yazılır: "GET /yol" ya da method=GET.
+	if q.Method != "" {
+		x := strings.ToLower(q.Method)
+		k = append(k, func(s string) bool { return kelimeVar(s, x) })
+	}
+	// Durum kodu: ayrı bir sayı olarak geçmeli. Tam kod (403) o sayının kendisi; sınıf
+	// (5xx) için 5 ile başlayan üç haneli bir sayı.
+	if st := q.Status; len(st) == 3 {
+		if strings.HasSuffix(st, "xx") {
+			c := st[0]
+			k = append(k, func(s string) bool { return kodSinifiVar(s, c) })
+		} else {
+			k = append(k, func(s string) bool { return sayiVar(s, st) })
+		}
+	}
+	return k
+}
+
+func harf(c byte) bool  { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
+func rakam(c byte) bool { return c >= '0' && c <= '9' }
+
+// s içinde w, önünde ve arkasında harf olmayan ayrı bir kelime olarak geçiyor mu (harf duyarsız)
+func kelimeVar(s, w string) bool {
+	for i := 0; i+len(w) <= len(s); i++ {
+		if (i == 0 || !harf(s[i-1])) && (i+len(w) == len(s) || !harf(s[i+len(w)])) && strings.EqualFold(s[i:i+len(w)], w) {
+			return true
+		}
+	}
+	return false
+}
+
+// s içinde n, önünde ve arkasında rakam olmayan ayrı bir sayı olarak geçiyor mu
+func sayiVar(s, n string) bool {
+	for i := strings.Index(s, n); i >= 0; {
+		if (i == 0 || !rakam(s[i-1])) && (i+len(n) == len(s) || !rakam(s[i+len(n)])) {
+			return true
+		}
+		j := strings.Index(s[i+1:], n)
+		if j < 0 {
+			return false
+		}
+		i += j + 1
+	}
+	return false
+}
+
+// s içinde c ile başlayan, ayrı duran üç haneli bir sayı var mı (5xx için 500-599)
+func kodSinifiVar(s string, c byte) bool {
+	for i := 0; i+3 <= len(s); i++ {
+		if s[i] == c && rakam(s[i+1]) && rakam(s[i+2]) && (i == 0 || !rakam(s[i-1])) && (i+3 == len(s) || !rakam(s[i+3])) {
+			return true
+		}
+	}
+	return false
 }
 
 // Büyük/küçük harf ayrımı olmadan, bellek ayırmadan metin arama
@@ -227,7 +297,7 @@ func satirOkuyucu(yol string) (*bufio.Scanner, func(), error) {
 }
 
 type aramaToplayici struct {
-	gerekli []string // satırda mutlaka geçmesi gereken metinler (ucuz ön eleme)
+	gerekli []func(string) bool // hızlı eleme kontrolleri (ayrıştırmadan önce)
 	q       SearchQuery
 	res     SearchResult
 	kodlar  map[int]int64
@@ -238,7 +308,7 @@ type aramaToplayici struct {
 
 func (t *aramaToplayici) elemedenGecer(satir string) bool {
 	for _, g := range t.gerekli {
-		if !icerirFold(satir, g) {
+		if !g(satir) {
 			return false
 		}
 	}
@@ -285,7 +355,7 @@ func (t *aramaToplayici) bitir() {
 	t.budaHits()
 }
 
-// Aynı anda ikinci bir arama gelirse beklemez; kuyruğa giren her arama 20 saniyeye
+// Aynı anda ikinci bir arama gelirse beklemez; kuyruğa giren her arama 1 dakikaya
 // kadar bağlantı tutup paneli yavaşlatıyordu.
 var ErrAramaSuruyor = fmt.Errorf("başka bir arama sürüyor; birkaç saniye sonra tekrar deneyin")
 

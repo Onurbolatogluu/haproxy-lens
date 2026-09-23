@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"compress/gzip"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -425,5 +426,86 @@ func TestAramaYontem(t *testing.T) {
 	}
 	if _, err := searchQueryFrom(al(map[string]string{"method": "GETX"})); err == nil {
 		t.Fatal("bilinmeyen yöntem reddedilmeliydi")
+	}
+}
+
+// Her alan kombinasyonu doğru çalışmalı: tek alan, iki alan, hepsi; tam adres ya da içinde
+// geçen; tam kod ya da sınıf; zaman aralığıyla ya da aralıksız. Arama sonucu, her satırı tek
+// tek ayrıştırıp süzgeçten geçiren yavaş ama kesin bir sayımla karşılaştırılır. Hızlı eleme
+// tek bir eşleşmeyi bile yanlışlıkla atarsa test düşer.
+func TestAramaHerKombinasyonDogru(t *testing.T) {
+	r := rand.New(rand.NewSource(42))
+	ipler := []string{"203.0.113.5", "203.0.113.50", "198.51.100.7", "192.0.2.77", "172.71.95.55"}
+	yontemler := []string{"GET", "POST", "HEAD", "DELETE"}
+	uzun := "/cok/uzun/" + strings.Repeat("parca/", 25) + "son"
+	yollar := []string{"/", "/api/kayit", "/getmedia/123/dosya", "/getmedia/9876/dosya", "/blog/post",
+		"/a/b?x=1&y=GET", "/GETveri", "/CMSMessages/Error.aspx", uzun}
+	kodlar := []int{200, 200, 200, 301, 304, 403, 404, 500, 503}
+
+	dir := t.TempDir()
+	simdi := time.Now()
+	var satirlar []string
+	for i := 0; i < 3000; i++ {
+		ts := simdi.Add(-time.Duration(3000-i) * 3 * time.Second)
+		s := logSatiri(ts, ipler[r.Intn(len(ipler))], yollar[r.Intn(len(yollar))], kodlar[r.Intn(len(kodlar))])
+		s = strings.Replace(s, `"GET `, `"`+yontemler[r.Intn(len(yontemler))]+" ", 1)
+		// Durum koduna benzeyen başka sayılar da olsun (bayt sayısı): yanlış eşleşme değil, yalnızca eleme zorlaşır
+		s = strings.Replace(s, " 216 ", fmt.Sprintf(" %d ", []int{216, 403, 500, 5031}[r.Intn(4)]), 1)
+		satirlar = append(satirlar, s)
+	}
+	yaz(t, filepath.Join(dir, "haproxy.log"), satirlar, false)
+	a := NewLogAnalyzer("file:"+filepath.Join(dir, "haproxy.log"), "")
+	parser := a.parser.Load()
+
+	// Panelde görünen biçimler: birleştirilmiş ({id}) ve kısaltılmış (…) yollar dahil
+	var panelYollari []string
+	for _, s := range satirlar[:200] {
+		if rec, ok := parser.Parse(s); ok {
+			panelYollari = append(panelYollari, rec.Path, rec.RawPath)
+		}
+	}
+	adresAdaylari := append(panelYollari, "/", "api", "POST", "getmedia", "/getmedia/{id}/dosya", ".aspx", "yok-boyle")
+	durumAdaylari := []string{"200", "403", "404", "500", "503", "2xx", "3xx", "4xx", "5xx"}
+
+	sorgu := 600
+	if testing.Short() {
+		sorgu = 80 // yarış denetimi altında (CI) yavaş çalışır; kısa modda daha az sorgu
+	}
+	for n := 0; n < sorgu; n++ {
+		var q SearchQuery
+		for q.bos() { // en az bir alan dolu olsun
+			if r.Intn(2) == 0 {
+				q.Path = adresAdaylari[r.Intn(len(adresAdaylari))]
+				q.Exact = r.Intn(3) == 0
+			}
+			if r.Intn(3) == 0 {
+				ip := ipler[r.Intn(len(ipler))]
+				if r.Intn(2) == 0 {
+					ip = ip[:strings.LastIndex(ip, ".")+1] // başlangıç
+				}
+				q.IP = ip
+			}
+			if r.Intn(3) == 0 {
+				q.Method = yontemler[r.Intn(len(yontemler))]
+			}
+			if r.Intn(2) == 0 {
+				q.Status = durumAdaylari[r.Intn(len(durumAdaylari))]
+			}
+		}
+		if r.Intn(4) == 0 {
+			q.Since = simdi.Add(-time.Duration(1+r.Intn(150)) * time.Minute)
+		}
+		// Kesin sayım: her satır ayrıştırılır ve süzgeçten geçirilir
+		var beklenen int64
+		for _, s := range satirlar {
+			if rec, ok := parser.Parse(s); ok && q.uyuyor(rec) {
+				beklenen++
+			}
+		}
+		res := ara(t, a, q)
+		if res.Matches != beklenen {
+			t.Fatalf("arama %d eşleşme buldu, doğrusu %d\n  sorgu: yol=%q tam=%v ip=%q yöntem=%q kod=%q aralık=%v",
+				res.Matches, beklenen, q.Path, q.Exact, q.IP, q.Method, q.Status, !q.Since.IsZero())
+		}
 	}
 }

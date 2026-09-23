@@ -1953,7 +1953,7 @@ function SearchSection({ inputRef }) {
         {durum === "hata" && <p className="text-sm mt-3" style={{ color: C.warn }}>{hata}</p>}
         {durum === "araniyor" && (
           <p className="text-sm mt-3" style={{ color: C.muted }}>
-            Log dosyaları taranıyor. Büyük log'larda bu biraz sürebilir; arama en fazla 20 saniye çalışır.
+            Log dosyaları taranıyor. Büyük log'larda bu biraz sürebilir; arama en fazla 1 dakika çalışır.
           </p>
         )}
         {durum === "bitti" && res && <SearchResult res={res} />}

@@ -4,6 +4,23 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 1.0.11
+
+- **Log'da arama her alan kombinasyonunda doğru ve daha hızlı.** Alanlar (adres, IP, yöntem, durum kodu, zaman aralığı) tek başına ya da birlikte kullanılabiliyor; birlikte kullanılınca "ve" ile birleşiyor.
+- **Durum kodu hızlı elemeye eklendi.** Eskiden eleme koda hiç bakmıyordu; "/" ve "GET" gibi her satırda geçen değerlerle yapılan aramalarda satırların hepsi tek tek okunuyor, arama süre sınırına takılıyordu. Ölçülen etki: belirli bir kodla arama 12 kat, sınıfla (5xx) 3,4 kat, "GET / + 403" gibi bir arama 4 kat hızlandı.
+- **Düzeltme: panelden aratılan bazı adresler hiç sonuç vermiyordu.** Panel sayıları "{id}", uzun yolları "…" ile gösteriyor; bu biçimler ham log'da geçmediği için hızlı eleme satırları yanlışlıkla atıyordu. Örneğin kısaltılmış uzun bir yol aratılınca 77 yerine 0 sonuç çıkıyordu. "IP'leri ve zamanları log'dan getir" düğmesi de bu yüzden bazı satırlarda boş dönüyordu.
+- Yöntem artık ayrı bir kelime olarak aranıyor; özel log biçimlerinde de (method=GET gibi) doğru çalışıyor.
+- **Süre sınırı 20 saniyeden 1 dakikaya çıktı.** Neredeyse her satırın eşleştiği aramalarda (yalnızca "GET" ya da "2xx") her satırı ayrıntılı okumak zorunlu; %10 işlemci tavanıyla günlük bir log yaklaşık 50 saniye sürüyor. Artık bunlar da tamamlanabiliyor.
+- Doğruluk rastgele bir testle korunuyor: 3.000 satırlık log üzerinde her türlü alan kombinasyonuyla 600 arama yapılıyor (CI'daki yarış denetiminde süre için 80) ve her birinin sonucu, satırları tek tek kontrol eden kesin bir sayımla karşılaştırılıyor. Test eski kodu çalıştırınca "{id}"/"…" hatasını hemen yakalıyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 1.0.10
 
 - **Log'da aramaya HTTP yöntemi eklendi.** Formda artık bir "Yöntem" seçimi var (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS). Diğer alanlarla birlikte ya da tek başına kullanılabiliyor; örneğin yalnızca DELETE seçip son 24 saatteki bütün silme isteklerini görmek mümkün.
