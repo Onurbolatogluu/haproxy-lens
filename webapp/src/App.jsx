@@ -398,7 +398,9 @@ function Meter({ value, max }) {
 
 function Panel({ title, note, badge, children }) {
   return (
-    <section className="rounded-lg p-4 md:p-5" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
+    // min-w-0: panel ızgara içinde durur; olmasa içeriği (ör. uzun bir IPv6 adresi) paneli
+    // ekrandan geniş olmaya zorlar ve sayfa yana taşar. Sığmayan içerik kendi kutusunda kayar.
+    <section className="rounded-lg p-4 md:p-5 min-w-0" style={{ background: C.panel, border: `1px solid ${C.line}` }}>
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
           <h3 className="text-base font-semibold">{title}</h3>
@@ -441,26 +443,16 @@ const codeColor = (code) => (code >= 500 || code === 0 ? C.bad : code >= 400 ? C
 // etiketiyle aynı biçim kullanılır (● 403 erişim yok ×3). Hepsi aynı kodu aldıysa adet
 // tekrarlanmaz ("tümü ● 200"), çünkü toplam zaten satırın sağında yazıyor.
 function IPKodlari({ codes, other }) {
-  const k = codes || [];
+  // Panelin her yerindeki kural: en sık görülen kod önce, eşitse küçük kod önce
+  const k = [...(codes || [])].sort((a, b) => b.n - a.n || a.code - b.code);
   if (k.length === 0 && !other) return null;
-  // Tek kodlu satırlar sade yazı: yirmi satırın hepsinde kutulu etiket göz yoruyor ve
-  // asıl önemli olan istisnaları (farklı kod alan IP'leri) boğuyordu. Kutu yalnızca
-  // karışık satırlarda kalır, böylece onlar göze çarpar.
-  if (k.length === 1 && !other) {
-    const kod = k[0].code;
-    return (
-      <span className="inline-flex items-center gap-1.5 text-xs nw" style={{ color: C.faint }} title={CODE_TEXT[kod] || ""}>
-        tümü
-        <span style={{ width: 7, height: 7, borderRadius: 2, background: codeColor(kod) }} />
-        <b className="tnum" style={{ color: C.text }}>{kod}</b>
-        {CODE_TEXT[kod] ? <span className="hidden sm:inline">{CODE_TEXT[kod]}</span> : null}
-      </span>
-    );
-  }
+  // Her satır aynı biçimde: kısa kutular ("● 304 ×22"), anlamı üzerine gelince görünür.
+  // Bu dar sütunda anlam yazısı kutunun içinde iki satıra bölünüyordu; tek kodlu satırların
+  // kutusuz yazılması da tutarsız görünüyordu.
   return (
     <span className="flex flex-wrap gap-1.5">
-      {k.map((x) => <CodeChip key={x.code} code={x.code} n={x.n} />)}
-      {other > 0 && <CodeChip code={0} n={other} />}
+      {k.map((x) => <CodeChip key={x.code} code={x.code} n={x.n} kisa />)}
+      {other > 0 && <CodeChip code={0} n={other} kisa />}
     </span>
   );
 }
@@ -470,10 +462,19 @@ function IPKodlari({ codes, other }) {
 // hizadan başlar. Ağ adı tek yerden gelir: ileride başka sağlayıcılar (ör. bir internet
 // servis sağlayıcısının adı) eklenirse yalnızca agAdi değişir.
 const agAdi = (c) => (c?.cloudflare ? "Cloudflare" : "");
+// IPv6 adresleri uzun (39 karaktere kadar); tek satırda kalmaya zorlanınca bulundukları
+// sütunu genişletip yanındakileri daraltıyordu. ":" işaretlerinden alt satıra geçebilirler.
+// IPv4 adresleri kısa, hep tek satırda kalır.
+function ipKir(ip) {
+  const s = String(ip || "");
+  if (!s.includes(":")) return s;
+  const p = s.split(":");
+  return p.map((x, i) => <Fragment key={i}>{x}{i < p.length - 1 ? <>:<wbr /></> : null}</Fragment>);
+}
 function IPAg({ ip, ag, soluk }) {
   return (
     <span className="inline-flex items-baseline tnum" title={ag ? `${ag} üzerinden geldi` : undefined}>
-      <span className="brk" style={{ display: "inline-block", minWidth: "15ch", color: soluk ? C.faint : C.text }}>{ip}</span>
+      <span style={{ display: "inline-block", minWidth: "15ch", color: soluk ? C.faint : C.text }}>{ipKir(ip)}</span>
       {/* Dar ekranda yer açmak için gizlenir; üzerine gelince başlıkta görünür */}
       {ag ? <span className="text-xs ml-3 nw hidden sm:inline" style={{ color: C.faint }}>{ag}</span> : null}
     </span>
@@ -506,12 +507,14 @@ function YontemYol({ method, path, host, alt }) {
   );
 }
 
-function CodeChip({ code, n }) {
+// Kod etiketi. Hiçbir zaman kendi içinde bölünmez (nw); sığmazsa bütün olarak alt satıra
+// geçer. "kisa": dar yerlerde anlam yazısı gösterilmez, üzerine gelince görünür.
+function CodeChip({ code, n, kisa }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs tnum" style={{ background: C.panel2, border: `1px solid ${C.line}` }} title={CODE_TEXT[code] || ""}>
+    <span className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs tnum nw" style={{ background: C.panel2, border: `1px solid ${C.line}` }} title={CODE_TEXT[code] || ""}>
       <span style={{ width: 7, height: 7, borderRadius: 2, background: codeColor(code) }} />
       <b style={{ color: C.text }}>{code === 0 ? "diğer" : code}</b>
-      {CODE_TEXT[code] && code !== 0 ? <span className="hidden sm:inline" style={{ color: C.faint }}>{CODE_TEXT[code]}</span> : null}
+      {!kisa && CODE_TEXT[code] && code !== 0 ? <span className="hidden sm:inline" style={{ color: C.faint }}>{CODE_TEXT[code]}</span> : null}
       <span style={{ color: C.muted }}>×{fmtNum(n)}</span>
     </span>
   );
@@ -2183,7 +2186,8 @@ function LogSection({ logs, minutes }) {
                                       <tr className="text-xs" style={{ color: C.muted }}>
                                         <th className="py-1.5 pr-3 font-normal text-left">IP</th>
                                         <th className="py-1.5 pr-3 font-normal text-left hidden sm:table-cell">Ağ</th>
-                                        <th className="py-1.5 pr-3 font-normal text-left">Aldığı yanıtlar</th>
+                                        {/* Kalan genişlik bu sütunun: etiketler alt alta değil yan yana dizilsin */}
+                                        <th className="py-1.5 pr-3 font-normal text-left" style={{ width: "100%" }}>Aldığı yanıtlar</th>
                                         <th className="py-1.5 font-normal text-right">İstek</th>
                                       </tr>
                                     </thead>
@@ -2194,7 +2198,7 @@ function LogSection({ logs, minutes }) {
                                             {c.ip === "(diğer)" ? (
                                               <span style={{ color: C.faint }}>listeye girmeyen diğer IP'ler</span>
                                             ) : (
-                                              <span className="tnum nw" title={agAdi(c) ? `${agAdi(c)} üzerinden geldi` : undefined}>{c.ip}</span>
+                                              <span className={`tnum ${c.ip.includes(":") ? "" : "nw"}`} title={agAdi(c) ? `${agAdi(c)} üzerinden geldi` : undefined}>{ipKir(c.ip)}</span>
                                             )}
                                           </td>
                                           <td className="py-1.5 pr-3 align-middle text-xs nw hidden sm:table-cell" style={{ color: C.faint }}>{agAdi(c)}</td>

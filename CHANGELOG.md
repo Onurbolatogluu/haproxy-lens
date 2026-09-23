@@ -4,6 +4,23 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 1.0.13
+
+- **Adres ayrıntısındaki yanıt etiketleri tutarlı.** Tek kodlu satırlar kutusuz, karışık satırlar kutulu yazılıyordu; ayrıca "304 değişmemiş (önbellek)" gibi uzun etiketler kutunun içinde iki satıra bölünüyordu. Artık her satırda aynı kısa kutular var ("● 304 ×22"), anlamı üzerine gelince görünüyor.
+- **Hiçbir kod etiketi kendi içinde bölünmüyor** (panelin tamamında). Sığmayan etiket bütün olarak alt satıra geçiyor.
+- **Etiket sırası her yerde aynı kurala bağlı:** en sık görülen kod önce, eşitse küçük kod önce. Eşit sayılarda sıra eskiden her yenilemede değişebiliyordu.
+- **IPv6 adresleri tabloyu bozmuyor.** Uzun bir IPv6 adresi tek satırda kalmaya zorlandığı için IP sütununu genişletip yanıt etiketlerini tek sütuna sıkıştırıyordu. Artık ":" işaretlerinden alt satıra geçebiliyor; etiketler yan yana diziliyor.
+- **Telefonda sayfa yana taşmıyor.** Bir satır açıldığında içindeki uzun içerik (IPv6 adresleri gibi) paneli ekrandan geniş olmaya zorluyordu; paneller artık ekran genişliğini aşmıyor, sığmayan içerik kendi kutusunda kayıyor.
+- Bu sürüm panelin tamamı, gerçek hayattan zor bir veriyle (20 farklı durum kodu, IPv6 adresleri, çok uzun yollar ve backend adları, engellenmiş ve yönlendirilmiş istekler) üç ekran genişliğinde otomatik olarak denetlenerek hazırlandı: bölünen etiket, panelden taşan öğe ya da sayfa taşması kalmadı.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 1.0.12
 
 - **Arama sonuç tablosunda "Süre" sütunu kaydırma çubuğuyla üst üste binmiyor.** Son sütun kutunun sağ kenarına yapışıktı; macOS kaydırma çubuğunu içeriğin üstüne çizdiği için "ms" yazısı çubuğun altında kalıyordu. Artık sağda boşluk var ve kaydırma çubuğu için yer ayrılıyor.

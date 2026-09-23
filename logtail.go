@@ -346,7 +346,7 @@ func (v *ipAgg) kodListesi() []ipCode {
 			out = append(out, c)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].N > out[j].N })
+	sort.Slice(out, func(i, j int) bool { return out[i].N > out[j].N || out[i].N == out[j].N && out[i].Code < out[j].Code })
 	return out
 }
 
@@ -1601,7 +1601,10 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 		for code, n := range v.Codes {
 			row.Codes = append(row.Codes, CodeCount{Code: code, N: n})
 		}
-		sort.Slice(row.Codes, func(i, j int) bool { return row.Codes[i].N > row.Codes[j].N })
+		sort.Slice(row.Codes, func(i, j int) bool { // en sık önce, eşitse küçük kod önce (sıra sabit kalsın)
+			a, b := row.Codes[i], row.Codes[j]
+			return a.N > b.N || a.N == b.N && a.Code < b.Code
+		})
 		if len(row.Codes) > 6 {
 			row.Codes = row.Codes[:6]
 		}

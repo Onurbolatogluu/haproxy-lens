@@ -347,7 +347,10 @@ func (t *aramaToplayici) bitir() {
 	for k, n := range t.kodlar {
 		t.res.Codes = append(t.res.Codes, CodeCount{Code: k, N: n})
 	}
-	sort.Slice(t.res.Codes, func(i, j int) bool { return t.res.Codes[i].N > t.res.Codes[j].N })
+	sort.Slice(t.res.Codes, func(i, j int) bool { // en sık önce, eşitse küçük kod önce (sıra sabit kalsın)
+		a, b := t.res.Codes[i], t.res.Codes[j]
+		return a.N > b.N || a.N == b.N && a.Code < b.Code
+	})
 	for _, x := range topN(t.ipler, aramaIPSiniri) {
 		t.res.IPs = append(t.res.IPs, ClientRow{IP: x.Name, N: x.N, Cloudflare: t.cf(x.Name)})
 	}
