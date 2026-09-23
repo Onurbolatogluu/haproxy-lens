@@ -395,3 +395,35 @@ func TestAramaTamAdres(t *testing.T) {
 		t.Fatalf("yolun bir kısmı tam aramada eşleşmemeli: %d", yarim.Matches)
 	}
 }
+
+// Yöntemle arama: yalnızca yöntem verilse de çalışmalı, ön eleme sonucu değiştirmemeli
+func TestAramaYontem(t *testing.T) {
+	dir := t.TempDir()
+	simdi := time.Now()
+	var satirlar []string
+	for i := 0; i < 30; i++ {
+		y := "GET"
+		if i%3 == 0 {
+			y = "POST"
+		}
+		satirlar = append(satirlar, strings.Replace(logSatiri(simdi.Add(-time.Duration(i)*time.Minute), "203.0.113.5", "/api/kayit", 200), `"GET `, `"`+y+" ", 1))
+	}
+	// Yolun içinde "post" geçen ama yöntemi GET olan satır: ön eleme yanıltmamalı
+	satirlar = append(satirlar, logSatiri(simdi, "203.0.113.6", "/blog/post", 200))
+	yaz(t, filepath.Join(dir, "haproxy.log"), satirlar, false)
+	a := NewLogAnalyzer("file:"+filepath.Join(dir, "haproxy.log"), "")
+
+	if res := ara(t, a, SearchQuery{Method: "POST"}); res.Matches != 10 {
+		t.Fatalf("yalnızca yöntem: %d, beklenen 10", res.Matches)
+	}
+	if res := ara(t, a, SearchQuery{Method: "GET", Path: "/api"}); res.Matches != 20 {
+		t.Fatalf("yöntem + adres: %d, beklenen 20", res.Matches)
+	}
+	al := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	if q, err := searchQueryFrom(al(map[string]string{"method": "post"})); err != nil || q.Method != "POST" {
+		t.Fatalf("küçük harfli yöntem kabul edilmeli: %v %v", q.Method, err)
+	}
+	if _, err := searchQueryFrom(al(map[string]string{"method": "GETX"})); err == nil {
+		t.Fatal("bilinmeyen yöntem reddedilmeliydi")
+	}
+}

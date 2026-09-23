@@ -4,6 +4,20 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 1.0.10
+
+- **Log'da aramaya HTTP yöntemi eklendi.** Formda artık bir "Yöntem" seçimi var (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS). Diğer alanlarla birlikte ya da tek başına kullanılabiliyor; örneğin yalnızca DELETE seçip son 24 saatteki bütün silme isteklerini görmek mümkün.
+- Yalnızca yöntemle yapılan aramalar da hızlı: yöntem, satırları ayrıştırmadan önceki hızlı elemeye eklendi. Yolun içinde yöntem adı geçen satırlar (ör. "/blog/post") yanlışlıkla eşleşmiyor; bu testle korunuyor.
+- Bilinmeyen bir yöntem gönderilirse arama açık bir mesajla reddediliyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 1.0.9
 
 - **"Ayrıntı tutulmadı" mesajı doğru sebebi söylüyor ve bir çözüm sunuyor.** Eskiden ayrıntısı olmayan her satırda "o dakikada çok fazla farklı adres vardı" yazıyordu; oysa çoğu zaman sebep kaydın eski olmasıydı (ayrıntılar panelde yalnızca son 1 saat tutulur) ya da ajanın yeniden başlamasıydı. Mesaj hem yanlış yönlendiriyor hem de çıkmaz sokak bırakıyordu.

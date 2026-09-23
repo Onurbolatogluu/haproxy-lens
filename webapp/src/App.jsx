@@ -1859,8 +1859,8 @@ function SearchSection({ inputRef }) {
   const ara = async (e, f = form) => {
     e?.preventDefault?.();
     const form = f;
-    if (!form.path && !form.ip && !form.status) {
-      setHata("Aramak için adres, IP ya da durum kodu yazın.");
+    if (!form.path && !form.ip && !form.status && !form.method) {
+      setHata("Aramak için adres, IP, yöntem ya da durum kodu girin.");
       setDurum("hata");
       return;
     }
@@ -1907,13 +1907,20 @@ function SearchSection({ inputRef }) {
         <form onSubmit={ara} className="flex flex-wrap items-end gap-3">
           <label className="text-sm">
             <div className="text-xs mb-1" style={{ color: C.muted }}>Adres (yolun içinde geçen)</div>
-            <input ref={inputRef} value={form.path} onChange={(e) => setForm({ ...form, path: e.target.value, method: "", exact: false })}
+            <input ref={inputRef} value={form.path} onChange={(e) => setForm({ ...form, path: e.target.value, exact: false })}
               placeholder="/api/kayit" style={{ ...alan, width: 260 }} />
           </label>
           <label className="text-sm">
             <div className="text-xs mb-1" style={{ color: C.muted }}>IP (tam ya da başlangıcı)</div>
             <input value={form.ip} onChange={(e) => setForm({ ...form, ip: e.target.value })}
               placeholder="203.0.113." style={{ ...alan, width: 150 }} />
+          </label>
+          <label className="text-sm">
+            <div className="text-xs mb-1" style={{ color: C.muted }}>Yöntem</div>
+            <select value={form.method} onChange={(e) => setForm({ ...form, method: e.target.value })} style={alan}>
+              <option value="">Hepsi</option>
+              {["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
           </label>
           <label className="text-sm">
             <div className="text-xs mb-1" style={{ color: C.muted }}>Durum kodu</div>
@@ -1938,7 +1945,7 @@ function SearchSection({ inputRef }) {
             Tam adres aranıyor:
             <b className="tnum" style={{ color: C.text }}>{form.method ? `${form.method} ` : ""}{form.path}</b>
             <button type="button" className="underline" style={{ color: C.info }}
-              onClick={() => setForm({ ...form, method: "", exact: false })}>
+              onClick={() => setForm({ ...form, exact: false })}>
               içinde geçenleri ara
             </button>
           </p>

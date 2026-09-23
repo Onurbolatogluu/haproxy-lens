@@ -154,7 +154,7 @@ cd /root && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./inst
 
 Panelin en altındaki "Log'da ara" bölümü (sayfanın başındaki **Log'da ara** düğmesi oraya götürür), paneldeki verilerden bağımsız çalışır: doğrudan log dosyalarını okur, döndürülmüş (`haproxy.log.1`) ve sıkıştırılmış (`.gz`) dosyalar dahil. Bu yüzden panelin saklama süresinden (varsayılan 24 saat) çok daha geriye gidebilir.
 
-Aranabilenler: adresin içinde geçen metin, IP (tam ya da başlangıcı), durum kodu (`500` ya da `5xx`) ve zaman aralığı. Paneldeki bir satırın ayrıntısı artık tutulmuyorsa (ayrıntılar panelde yalnızca son 1 saat tutulur), satırdaki "IP'leri ve zamanları log'dan getir" düğmesi o isteği yöntemi ve tam adresiyle burada aratır. Sonuçta toplam eşleşme, kod dağılımı, en çok istek yapan IP'ler, en çok eşleşen adresler ve en yeni eşleşen istekler zaman damgalarıyla listelenir.
+Aranabilenler: adresin içinde geçen metin, IP (tam ya da başlangıcı), HTTP yöntemi (GET, POST, DELETE…), durum kodu (`500` ya da `5xx`) ve zaman aralığı. Bunlar birlikte ya da tek başına kullanılabilir; örneğin yalnızca yöntem seçip "son 24 saatteki tüm DELETE istekleri" aranabilir. Paneldeki bir satırın ayrıntısı artık tutulmuyorsa (ayrıntılar panelde yalnızca son 1 saat tutulur), satırdaki "IP'leri ve zamanları log'dan getir" düğmesi o isteği yöntemi ve tam adresiyle burada aratır. Sonuçta toplam eşleşme, kod dağılımı, en çok istek yapan IP'ler, en çok eşleşen adresler ve en yeni eşleşen istekler zaman damgalarıyla listelenir.
 
 Nasıl korunur:
 

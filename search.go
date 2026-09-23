@@ -95,6 +95,10 @@ func (q SearchQuery) onEleme() []string {
 			gerekli = append(gerekli, strings.ToLower(v))
 		}
 	}
+	// Yöntem log satırında istek satırının başında tırnakla durur: "POST /yol HTTP/1.1"
+	if q.Method != "" {
+		gerekli = append(gerekli, `"`+strings.ToLower(q.Method)+" ")
+	}
 	return gerekli
 }
 
@@ -459,6 +463,14 @@ func searchQueryFrom(get func(string) string) (SearchQuery, error) {
 	}
 	if q.bos() {
 		return q, fmt.Errorf("aranacak bir şey yazın: adres, IP, durum kodu, yöntem ya da backend")
+	}
+	if q.Method != "" {
+		q.Method = strings.ToUpper(q.Method)
+		switch q.Method {
+		case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT", "TRACE":
+		default:
+			return q, fmt.Errorf("bilinmeyen HTTP yöntemi: %s", q.Method)
+		}
 	}
 	if len(q.Path) > 200 || len(q.IP) > 60 || len(q.Backend) > 80 {
 		return q, fmt.Errorf("arama metni çok uzun")
