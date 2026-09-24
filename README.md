@@ -1,374 +1,376 @@
 # haproxy-lens
 
-HAProxy'nin stats sayfasını okunur bir panele çeviren, **config'e dokunmayan** salt okunur ajan.
+**English** | [Türkçe](README.tr.md)
 
-Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur, tarayıcıda şunları gösterir:
+A read-only agent that turns the HAProxy stats page into a readable dashboard, **without touching your HAProxy configuration**.
 
-- Sade bir durum özeti: "api içindeki srv3, 12 dakikadır çalışmıyor. Sebep: bağlantı zaman aşımı."
-- Backend'ler ve sunucular: durum, sağlık kontrolünün anlamı, bağlantı doluluğu, yanıt süresi, hatalar.
-- Canlı grafikler: saniyedeki istek (yanıt türüne göre) ve trafik; zaman aralığı 5 dk, 15 dk, 1 saat, 6 saat ya da 24 saat seçilebilir.
-- 4xx ve 5xx hatalarının en çok hangi sunucudan döndüğü; hatalar sunuculara eşit dağılmışsa sorunun ortak bir yerde olabileceği uyarısı.
-- Log bölümünün başında tek bir özet: renkli bir çubukla isteklerin 2xx/3xx/4xx/5xx dağılımı, her birinin ne anlama geldiği ve düz cümlelerle isteklerin nereye gittiği (kaçı sunuculara ulaştı, kaçını HAProxy kendisi yanıtladı, kaçı hiçbir sunucuya ulaşamadı).
-- Log'dan "Hangi adres ne döndürüyor": 3xx, 4xx ve 5xx sekmeleri. Hangi path'in hangi kodu (301, 404, 502...) kaç kez döndürdüğü; HAProxy'nin kendi ürettiği http→https yönlendirmeleri dahil.
-- Hatalı ve engellenen isteklerde satıra tıklayınca açılan ayrıntı: tam adres (alan adı log'da varsa), gerçek yollar ve isteği gönderen IP'ler.
-- "En çok istek atan IP'ler": her IP'nin en çok istediği adresler; bir IP'nin normal kullanıcı mı, tarama botu mu olduğu görülebiliyor.
-- "En çok istenen adresler": satıra tıklayınca o adrese en çok istek yapan 20 IP; her IP'nin yanında aldığı yanıt kodları tam olarak (200, 404, 500...). Yanıt kodundan bağımsız çalışır, yani başarılı isteklerde de görünür. Cloudflare'e ait IP'ler etiketlenir, doğrudan gelenler etiketsiz görünür.
-- Bir backend'i açınca o backend'e gelen isteklerin adres ve IP dökümü: "buraya hiç trafik gitmemeli" dediğin bir backend'e kimin, nereye istek attığı.
-- Log'dan: en çok istenen adresler, engellenen (403) ve hiçbir backend'e eşleşmeyen (503) istekler, en çok istek atan IP'ler.
-- Her terimin sade Türkçe açıklaması ve her satır için HAProxy'nin verdiği tüm alanlar.
+It is installed on each HAProxy server, reads that server's own stats data and logs, and shows the following in the browser. The dashboard and the installer messages are in Turkish.
 
-## Temel kurallar
+- A plain-language status summary, e.g. "srv3 in api has been down for 12 minutes. Reason: connection timeout."
+- Backends and servers: state, what the health check result means, connection usage, response time, errors.
+- Live charts: requests per second (by response type) and traffic; the time range can be 5 min, 15 min, 1 hour, 6 hours or 24 hours.
+- Which servers return the most 4xx and 5xx errors; if errors are spread evenly across servers, a hint that the problem is probably in something they share.
+- A single summary at the top of the log section: a colored bar showing the 2xx/3xx/4xx/5xx split, what each class means, and plain sentences on where requests went (how many reached servers, how many HAProxy answered itself, how many reached no server at all).
+- "Which address returns what" from the logs: tabs for 3xx, 4xx and 5xx showing which path returned which code (301, 404, 502...) how many times, including HAProxy's own http→https redirects.
+- For failed and blocked requests, a detail view per row: the full address (if the host name is in the log), the real paths, and the client IPs.
+- "Top client IPs": the addresses each IP requested most, so you can tell a normal user from a scanning bot.
+- "Most requested addresses": click a row to see the 20 IPs that requested that address most, with the exact response codes each got (200, 404, 500...). This works regardless of the response code, so successful requests are covered too. Cloudflare IPs are labeled; direct clients are shown without a label.
+- Open a backend to see which addresses and IPs sent requests to it: who is calling a backend that "should get no traffic", and where.
+- From the logs: most requested addresses, blocked (403) requests and requests that matched no backend (503), top client IPs.
+- A plain explanation for every term, and every field HAProxy reports for each row.
 
-- **HAProxy config'ine ve servisine dokunmaz.** Reload ve restart yapmaz.
-- **Her sunucuya kendini uydurur.** Ajan, çalışan HAProxy'nin config'ini sadece okuyarak stats socket'ini, log kaynağını ve her frontend'in log biçimini kendisi bulur. Özel `log-format` tanımları da okunur.
-- **Geçmişi saklar.** Grafikler ve oranlar varsayılan olarak 24 saat geriye gider. Veriler `/var/lib/haproxy-lens` altına yazılır (24 saat için birkaç yüz KB), böylece ajan yeniden başladığında geçmiş kaybolmaz.
-- **Sunucunun kendi ölçümleri.** İşlemci, disk beklemesi, bellek, yük ortalaması, disk doluluğu ve disk okuma/yazma hızı; canlı grafiklerle. Veriler `/proc` altından okunur: ek yetki, ek araç ya da ek servis gerekmez.
-- **Log'da arama.** Panelden bağımsız olarak log dosyalarında (döndürülmüş ve sıkıştırılmış dahil) arama yapar; saklama süresinin ötesine bakabilir.
-- **Çalışırken izler, yeniden kurulum istemez.** Config değişip HAProxy reload edilince (yeni log biçimi, yeni Host yakalaması, yeni backend) ajan bunu en geç 30 saniyede fark eder ve kendini günceller. Log kaynağı susarsa yenisini arar; stats socket çalışmazsa config'teki başka bir socket'e geçer.
-- **Eksiği panelde söyler.** Config'te veriyi kısıtlayan bir şey varsa (log kapalı, `dontlog-normal`, alan adı yakalanmıyor, sağlık kontrolü yok, okunamayan log satırları...) panelin üstündeki "Yapılandırma notları" bölümünde ne olduğunu, neyi etkilediğini ve eklenebilecek config satırını yazar.
-- **Emin olamazsa kurmaz.** Çalışan bir stats socket bulamazsa hiçbir şey değiştirmeden durur ve sebebini yazar.
-- **Sadece okur.** HAProxy'ye yalnızca `show info` ve `show stat` komutlarını gönderir. Başka komut gönderen kod yoktur (bkz. `haproxy.go` içindeki `allowedCommands`).
-- **Hassas veri tutmaz.** Log'daki sorgu parametreleri (`?token=...` gibi) hafızada bile tutulmaz.
-- **Kaynak tavanı var.** CPU %10 ve RAM varsayılan 512 MB sınırıyla (`MEMMAX` ile ayarlanır), düşük öncelikte çalışır; `/etc` ve `/usr` altına yazamaz. Normal kullanımda ~50 MB tutar.
-- **Kapanırken kaydeder.** Servis durdurulurken ya da yeniden başlatılırken (güncellemede olduğu gibi) geçmişi diske yazıp kapanır; yeniden açıldığında kaldığı yerden devam eder, aynı satırı iki kez saymaz, kapalıyken yazılan satırları da atlamaz. Açılışta geçmişi yüklemek birkaç saniye sürebilir; bu sürede panel açıktır ve "geçmiş yükleniyor" der.
-- **Tarayıcı korumaları açık.** Panel başka bir siteye gömülemez (`frame-ancestors 'none'`), yalnızca kendi dosyalarını yükler (Content-Security-Policy), içerik türü tahmin edilmez.
-- **İnternete açılmaz.** Panel sunucunun kendi iç IP'sinde açılır (keepalived VIP'inde değil) ve sadece izin verilen ağlardan gelen isteklere cevap verir. Varsayılan liste özel ağlardır (10.x, 172.16-31.x, 192.168.x). Sunucunun ana IP'si herkese açık bir adresse panel `127.0.0.1`'de kalır.
-- **Kanıtlar.** Kurulum ve kaldırma sonunda config dosyalarının sha256 özetinin ve HAProxy süreç numaralarının değişmediğini kendisi kontrol edip yazar.
+## Core principles
 
-## Kurulum
+- **Never touches HAProxy's configuration or service.** No reload, no restart.
+- **Adapts to each server.** By only reading the running HAProxy's configuration, the agent finds the stats socket, the log source and each frontend's log format by itself. Custom `log-format` definitions are read too.
+- **Keeps history.** Charts and rates go back 24 hours by default. Data is written under `/var/lib/haproxy-lens` (a few hundred KB for 24 hours), so history survives an agent restart.
+- **The server's own metrics.** CPU, I/O wait, memory, load average, disk usage and disk read/write speed, with live charts. Read from `/proc`: no extra privileges, tools or services needed.
+- **Log search.** Searches the log files directly (including rotated and compressed ones), independently of the dashboard, so it can look further back than the retention period.
+- **Follows changes while running, no reinstall needed.** When the configuration changes and HAProxy is reloaded (new log format, new Host capture, new backend), the agent notices within 30 seconds and updates itself. If the log source goes silent it looks for a new one; if the stats socket stops working it switches to another socket from the configuration.
+- **Tells you what is missing.** If something in the configuration limits the data (logging off, `dontlog-normal`, host name not captured, no health checks, unreadable log lines...), the "Configuration notes" section at the top of the dashboard explains what it is, what it affects, and the configuration line you could add.
+- **Does not install if unsure.** If it cannot find a working stats socket, it stops without changing anything and tells you why.
+- **Only reads.** It sends HAProxy only the `show info` and `show stat` commands. There is no code that sends any other command (see `allowedCommands` in `haproxy.go`).
+- **Keeps no sensitive data.** Query parameters in the logs (such as `?token=...`) are not kept, not even in memory.
+- **Has a resource ceiling.** Runs at low priority with a 10% CPU limit and a 512 MB memory limit by default (set with `MEMMAX`); it cannot write under `/etc` or `/usr`. It uses about 50 MB in normal operation.
+- **Saves on shutdown.** When the service is stopped or restarted (as during an update), it writes its history to disk before exiting; when it starts again it continues where it left off, never counts the same log line twice and does not skip lines written while it was down. Loading the history at startup can take a few seconds; meanwhile the dashboard is up and says the history is loading.
+- **Browser protections on.** The dashboard cannot be embedded in another site (`frame-ancestors 'none'`), loads only its own files (Content-Security-Policy), and content types are not sniffed.
+- **Not exposed to the internet.** The dashboard listens on the server's own internal IP (not on a keepalived VIP) and only answers requests from allowed networks. The default list is the private networks (10.x, 172.16-31.x, 192.168.x). If the server's main IP is public, the dashboard stays on `127.0.0.1`.
+- **Proves it.** At the end of installation and removal it checks, and prints, that the sha256 of the configuration files and HAProxy's process IDs have not changed.
 
-Tüm komutlar HAProxy sunucusunda, root olarak.
+## Installation
 
-### 1. İndir ve kur
+All commands run on the HAProxy server as root.
 
-Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar. Adımlar `&&` ile bağlı olduğu için biri hata verirse sonrakiler çalışmaz.
+### 1. Download and install
+
+One line: downloads into a clean directory, verifies, extracts and installs. The steps are chained with `&&`, so if one fails the rest do not run.
 
 ```bash
 cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
 ```
 
-wget her dosya için bir satır yazar, sonra doğrulama `haproxy-lens-linux-amd64.tar.gz: OK` demeli. Hiçbir şey yazılmadan komut biterse sunucunun GitHub'a erişimi yok demektir; aşağıdaki "Sunucunun internete çıkışı yoksa" bölümüne bakın. ARM sunucularda (`uname -m` çıktısı `aarch64` ise) `amd64` yerine `arm64` yazın.
+wget prints one line per file, then the verification should say `haproxy-lens-linux-amd64.tar.gz: OK`. If the command ends without printing anything, the server cannot reach GitHub; see "If the server has no internet access" below. On ARM servers (if `uname -m` prints `aarch64`), use `arm64` instead of `amd64`.
 
-Kurulum önce bir rapor, sonra yapılacakları gösterir ve onay ister. Sonunda şu iki satırı görmelisin:
+The installer first shows a report, then what it is going to do, and asks for confirmation. At the end you should see these two lines (the installer's messages are in Turkish; they say the HAProxy configuration files did not change and HAProxy was neither restarted nor reloaded):
 
 ```
 Doğrulama: HAProxy config dosyaları değişmedi (1 dosya, sha256 aynı).
 Doğrulama: HAProxy yeniden başlatılmadı ve reload edilmedi (süreç numaraları aynı).
 ```
 
-### 2. Kurmadan önce sadece kontrol etmek istersen
+### 2. Only check, without installing
 
-Yukarıdaki satırın sonundaki `./install.sh` yerine `./install.sh --check` yaz. Hiçbir şey kurulmaz, sadece rapor verir:
+Replace `./install.sh` at the end of the line above with `./install.sh --check`. Nothing is installed; you only get the report:
 
 ```bash
 ./install.sh --check
 ```
 
-Rapor dört bölümden oluşur: bulunan config dosyaları ve stats socket'leri, log kaynağı (ve o LB'de alan adının log'da olup olmadığı), yapılandırma notları, panelin açılacağı adres. En altta bir **SONUÇ** satırı olur:
+The report has four parts: the configuration files and stats sockets found, the log source (and whether host names appear in the logs on that load balancer), configuration notes, and the address the dashboard will use. At the bottom there is a **SONUÇ** (result) line:
 
-| Sonuç | Anlamı |
+| Result | Meaning |
 |---|---|
-| `UYUMLU (stats + log analizi)` | Her şey kurulabilir. |
-| `UYUMLU (sadece stats)` | Stats paneli tam çalışır, log analizi kapalı olur. Sebebi raporda yazar. |
-| `KURULAMAZ` | Çalışan ve erişilebilir bir stats socket yok. Hiçbir şey kurulmaz. |
+| `UYUMLU (stats + log analizi)` | Compatible: everything can be installed. |
+| `UYUMLU (sadece stats)` | Compatible, stats only: the stats dashboard works fully, log analysis is off. The report says why. |
+| `KURULAMAZ` | Cannot install: there is no working, accessible stats socket. Nothing is installed. |
 
-### 3. Kurulum seçenekleri
+### 3. Installation options
 
-Hiçbir parametre vermezsen kurulum şu varsayılanlarla çalışır:
+With no parameters, the installer uses these defaults:
 
-| Parametre | Varsayılan | Ne yapar |
+| Parameter | Default | What it does |
 |---|---|---|
-| `PORT` | `8405` | Panelin portu |
-| `LISTEN` | sunucunun iç IP'si | Panelin adresi; bulunamazsa `127.0.0.1` (yalnızca SSH tüneliyle) |
-| `ALLOW` | özel ağlar (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`, `127.0.0.0/8`) | Panele erişebilecek ağlar |
-| `LOG` | `auto` | Log kaynağı; ajan kendisi bulur ve çalışırken izler |
-| `RETENTION` | `24h` | Sayıların saklanma süresi |
-| `DETAIL` | `1h` | Tam ayrıntının (tam adres, gerçek yollar, IP dökümü) saklanma süresi |
-| `LISTS` | `6h` | Yol ve IP listelerinin saklanma süresi |
-| `BUDGET` | `250` | Ayrıntı için bellek bütçesi (MB) |
-| `MEMMAX` | `512M` | Servisin bellek tavanı |
+| `PORT` | `8405` | Dashboard port |
+| `LISTEN` | the server's internal IP | Dashboard address; if none is found, `127.0.0.1` (SSH tunnel only) |
+| `ALLOW` | private networks (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `100.64.0.0/10`, `127.0.0.0/8`) | Networks allowed to reach the dashboard |
+| `LOG` | `auto` | Log source; the agent finds it and follows it while running |
+| `RETENTION` | `24h` | How long counts are kept |
+| `DETAIL` | `1h` | How long full detail is kept (full address, real paths, IP breakdown) |
+| `LISTS` | `6h` | How long path and IP lists are kept |
+| `BUDGET` | `250` | Memory budget for detail (MB) |
+| `MEMMAX` | `512M` | Memory ceiling of the service |
 
-Değiştirmek için satırın sonundaki `./install.sh` yerine kullanabilirsin:
+To change them, use one of these instead of `./install.sh` at the end of the line:
 
-| Komut | Ne yapar |
+| Command | What it does |
 |---|---|
-| `./install.sh -y` | Onay sormadan kurar |
-| `PORT=8415 ./install.sh` | Farklı port kullanır |
-| `ALLOW=10.20.0.0/16 ./install.sh` | Panele sadece bu ağ(lar)dan erişilebilir; virgülle birden fazla ağ ya da tek IP verilebilir |
-| `LISTEN=10.0.0.5 ./install.sh` | Panelin adresini elle verir |
-| `LISTEN=127.0.0.1 ./install.sh` | Paneli sadece sunucunun içinden açar (SSH tüneliyle kullanılır) |
-| `LOG=/yol/haproxy.log ./install.sh` | Log kaynağını elle sabitler (varsayılan: ajan kendisi bulur ve izler) |
-| `RETENTION=48h ./install.sh` | Sayıların ne kadar saklanacağı (varsayılan 24 saat, en az 1 saat) |
-| `DETAIL=6h ./install.sh` | Tam ayrıntının (tam adres, gerçek yollar, IP dökümü) saklanacağı süre (varsayılan 1 saat) |
-| `LISTS=24h ./install.sh` | Yol ve IP listelerinin saklanacağı süre (varsayılan 6 saat) |
-| `BUDGET=500 ./install.sh` | Ayrıntı için bellek bütçesi, MB (varsayılan 250) |
-| `MEMMAX=768M ./install.sh` | Servisin bellek tavanı (varsayılan 512M) |
+| `./install.sh -y` | Installs without asking for confirmation |
+| `PORT=8415 ./install.sh` | Uses a different port |
+| `ALLOW=10.20.0.0/16 ./install.sh` | Only these networks can reach the dashboard; several networks or single IPs can be given, separated by commas |
+| `LISTEN=10.0.0.5 ./install.sh` | Sets the dashboard address manually |
+| `LISTEN=127.0.0.1 ./install.sh` | Makes the dashboard reachable only from the server itself (used with an SSH tunnel) |
+| `LOG=/path/haproxy.log ./install.sh` | Pins the log source manually (default: the agent finds and follows it) |
+| `RETENTION=48h ./install.sh` | How long counts are kept (default 24 hours, at least 1 hour) |
+| `DETAIL=6h ./install.sh` | How long full detail is kept (full address, real paths, IP breakdown) (default 1 hour) |
+| `LISTS=24h ./install.sh` | How long path and IP lists are kept (default 6 hours) |
+| `BUDGET=500 ./install.sh` | Memory budget for detail, MB (default 250) |
+| `MEMMAX=768M ./install.sh` | Memory ceiling of the service (default 512M) |
 
-Son dördü ne kadar geriye ne kadar ayrıntı göreceğini belirler; [aşağıdaki bölüme](#ne-kadar-geriye-ne-kadar-ayrıntı) bakın.
+The last four decide how far back you can look and in how much detail; see [the section below](#how-far-back-and-in-how-much-detail).
 
-Güncellemede komutta vermediğin her ayar önceki kurulumdan korunur (port, adres, erişim listesi, log kaynağı, saklama süreleri, bellek bütçesi ve tavanı); kurulum hangilerini koruduğunu ekrana yazar. Yalnızca değiştirmek istediğini vermen yeterli: `DETAIL=12h ./install.sh` gerisine dokunmaz. Önceki panel adresi artık sunucuda yoksa (IP değiştiyse) adres yeniden tespit edilir. Kurulum, sonunda hangi değerlerle çalıştığını ekrana yazar.
+On an update, every setting you do not give on the command line is kept from the previous installation (port, address, access list, log source, retention periods, memory budget and ceiling); the installer prints which ones it kept. Give only what you want to change: `DETAIL=12h ./install.sh` leaves the rest alone. If the previous dashboard address no longer exists on the server (the IP changed), the address is detected again. At the end, the installer prints the values it is running with.
 
-### 4. Paneli aç
+### 4. Open the dashboard
 
-Tarayıcıda kurulumun sonunda yazan adresi aç, örneğin `http://10.0.0.5:8405`.
+Open the address printed at the end of the installation in your browser, for example `http://10.0.0.5:8405`.
 
-Panel `127.0.0.1`'de kurulduysa kendi bilgisayarında `ssh -L 8405:127.0.0.1:8405 root@SUNUCU_ADRESI` çalıştır, sonra `http://localhost:8405` adresini aç.
+If the dashboard was installed on `127.0.0.1`, run `ssh -L 8405:127.0.0.1:8405 root@SERVER_ADDRESS` on your own computer, then open `http://localhost:8405`.
 
-Sunucuda güvenlik duvarı açıksa (ufw, firewalld) panelin portuna kendi ağın için izin vermen gerekebilir. Kurulum bunu fark ederse hatırlatır ama güvenlik duvarına dokunmaz.
+If a firewall is active on the server (ufw, firewalld), you may need to allow the dashboard port for your network. The installer reminds you if it notices one, but does not touch the firewall.
 
-### Panelin adresi nasıl seçilir
+### How the dashboard address is chosen
 
-1. Varsayılan rotanın geçtiği arayüz bulunur (`/proc/net/route`).
-2. O arayüzdeki keepalived VIP'leri atlanır (`/etc/keepalived/keepalived.conf` ve `include` ettiği dosyalar). VIP master/slave arasında yer değiştirdiği için panel her sunucunun kendi adresinde durur.
-3. Kalan adreslerden ağ ayarlarında sabit tanımlı olan seçilir: netplan, `/etc/network/interfaces`, `ifcfg-*`, NetworkManager, systemd-networkd.
-4. Bulunamazsa arayüzün birincil adresi seçilir; `/32`, `secondary` ve etiketli (`eth0:1`) adresler VIP olabileceği için atlanır.
-5. Seçilen adres herkese açık bir IP ise kullanılmaz, panel `127.0.0.1`'de kalır.
+1. The interface carrying the default route is found (`/proc/net/route`).
+2. keepalived VIPs on that interface are skipped (`/etc/keepalived/keepalived.conf` and the files it `include`s). Because a VIP moves between master and slave, the dashboard stays on each server's own address.
+3. Of the remaining addresses, the one statically configured in the network settings is chosen: netplan, `/etc/network/interfaces`, `ifcfg-*`, NetworkManager, systemd-networkd.
+4. If none is found, the interface's primary address is used; `/32`, `secondary` and labeled (`eth0:1`) addresses are skipped because they may be VIPs.
+5. If the chosen address is a public IP, it is not used and the dashboard stays on `127.0.0.1`.
 
-`./install.sh --check` raporundaki "Panel adresi" bölümü hangi adresin neden seçildiğini ve hangilerinin neden atlandığını gösterir.
+The "Panel adresi" (dashboard address) part of the `./install.sh --check` report shows which address was chosen and why, and which ones were skipped and why.
 
-## Güncelleme
+## Updating
 
-Kurulumdaki tek satırın aynısını çalıştırmak yeterli: her seferinde en son sürümü indirir, betik de önceki kurulumu görüp üzerine yazar. Adres, erişim listesi ve log ayarların korunur.
+Run the same one-line command as for installation: it always downloads the latest release, and the installer detects the previous installation and replaces it. All your settings are kept (port, address, access list, log source, retention periods, memory budget and ceiling); give only the ones you want to change.
 
-## Kaldırma
+## Removal
 
 ```bash
 ./uninstall.sh
 ```
 
-Servisi, program dosyasını ve `haproxy-lens` sistem kullanıcısını siler, geride bir şey kalmadığını kontrol eder. Kurulumdaki iki doğrulamayı burada da yapar. Paketin klasörü artık yoksa aynı paketi tekrar indirip içindeki `uninstall.sh`'ı çalıştırabilirsin.
+Removes the service, the program file, the stored history and the `haproxy-lens` system user, and checks that nothing is left behind. It runs the same two verifications as the installer. If the package directory is gone, download the same package again and run the `uninstall.sh` inside it.
 
-## Sunucunun internete çıkışı yoksa
+## If the server has no internet access
 
-Paketi kendi bilgisayarına indir, sunucuya kopyala, sonra açıp kur:
+Download the package on your own computer, copy it to the server, then extract and install:
 
 ```bash
-scp haproxy-lens-linux-amd64.tar.gz root@SUNUCU_ADRESI:/root/
+scp haproxy-lens-linux-amd64.tar.gz root@SERVER_ADDRESS:/root/
 ```
 
 ```bash
 cd /root && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
 ```
 
-## Log'da arama
+## Log search
 
-Panelin en altındaki "Log'da ara" bölümü (sayfanın başındaki **Log'da ara** düğmesi oraya götürür), paneldeki verilerden bağımsız çalışır: doğrudan log dosyalarını okur, döndürülmüş (`haproxy.log.1`) ve sıkıştırılmış (`.gz`) dosyalar dahil. Bu yüzden panelin saklama süresinden (varsayılan 24 saat) çok daha geriye gidebilir.
+The "Log'da ara" (log search) section at the bottom of the dashboard (the **Log'da ara** button at the top of the page takes you there) works independently of the dashboard data: it reads the log files directly, including rotated (`haproxy.log.1`) and compressed (`.gz`) files. So it can go much further back than the dashboard's retention period (24 hours by default).
 
-Aranabilenler: adresin içinde geçen metin, IP (tam ya da başlangıcı), HTTP yöntemi (GET, POST, DELETE…), durum kodu (`500` ya da `5xx`) ve zaman aralığı. Bunlar birlikte ya da tek başına kullanılabilir; örneğin yalnızca yöntem seçip "son 24 saatteki tüm DELETE istekleri" aranabilir. Paneldeki bir satırın ayrıntısı artık tutulmuyorsa (ayrıntılar panelde yalnızca son 1 saat tutulur), satırdaki "IP'leri ve zamanları log'dan getir" düğmesi o isteği yöntemi ve tam adresiyle burada aratır. Sonuçta toplam eşleşme, kod dağılımı, en çok istek yapan IP'ler, en çok eşleşen adresler ve en yeni eşleşen istekler zaman damgalarıyla listelenir.
+You can search by: text contained in the address, IP (full or a prefix), HTTP method (GET, POST, DELETE…), status code (`500` or `5xx`) and time range. They can be used together or alone; for example you can pick only a method and search for "all DELETE requests in the last 24 hours". If a dashboard row's detail is no longer kept (the dashboard keeps detail only for the last hour), the "IP'leri ve zamanları log'dan getir" (get IPs and times from the log) button on that row searches for that request here, by its method and exact address. Results show the total number of matches, the status code breakdown, the top client IPs, the most matched addresses, and the newest matching requests with timestamps.
 
-Nasıl korunur:
+How it is protected:
 
-- Kabuk komutu çalıştırılmaz; dosyalar programın içinde okunur, bu yüzden arama metniyle komut çalıştırılamaz.
-- Yalnızca ajanın kullandığı log kaynağı ve onun döndürülmüş kopyaları okunur; kullanıcıdan dosya yolu kabul edilmez.
-- Aranan metni içermeyen satırlar, ayrıştırılmadan ucuz bir metin karşılaştırmasıyla elenir. Ayrıştırma saniyede ~200 bin satır işlerken bu eleme ~4 milyon satır işler; büyük log'larda aramayı kat kat hızlandırır. Sonuç değişmez: eleme yalnızca "kesinlikle eşleşmez" diyebildiği satırları atar, asıl süzgeç yine ayrıştırılmış kayıt üzerinde çalışır.
-- Log dosyaları **sondan başa** okunur: en yeni kayıtlar önce taranır. Bu sayede "son 1 saat" araması dosya ne kadar büyük olursa olsun hızlı biter ve süre sınırına takılsa bile elde edilen sonuçlar en güncel kayıtları kapsar.
-- Arama en fazla 1 dakika çalışır ve aynı anda tek arama yapılır (ajanın işlemci tavanı düşük). Belirli bir kod, IP ya da adres içeren aramalar birkaç saniyede biter; yalnızca "GET" ya da "2xx" gibi neredeyse her satırın eşleştiği aramalar daha uzun sürer. Sınıra takılırsa sonuç bunu açıkça yazar.
-- Alanlar birlikte kullanılırsa "ve" ile birleşir: hepsine uyan istekler bulunur. Tek alan da yeterlidir.
-- Zaman aralığı verildiğinde, son yazma zamanı aralığın dışında kalan dosyalar hiç açılmaz.
+- No shell commands are run; files are read inside the program, so search text cannot be used to run commands.
+- Only the log source used by the agent and its rotated copies are read; no file path is accepted from the user.
+- Lines that cannot match are dropped with a cheap text comparison before parsing. Parsing handles about 200 thousand lines per second, while this filter handles about 4 million, which makes searches on large logs several times faster. Results do not change: the filter only drops lines it can prove will not match, and the real filter still runs on the parsed record.
+- Log files are read **from the end backwards**: the newest records are scanned first. So a "last 1 hour" search finishes quickly however large the file is, and even if it hits the time limit, the results cover the most recent records.
+- A search runs for at most 1 minute, and only one search runs at a time (the agent's CPU limit is low). Searches for a specific code, IP or address finish in a few seconds; searches that match almost every line, such as only "GET" or "2xx", take longer. If the limit is reached, the result says so clearly.
+- When several fields are filled in, they are combined with "and": requests matching all of them are found. A single field is enough too.
+- When a time range is given, files last written before the range are not opened at all.
 
-## Yapılandırma notları
+## Configuration notes
 
-Panelin üst kısmındaki bu bölüm, o sunucunun config'inde ya da ortamında paneli kısıtlayan her şeyi listeler. Uyarı varsa kendiliğinden açık gelir. Her notta şunlar yazar: ne eksik, neyi etkiliyor, istersen config'e eklenebilecek satır ve config'teki yeri (`haproxy.cfg:39` gibi). Aynı notlar `./install.sh --check` raporunda da çıkar.
+This section at the top of the dashboard lists everything in that server's configuration or environment that limits the dashboard. If there is a warning, it opens by itself. Each note says what is missing, what it affects, the line you could add to the configuration if you want, and where in the configuration it applies (such as `haproxy.cfg:39`). The same notes appear in the `./install.sh --check` report.
 
-| Not | Ne demek |
+| Note | What it means |
 |---|---|
-| Frontend log yazmıyor | `no log` ya da log hedefi yok; log bölümü bu trafiği göremez |
-| Trafik kayıtları log seviyesine takılıyor | Log hedefleri `notice` gibi bir seviyeyle sınırlı; HAProxy trafiği `info` seviyesinde yazar |
-| HTTP log biçimi kullanmıyor | `option httplog` yok; yol ve durum kodu log'da yok |
-| Log biçiminde eksik alanlar | Özel `log-format` durum kodu, yol, backend/sunucu ya da istemci IP'si içermiyor |
-| Başarılı istekleri log'a yazmıyor | `option dontlog-normal` açık; sadece hatalar log'a düşüyor |
-| Alan adını log'a yazmıyor / sadece bazı isteklerde yakalıyor | Host başlığı yakalanmıyor ya da koşullu yakalanıyor |
-| Sağlık kontrolü yok | `check` olmayan sunucular; düşerlerse HAProxy fark etmez |
-| Log satırlarının bir kısmı okunamadı | Satırlar config'teki biçimle uyuşmuyor; örnekleri notta görünür (sorgu parametreleri gizli) |
-| Stats'ta trafik var ama log'da yok | Trafiğin geçtiği yerin log'u kapalı ya da başka yere gidiyor |
+| Frontend does not write logs | `no log`, or no log target; the log section cannot see this traffic |
+| Traffic records are filtered by log level | Log targets are limited to a level such as `notice`; HAProxy writes traffic at `info` level |
+| Not using an HTTP log format | No `option httplog`; path and status code are not in the logs |
+| Missing fields in the log format | The custom `log-format` lacks the status code, path, backend/server or client IP |
+| Successful requests are not logged | `option dontlog-normal` is on; only errors reach the logs |
+| Host name not logged / captured only for some requests | The Host header is not captured, or captured conditionally |
+| No health checks | Servers without `check`; if they go down HAProxy will not notice |
+| Some log lines could not be read | The lines do not match the format in the configuration; examples are shown in the note (query parameters hidden) |
+| Traffic in stats but not in the logs | Logging is off where this traffic passes, or the logs go somewhere else |
 
-Ajan config'e hiçbir şey yazmaz. Önerilen bir satırı eklemek senin kararın; eklersen HAProxy reload edildikten sonra panel en geç 30 saniye içinde kendiliğinden uyum sağlar ve not kalkar.
+The agent writes nothing to the configuration. Adding a suggested line is your decision; if you add it, the dashboard adapts within 30 seconds after HAProxy is reloaded, and the note disappears.
 
-## Kurulum sunucuda neleri değiştirir
+## What the installation changes on the server
 
-| Ne | Nerede |
+| What | Where |
 |---|---|
 | Program | `/usr/local/bin/haproxy-lens` |
-| Saklanan geçmiş | `/var/lib/haproxy-lens` (systemd oluşturur, kaldırma betiği siler) |
-| Servis | `/etc/systemd/system/haproxy-lens.service` |
-| Sistem kullanıcısı | `haproxy-lens` (giriş yapamaz) |
+| Stored history | `/var/lib/haproxy-lens` (created by systemd, removed by the uninstall script) |
+| Service | `/etc/systemd/system/haproxy-lens.service` |
+| System user | `haproxy-lens` (cannot log in) |
 
-Başka hiçbir dosyaya yazmaz. Servis, stats socket'ine ve log'a erişebilmek için gereken gruplarla çalışır: socket'in grubu (genelde `haproxy`), syslog dosyaları için `adm` ve journald için `systemd-journal` (sunucuda varsa). Böylece log'un yeri sonradan değişse de yeniden kurulum gerekmez. Kullanıcı bu gruplara kalıcı olarak eklenmez; gruplar yalnızca servis çalışırken geçerlidir.
+It writes to no other file. The service runs with the groups it needs to reach the stats socket and the logs: the socket's group (usually `haproxy`), `adm` for syslog files and `systemd-journal` for journald (if present on the server). So no reinstall is needed if the log location changes later. The user is not added to these groups permanently; the groups apply only while the service runs.
 
-## Neleri destekler
+## What is supported
 
-- **Stats socket:** unix yolu, `unix@`, `abns@`, `ipv4@` / `ipv6@` ve `host:port` biçimleri. Birden fazla socket varsa çalışan ilkini seçer.
-- **Config:** çalışan HAProxy'nin komut satırındaki bütün `-f` dosyaları ve klasörleri (`conf.d` gibi).
-- **Log kaynağı:** syslog dosyası (yeri rsyslog/syslog-ng ayarından bulunur) ya da journald.
-- **Log biçimi:** `option httplog`, `option httpslog`, `option tcplog` ve özel `log-format` tanımları (JSON benzeri biçimler dahil). `defaults` mirası, adlı `defaults` bölümleri ve `from` desteklenir. Tanınmayan değişkenler atlanır; panelin ihtiyaç duyduğu bir alan yoksa bu not olarak raporlanır. `option httplog clf` (CLF) henüz desteklenmiyor.
-- **İşletim sistemi:** systemd kullanan Linux dağıtımları, amd64 ve arm64.
+- **Stats socket:** unix path, `unix@`, `abns@`, `ipv4@` / `ipv6@` and `host:port` forms. If there are several sockets, the first working one is used.
+- **Configuration:** all `-f` files and directories (such as `conf.d`) on the running HAProxy's command line.
+- **Log source:** a syslog file (its location is found from the rsyslog/syslog-ng settings) or journald.
+- **Log format:** `option httplog`, `option httpslog`, `option tcplog` and custom `log-format` definitions (including JSON-like formats). `defaults` inheritance, named `defaults` sections and `from` are supported. Unknown variables are skipped; if a field the dashboard needs is missing, it is reported as a note. `option httplog clf` (CLF) is not supported yet.
+- **Operating system:** Linux distributions with systemd, amd64 and arm64.
 
-## Alan adı (hangi domaine istek gelmiş)
+## Host name (which domain the request was for)
 
-haproxy-lens config'e dokunmaz; alan adını log'da bulabildiği kadarıyla gösterir. Her LB'de kendiliğinden şu kaynaklara bakar:
+haproxy-lens does not touch the configuration; it shows the host name as far as it can find it in the logs. On each load balancer it checks these sources by itself:
 
-| Log'da alan adı olur, eğer | Örnek |
+| The host name is in the logs if | Example |
 |---|---|
-| Host başlığı yakalanıyorsa | `capture request header Host len 64` ya da `http-request capture req.hdr(host) len 64` |
-| İstek HTTP/2 ise | HAProxy istek satırına `https://alan.com/yol` yazar |
-| `option httpslog` kullanılıyorsa | Satırın sonundaki SNI alanından |
-| `log-format`'ın sonuna host eklenmişse | `... %{+Q}r %[req.hdr(host)]` |
+| The Host header is captured | `capture request header Host len 64` or `http-request capture req.hdr(host) len 64` |
+| The request is HTTP/2 | HAProxy writes `https://example.com/path` in the request line |
+| `option httpslog` is used | From the SNI field at the end of the line |
+| The host was appended to the `log-format` | `... %{+Q}r %[req.hdr(host)]` |
 
-Hiçbiri yoksa ayrıntıda sadece yol ve IP görünür. Yakalama koşulluysa (ör. `if rate_limit_abuse`) alan adı sadece o isteklerde görünür; panel kaç istekte bilindiğini yazar. `./install.sh --check` raporu da o LB'de alan adının log'da olup olmadığını söyler.
+If none applies, the detail shows only the path and the IP. If the capture is conditional (e.g. `if rate_limit_abuse`), the host name appears only for those requests; the dashboard says for how many requests it is known. The `./install.sh --check` report also tells you whether host names are in the logs on that load balancer.
 
-Alan adını görmek istediğin bir LB'de bunu sen eklemeye karar verirsen en basit yol frontend'e `capture request header Host len 64` satırıdır. Bu satır mevcut log satırlarına `{alan.com}` bölümünü ekler; o log'u okuyan başka bir araç (Elasticsearch, fail2ban gibi) varsa önce onu kontrol et ve değişikliği önce bir slave'de dene.
+If you decide to add it on a load balancer where you want to see host names, the simplest way is the line `capture request header Host len 64` in the frontend. This line adds a `{example.com}` part to existing log lines; if another tool reads that log (such as Elasticsearch or fail2ban), check it first and try the change on a slave first.
 
-## Bilinen sınırlar
+## Known limitations
 
-- **Alan adı:** Varsayılan `httplog` biçimi Host bilgisini içermez; o LB'de hiçbir kaynaktan alan adı bulunamazsa (yukarıdaki tabloya bakın) 3xx, 4xx ve 5xx dönen isteklerde sadece yol ve IP görünür.
-- **Gerçek IP:** Cloudflare arkasından gelen isteklerde log'daki IP Cloudflare'e aittir; panel bu IP'leri "Cloudflare" diye etiketler.
-- **Log biçimi tahmini değil:** Ajan satırları config'teki log tanımına göre okur. Config'te olmayan bir biçimle gelen satırlar (ör. başka bir sunucudan aynı dosyaya yazılanlar) okunamaz ve "Yapılandırma notları"nda örnekleriyle görünür.
-- **Geçmiş bellekte tutulur, disk yalnızca yedektir.** Bu yüzden asıl sınır disk değil bellektir; ayrıntı süresini uzatmadan önce aşağıdaki tabloya bakın.
-- **Geçmişin ayrıntısı zamanla azalır:** Sayılar saklama süresi boyunca eksiksiz durur, ama adres ve IP ayrıntısı varsayılan olarak son 1 saati, listeler son 6 saati kapsar. Süreler ayarlanabilir; bkz. [Ne kadar geriye, ne kadar ayrıntı](#ne-kadar-geriye-ne-kadar-ayrıntı).
-- **Kalıcı bir veritabanı yok:** Geçmiş tek bir sıkıştırılmış dosyada tutulur. Yıllık trend ya da serbest sorgu gerekiyorsa Prometheus gibi bir sistem gerekir.
-- **Yeniden başlatma:** HAProxy yeniden başlarsa sayaçları sıfırlandığı için o andan sonrası yeniden birikir; panel aralığın gerçekte kaç dakikayı kapsadığını yazar.
-- **Tek sunucu:** Her kurulum sadece kendi sunucusunu gösterir.
-- **Şifre ve HTTPS yok:** Erişim sadece ağ adresine göre sınırlanır. İzinli ağdaki herkes paneli görebilir; gerekirse `ALLOW` ile yönetim ağına daralt.
+- **Host name:** The default `httplog` format does not include the Host; if no host name source is found on that load balancer (see the table above), requests returning 3xx, 4xx and 5xx show only the path and the IP.
+- **Real client IP:** For requests coming through Cloudflare, the IP in the log belongs to Cloudflare; the dashboard labels these IPs "Cloudflare".
+- **The log format is not guessed:** The agent reads lines according to the log definition in the configuration. Lines in a format not in the configuration (e.g. written to the same file by another server) cannot be read and appear in "Configuration notes" with examples.
+- **History is kept in memory; the disk is only a backup.** So the real limit is memory, not disk; check the table below before extending the detail period.
+- **Detail decreases over time:** Counts stay complete for the whole retention period, but address and IP detail covers the last hour and the lists the last 6 hours by default. The periods are adjustable; see [How far back, and in how much detail](#how-far-back-and-in-how-much-detail).
+- **No permanent database:** History is kept in a single compressed file. For yearly trends or free-form queries, a system such as Prometheus is needed.
+- **HAProxy restarts:** HAProxy's own cumulative counters (shown as "toplam", total) reset when HAProxy restarts. The charts and rates are kept separately and continue to include the earlier traffic.
+- **Single server:** Each installation shows only its own server.
+- **No password or HTTPS:** Access is limited only by network address. Anyone on an allowed network can see the dashboard; narrow it to your management network with `ALLOW` if needed.
 
-## Ne kadar geriye, ne kadar ayrıntı
+## How far back, and in how much detail
 
-Geçmişin tamamı aynı ayrıntıda saklanmaz: veri yaşlandıkça kademeli olarak sadeleşir. Amaç belleği sınırlı tutmak; hangi kademenin ne kadar süreceğini siz belirlersiniz.
+Not all history is kept at the same level of detail: data is simplified step by step as it ages. The goal is to keep memory bounded; you decide how long each step lasts.
 
-| Veri yaşı | Panelde ne görürsünüz | Parametre (varsayılan) |
+| Data age | What you see in the dashboard | Parameter (default) |
 |---|---|---|
-| 0 – 1 saat | **Her şey.** Sayılar, yol ve IP listeleri, ayrıca satıra tıklayınca açılan ayrıntı: tam adres (alan adı log'da varsa), gerçek yollar ve isteği gönderen IP'ler | `DETAIL` (1 saat) |
-| 1 – 6 saat | Sayılar, en yoğun yol ve IP listeleri, ayrıca adres başına IP dökümü. Tam adres ve gerçek yol ayrıntısı yok | `LISTS` (6 saat) |
-| 6 – 24 saat | **Yalnızca sayılar:** istek sayısı, 2xx/3xx/4xx/5xx dağılımı, backend başına döküm, grafikler | `RETENTION` (24 saat) |
-| 24 saatten eski | Silinir | |
+| 0 – 1 hour | **Everything.** Counts, path and IP lists, plus the detail shown when you click a row: full address (if the host name is in the log), real paths and client IPs | `DETAIL` (1 hour) |
+| 1 – 6 hours | Counts, the busiest path and IP lists, plus the IP breakdown per address. No full address or real path detail | `LISTS` (6 hours) |
+| 6 – 24 hours | **Counts only:** request count, 2xx/3xx/4xx/5xx split, per-backend breakdown, charts | `RETENTION` (24 hours) |
+| Older than 24 hours | Deleted | |
 
-Tablodaki süreler varsayılanlardır; hiçbir parametre vermezsen bu şekilde çalışır.
+The periods in the table are the defaults, used when you give no parameters.
 
-Sayılar hiçbir kademede eksilmez; kısalan tek şey adres ve IP ayrıntısıdır. Grafikler ve oranlar bu yüzden 24 saat boyunca eksiksizdir.
+Counts are never reduced at any step; only address and IP detail gets shorter. So charts and rates are complete for all 24 hours.
 
-**Değiştirmek için** kurulum komutunun sonundaki `./install.sh` yerine:
+**To change it**, instead of `./install.sh` at the end of the installation command:
 
 ```bash
 DETAIL=6h LISTS=24h BUDGET=500 MEMMAX=768M ./install.sh
 ```
 
-Bu örnekte ayrıntı 6 saat, listeler 24 saat geriye gider. Bellek maliyeti için aşağıdaki tabloya bakın; ayrıntıyı uzatırsanız bütçeyi ve servis tavanını da yükseltin.
+In this example detail goes back 6 hours and lists 24 hours. See the table below for the memory cost; if you extend the detail period, raise the budget and the service ceiling too.
 
-Tüm kademeleri aynı yapmak da mümkün: `RETENTION=24h DETAIL=24h LISTS=24h BUDGET=750 MEMMAX=1G ./install.sh` ile 24 saatin tamamı tam ayrıntılı olur (yoğun bir LB'de ~664 MB; bütçe bunun altında kalırsa ajan en eski ayrıntıyı bırakır ve panel bunu yazar).
+You can also make every step the same: `RETENTION=24h DETAIL=24h LISTS=24h BUDGET=750 MEMMAX=1G ./install.sh` keeps full detail for all 24 hours (~664 MB on a busy load balancer; if the budget is lower than that, the agent drops the oldest detail and the dashboard says so).
 
-**Panel ne gördüğünü söyler.** Log bölümü, ayrıntının ve listelerin ayarlanan değil *gerçekte* kapsadığı süreyi yazar. Bir tarama saldırısında bellek bütçesi devreye girip ayrıntıyı kısaltırsa bunu orada görürsünüz.
+**The dashboard tells you what it has.** The log section shows the period the detail and lists *actually* cover, not the configured one. If the memory budget kicks in during a scanning attack and shortens the detail, you will see it there.
 
-## Sunucu ölçümleri
+## Server metrics
 
-Panelde "Sunucu" bölümü, HAProxy'nin çalıştığı makinenin kendi durumunu gösterir: işlemci kullanımı, işlemcinin disk beklediği süre, bellek, yük ortalaması, disk doluluğu ve disk okuma/yazma hızı. Bir yavaşlamanın sebebi çoğu zaman HAProxy'de değil buradadır.
+The "Sunucu" (server) section of the dashboard shows the state of the machine HAProxy runs on: CPU usage, the time the CPU spends waiting for disk (I/O wait), memory, load average, disk usage and disk read/write speed. The cause of a slowdown is often here rather than in HAProxy.
 
-Veriler `/proc/stat`, `/proc/meminfo`, `/proc/diskstats` ve dosya sistemi bilgisinden okunur. Bu dosyalar herkese açık olduğu için ek yetki gerekmez; kabuk komutu da çalıştırılmaz. Disk doluluğu için kök dizin, HAProxy'nin log yazdığı bölüm ve ajanın geçmişi sakladığı bölüm izlenir (aynı dosya sistemiyse bir kez gösterilir).
+The data is read from `/proc/stat`, `/proc/meminfo`, `/proc/diskstats` and file system information. These are readable by everyone, so no extra privileges are needed, and no shell commands are run. For disk usage, the root file system, the file system HAProxy logs to and the one where the agent keeps its history are watched (shown once if they are the same file system).
 
-Disk G/Ç hesaplanırken yalnızca fiziksel aygıtlar sayılır (`sda`, `vda`, `nvme0n1` gibi); bölümler ve `dm-`, `loop` gibi eşlemeler atlanır, yoksa aynı okuma iki kez toplanır.
+For disk I/O, only physical devices are counted (such as `sda`, `vda`, `nvme0n1`); partitions and mappings such as `dm-` and `loop` are skipped, otherwise the same reads would be counted twice.
 
-Geçmiş, HAProxy ölçümleriyle aynı şekilde saklanır: son 1 saat ince, ötesi dakikalık ortalama, ve dakikalık özet diske yazıldığı için ajan yeniden başlasa da kaybolmaz.
+History is kept the same way as for the HAProxy metrics: fine-grained for the last hour, per-minute averages beyond that, and the per-minute summary is written to disk so it survives an agent restart.
 
-## Bellek
+## Memory
 
-Geçmiş bellekte tutulur (disk yalnızca yeniden başlatma için yedektir), bu yüzden asıl sınır diskte değil bellektedir. Varsayılan ayarlarda (24 saat sayı, 6 saat yol/IP listesi, 1 saat tam ayrıntı) yoğun bir LB'de **~51 MB** kullanılır.
+History is kept in memory (the disk is only a backup for restarts), so the real limit is memory, not disk. With the default settings (counts for 24 hours, path/IP lists for 6 hours, full detail for 1 hour) it uses **~51 MB** on a busy load balancer.
 
-Ölçümler `go test -run TestBellekKullanimi` ile tekrarlanabilir; yük olarak saatte ~44.000 istek, dakikada 300 farklı adres, 150 farklı IP alındı.
+The measurements can be reproduced with `go test -run TestBellekKullanimi`; the load used was ~44,000 requests per hour, 300 distinct addresses and 150 distinct IPs per minute.
 
-| Ayar | Bellek |
+| Setting | Memory |
 |---|---|
-| **Varsayılan:** ayrıntı 1 saat, listeler 6 saat | ~51 MB |
+| **Default:** detail 1 hour, lists 6 hours | ~51 MB |
 | `DETAIL=6h LISTS=24h` | ~213 MB |
-| `DETAIL=24h LISTS=24h` (her şey tam ayrıntı) | ~664 MB |
+| `DETAIL=24h LISTS=24h` (full detail for everything) | ~664 MB |
 
-Sayılar (istek, yanıt kodu, backend başına döküm) her ayarda saklama süresi boyunca eksiksiz kalır; tablo yalnızca adres ve IP ayrıntısının maliyetidir. Trafiği düşük LB'lerde bu rakamlar çok daha azdır.
+Counts (requests, response codes, per-backend breakdown) stay complete for the whole retention period with every setting; the table only shows the cost of address and IP detail. On load balancers with less traffic these numbers are much lower.
 
-**Bellek bütçesi.** Bellek istek sayısından çok *farklı adres sayısına* bağlıdır ve bir tarama saldırısında her istek benzersiz bir adres olabilir. Bu yüzden süre sınırının yanında bir bütçe vardır (varsayılan 250 MB): aşılırsa ajan en eski ayrıntıyı kendiliğinden bırakır ve panel ayrıntının gerçekte kaç dakikayı kapsadığını yazar. Testte dakikada 8.000 benzersiz adresle 6 saat saldırı üretildi (2,88 milyon istek): bellek 161 MB'da kaldı, ayrıntı 50 dakikaya indi ve sayımların tamamı korundu (`go test -run TestAtakDayanikliligi`).
+**Memory budget.** Memory depends on the number of *distinct addresses* more than on the number of requests, and during a scanning attack every request can be a unique address. So besides the time limit there is a budget (250 MB by default): when it is exceeded, the agent drops the oldest detail by itself and the dashboard shows how many minutes the detail actually covers. In a test, a 6-hour attack with 8,000 unique addresses per minute was generated (2.88 million requests): memory stayed at 161 MB, detail was reduced to 50 minutes, and all counts were kept (`go test -run TestAtakDayanikliligi`).
 
-**Servis tavanı** (`MemoryMax`) 512 MB'tır. Bu bir rezervasyon değil üst sınırdır; amacı saldırı anında servisin öldürülmemesidir.
+**Service ceiling** (`MemoryMax`) is 512 MB. This is an upper limit, not a reservation; its purpose is to keep the service from being killed during an attack.
 
-**Bellek iadesi.** Yoğunluk geçtikten sonra ajan belleği yalnızca kendi içinde boşaltmakla kalmaz, işletim sistemine de geri verir. Go bunu kendiliğinden hemen yapmadığı ve systemd'nin tavanı RSS üzerinden uygulandığı için iade tetiklenir: büyük bir gerilemeden sonra hemen, küçük gerilemelerde en fazla 10 dakikada bir. Ölçümde saldırı sonrası RSS birkaç saniye içinde 257 MB'tan 100 MB'a indi.
+**Returning memory.** After a busy period, the agent does not only free memory internally but also returns it to the operating system. Go does not do this immediately by itself, and systemd applies the ceiling to RSS, so the return is triggered: right away after a large drop, and at most every 10 minutes for small drops. In a measurement, RSS went from 257 MB down to 100 MB within a few seconds after an attack.
 
-Ayarlar: `DETAIL=6h LISTS=24h BUDGET=500 MEMMAX=768M ./install.sh`. Bütçeyi yükseltirseniz servis tavanını da yükseltin.
+Settings: `DETAIL=6h LISTS=24h BUDGET=500 MEMMAX=768M ./install.sh`. If you raise the budget, raise the service ceiling too.
 
-## Sorun giderme
+## Troubleshooting
 
-| Durum | Ne yapmalı |
+| Situation | What to do |
 |---|---|
-| Panel açılmıyor | `systemctl status haproxy-lens` |
-| Servis çalışıyor ama panelde veri yok | `journalctl -u haproxy-lens -n 50` — en sık sebep servis kullanıcısının stats socket'ine erişememesi |
-| Panelin adresini unuttun | `systemctl show haproxy-lens -p ExecStart` ya da `ss -ltnp \| grep haproxy-lens` |
-| Hangi sürüm kurulu | `haproxy-lens -version` (panelin en üstünde, adın yanında da yazar) |
-| Tarayıcıda "Bu adresten panele erişim izni yok" | Bulunduğun ağ izinli listede değil: `ALLOW=<ağ>/<önek> ./install.sh` ile tekrar kur |
-| Sayfa hiç açılmıyor, zaman aşımı | Güvenlik duvarı (ufw/firewalld) portu kapatıyor olabilir; kurulum bunu fark ederse uyarır ama kendisi dokunmaz |
-| Log bölümü boş ya da eksik | Panelin üstündeki "Yapılandırma notları" sebebini ve varsa eklenebilecek config satırını yazar |
-| Ayarları değiştirmek istiyorsun | Aynı paketten `ALLOW=... LISTEN=... ./install.sh` çalıştırmak yeterli; servis dosyası yeniden yazılır |
-| Kurulum "HATA: ... olmalı" diyerek durdu | Verdiğin parametrelerden biri geçersiz; mesaj hangisi olduğunu ve örneğini yazar. Bu durumda sisteme hiçbir şey dokunulmamıştır |
-| Aramada "başka bir arama sürüyor" | Ajan aynı anda tek arama yapar (işlemci tavanı düşük olduğu için); birkaç saniye sonra tekrar dene |
+| The dashboard does not open | `systemctl status haproxy-lens` |
+| The service runs but the dashboard has no data | `journalctl -u haproxy-lens -n 50` — the most common cause is the service user not being able to reach the stats socket |
+| You forgot the dashboard address | `systemctl show haproxy-lens -p ExecStart` or `ss -ltnp \| grep haproxy-lens` |
+| Which version is installed | `haproxy-lens -version` (also shown at the top of the dashboard, next to the name) |
+| The browser says "Bu adresten panele erişim izni yok" (no access from this address) | Your network is not in the allowed list: reinstall with `ALLOW=<network>/<prefix> ./install.sh` |
+| The page does not open at all, timeout | A firewall (ufw/firewalld) may be blocking the port; the installer warns if it notices, but does not touch it |
+| The log section is empty or incomplete | "Configuration notes" at the top of the dashboard gives the reason and, if any, the configuration line you could add |
+| You want to change settings | Running `ALLOW=... LISTEN=... ./install.sh` from the same package is enough; the service file is rewritten |
+| The installer stopped with "HATA: ... olmalı" (error: must be ...) | One of the parameters you gave is invalid; the message says which one and gives an example. Nothing on the system was touched in this case |
+| Search says "başka bir arama sürüyor" (another search is running) | The agent runs one search at a time (because of its low CPU limit); try again in a few seconds |
 
-### Kurulum hangi değerleri kabul eder
+### Which values the installer accepts
 
-Kurulum, sisteme dokunmadan önce parametreleri kontrol eder ve hatalı bir değerde anlaşılır bir mesajla durur. Kurallar:
+Before touching the system, the installer checks the parameters and stops with a clear message if a value is invalid. The rules:
 
-- Süreler birimiyle yazılır: `30m`, `6h`, `1h30m`. Birimsiz `6` kabul edilmez.
-- `RETENTION` en az 1 saat, en fazla 30 gün. `DETAIL` en az 5 dakika. Sıra şöyle olmalı: `DETAIL` ≤ `LISTS` ≤ `RETENTION`.
-- `BUDGET` megabayt cinsinden, en az 16.
-- `MEMMAX` birimiyle yazılır (`512M`, `1G`) ve `BUDGET`'tan en az 128 MB büyük olmalı; yoksa servis bütçeye ulaşmadan öldürülür. (systemd birimsiz sayıyı bayt sayar; `MEMMAX=512` servisi açılır açılmaz öldürürdü.)
-- `PORT` 1 ile 65535 arasında.
+- Durations are written with a unit: `30m`, `6h`, `1h30m`. A bare `6` is not accepted.
+- `RETENTION` is at least 1 hour and at most 30 days. `DETAIL` is at least 5 minutes. The order must be: `DETAIL` ≤ `LISTS` ≤ `RETENTION`.
+- `BUDGET` is in megabytes, at least 16.
+- `MEMMAX` is written with a unit (`512M`, `1G`) and must be at least 128 MB larger than `BUDGET`; otherwise the service would be killed before reaching the budget. (systemd treats a bare number as bytes; `MEMMAX=512` would kill the service as soon as it starts.)
+- `PORT` is between 1 and 65535.
 
-Ajan çalışırken config'i 30 saniyede bir kontrol eder. HAProxy'de yaptığın bir değişiklikten sonra reload ettiysen panelin kendini güncellemesi için bir şey yapmana gerek yok.
+While running, the agent checks the configuration every 30 seconds. If you changed something in HAProxy and reloaded it, you do not need to do anything for the dashboard to update itself.
 
-## Nasıl çalışır
+## How it works
 
 ```
-HAProxy ──(stats socket: show info, show stat)──► haproxy-lens ──► panel (sunucunun iç IP'si:8405)
+HAProxy ──(stats socket: show info, show stat)──► haproxy-lens ──► dashboard (server's internal IP:8405)
    │                                                  ▲
-   └──► syslog / journald ──(sadece okuma)────────────┘
+   └──► syslog / journald ──(read only)───────────────┘
 ```
 
-Ajan her 2 saniyede stats'ı okur; saniyelik değerleri iki ölçüm arasındaki sayaç farkından hesaplar. Log satırlarını dakikalık özetlere çevirip son 60 dakikayı tutar. Arayüz programın içine gömülüdür, ayrıca bir web sunucusu gerekmez.
+The agent reads the stats every 2 seconds and computes per-second values from the counter difference between two readings. It turns log lines into per-minute summaries and keeps them for the retention period (24 hours by default). The web interface is embedded in the program; no separate web server is needed.
 
-## Geliştirme
+## Development
 
-Gerekenler: Go 1.22+ ve Node 18+.
+Requirements: Go 1.22+ and Node 18+.
 
 ```bash
-bash build.sh       # arayüzü ve programı derler: ./haproxy-lens
-go test ./...       # testler
+bash build.sh       # builds the interface and the program: ./haproxy-lens
+go test ./...       # tests
 ```
 
-Dosyalar:
+Files:
 
-| Dosya | İçerik |
+| File | Contents |
 |---|---|
-| `main.go` | Parametreler, web sunucusu, `/api/*` uçları |
-| `system.go` | Sunucu ölçümleri (`/proc/stat`, `/proc/meminfo`, `/proc/diskstats`, disk doluluğu) |
-| `store.go` | Geçmişin diske yazılması ve yeniden başlatmada yüklenmesi |
-| `haproxy.go` | Stats socket'inden okuma (izin verilen komutlar burada), zaman aralığı hesabı |
-| `config.go` | haproxy.cfg'yi okuma: bölümler, `defaults` mirası, log hedefleri, Host yakalama |
-| `logformat.go` | `log-format` tanımını ayrıştırıcıya çevirme (httplog, httpslog, tcplog, özel) |
-| `logtail.go` | Log dosyasını / journald'ı izleme, dakikalık özetler, yol ve kod dökümü |
-| `watch.go` | Çalışırken config, log kaynağı ve socket izleme; `/api/config` |
-| `notes.go` | Yapılandırma notları (ne eksik, neyi etkiliyor, hangi satır eklenebilir) |
-| `detect.go` | Kurulum öncesi tespit ve uyumluluk raporu (`-detect`) |
-| `listen.go` | Panelin dinleyeceği IP'nin seçimi (keepalived VIP hariç) |
-| `access.go` | Panele erişebilecek ağların kontrolü |
-| `cloudflare.go` | Yerleşik Cloudflare IP aralıkları (etiketleme için) |
-| `search.go` | Log'da arama: döndürülmüş ve sıkıştırılmış dosyalar dahil, sondan başa okuma |
-| `*_test.go` | Ayrıştırıcı, config uyumu, bellek, saldırı dayanıklılığı, arama, ayar doğrulama ve erişim testleri |
-| `webapp/` | Panel arayüzü (React) ve simge (`favicon.svg`, `favicon.png`); `build.sh` derleyip programa gömer |
-| `deploy/` | `install.sh` ve `uninstall.sh` |
+| `main.go` | Parameters, web server, `/api/*` endpoints |
+| `system.go` | Server metrics (`/proc/stat`, `/proc/meminfo`, `/proc/diskstats`, disk usage) |
+| `store.go` | Writing the history to disk and loading it on restart |
+| `haproxy.go` | Reading from the stats socket (the allowed commands are here), time range calculation |
+| `config.go` | Reading haproxy.cfg: sections, `defaults` inheritance, log targets, Host capture |
+| `logformat.go` | Turning a `log-format` definition into a parser (httplog, httpslog, tcplog, custom) |
+| `logtail.go` | Following the log file / journald, per-minute summaries, path and code breakdowns |
+| `watch.go` | Following the configuration, log source and socket while running; `/api/config` |
+| `notes.go` | Configuration notes (what is missing, what it affects, which line could be added) |
+| `detect.go` | Pre-installation detection and compatibility report (`-detect`) |
+| `listen.go` | Choosing the IP the dashboard listens on (excluding keepalived VIPs) |
+| `access.go` | Checking which networks may reach the dashboard |
+| `cloudflare.go` | Built-in Cloudflare IP ranges (for labeling) |
+| `search.go` | Log search: including rotated and compressed files, reading from the end backwards |
+| `*_test.go` | Tests for the parser, configuration compatibility, memory, attack resilience, search, settings validation and access |
+| `webapp/` | The dashboard interface (React) and icon (`favicon.svg`, `favicon.png`); `build.sh` builds it and embeds it in the program |
+| `deploy/` | `install.sh` and `uninstall.sh` |
 
-## Yeni sürüm yayınlama
+## Publishing a new release
 
-1. `CHANGELOG.md` dosyasına yeni sürümü yaz. Bir önceki sürümün "Kurulum ve güncelleme" bölümünü olduğu gibi kopyala; her sürümde aynıdır.
-2. GitHub'da **Releases > Draft a new release**, yeni bir etiket oluştur (ör. `v0.8.1`), başlığa `haproxy-lens 0.8.1` yaz.
-3. Açıklama kutusuna `CHANGELOG.md`'deki o sürüm bölümünün tamamını yapıştır (en üstteki sürüm numarası satırı hariç). Kurulum komutları böylece release sayfasında hazır gelir.
-4. **Publish release**'e bas. **Set as a pre-release** işaretli olmamalı, yoksa `latest` adresi o sürümü göstermez.
-5. **Actions** sekmesindeki `release` işi birkaç dakika içinde paketleri derleyip release'e ekler. Sunucularda `wget` çekmeden önce bu işin yeşile dönmesini bekle.
+1. Add the new version to `CHANGELOG.md`. Copy the "Kurulum ve güncelleme" (installation and update) part of the previous version as is; it is the same for every version.
+2. On GitHub, go to **Releases > Draft a new release**, create a new tag (e.g. `v1.1.0`), and set the title to `haproxy-lens 1.1.0`.
+3. Paste that version's whole section from `CHANGELOG.md` into the description (except the version number line at the top). This way the installation commands are ready on the release page.
+4. Click **Publish release**. **Set as a pre-release** must not be checked, otherwise the `latest` address will not point to that version.
+5. The `release` job in the **Actions** tab builds the packages and attaches them to the release within a few minutes. Wait for that job to turn green before running `wget` on the servers.
 
-Sürüm numarası: hata düzeltmesinde son hane (0.8.0 → 0.8.1), yeni özellikte ortadaki hane (0.8.0 → 0.9.0) artar.
+Version numbers: the last digit goes up for bug fixes (1.0.0 → 1.0.1), the middle one for new features (1.0.0 → 1.1.0).
 
-## Lisans ve markalar
+## License and trademarks
 
-MIT. Ayrıntılar için `LICENSE` dosyasına bakın.
+MIT. See the `LICENSE` file for details.
 
-Bu bağımsız bir açık kaynak projedir; HAProxy Technologies ile bir ilgisi, ortaklığı ya da onayı yoktur. "HAProxy" adı yalnızca uyumlu olunan yazılımı belirtmek için kullanılır. Projenin simgesi özgündür ve HAProxy'nin logosuyla benzerlik taşımaz.
+This is an independent open-source project; it is not affiliated with, partnered with or endorsed by HAProxy Technologies. The name "HAProxy" is used only to identify the software it is compatible with. The project's icon is original and does not resemble the HAProxy logo.
