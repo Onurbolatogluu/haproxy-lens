@@ -1399,14 +1399,17 @@ type LogReport struct {
 	Parsed    int64            `json:"parsed"`
 	LastAt    int64            `json:"lastAt"`
 	Kinds     map[string]int64 `json:"kinds"`
-	Paths     []PathRow        `json:"paths"`
-	CodePaths []CodePathRow    `json:"codePaths"`
-	Backends  []BackendLogRow  `json:"backends"`
-	Classes   [4]int64         `json:"classes"` // 2xx, 3xx, 4xx, 5xx toplamları
-	Blocked   []BlockRow       `json:"blocked"`
-	Clients   []ClientRow      `json:"clients"`
-	CFKnown   bool             `json:"cfKnown"`
-	HostLines int64            `json:"hostLines"` // aralıkta alan adı bulunan satır sayısı
+	// Son 2 dakikanın tür sayıları (seçili aralıktan bağımsız): kritik bulgunun şu an
+	// sürüp sürmediğini söyler
+	RecentKinds map[string]int64 `json:"recentKinds"`
+	Paths       []PathRow        `json:"paths"`
+	CodePaths   []CodePathRow    `json:"codePaths"`
+	Backends    []BackendLogRow  `json:"backends"`
+	Classes     [4]int64         `json:"classes"` // 2xx, 3xx, 4xx, 5xx toplamları
+	Blocked     []BlockRow       `json:"blocked"`
+	Clients     []ClientRow      `json:"clients"`
+	CFKnown     bool             `json:"cfKnown"`
+	HostLines   int64            `json:"hostLines"` // aralıkta alan adı bulunan satır sayısı
 	// Eski dakikalar sadeleştiği için ayrıntı ve listeler daha kısa bir süreyi kapsar
 	DetailMinutes int `json:"detailMinutes"`
 	ListMinutes   int `json:"listMinutes"`
@@ -1423,7 +1426,7 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 		minutes = a.retention
 	}
 	rep := LogReport{Enabled: true, Source: a.source, Error: a.lastErr, Minutes: minutes, Lines: a.lines, Parsed: a.parsed,
-		Kinds: map[string]int64{}, CFKnown: len(a.cfNets) > 0,
+		Kinds: map[string]int64{}, RecentKinds: map[string]int64{}, CFKnown: len(a.cfNets) > 0,
 		Retention: a.retention}
 	rep.DetailMinutes, rep.ListMinutes = a.kapsam(a.simdiDk())
 	if !a.lastAt.IsZero() {
@@ -1443,6 +1446,9 @@ func (a *LogAnalyzer) Report(minutes int) LogReport {
 		}
 		for k, v := range b.kinds {
 			rep.Kinds[k] += v
+			if m > a.simdiDk()-sonDakika {
+				rep.RecentKinds[k] += v
+			}
 		}
 		for k, v := range b.paths {
 			t := paths[k]

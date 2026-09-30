@@ -4,6 +4,23 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 1.0.15
+
+- **Kritik uyarılar şu anki durumu gösteriyor.** Bulgular seçili zaman aralığına göre hesaplanıyordu: sağlık kontrolü olmayan bir sunucuya bağlanılamadığında uyarı kırmızı çıkıyor, ama sorun düzeldikten sonra da 15 dakikalık ya da 1 saatlik görünümde, aralığın içinde kaldığı için "bağlanılamıyor" diye kırmızı görünmeye devam ediyordu. Artık ajan seçili aralıktan bağımsız olarak son 2 dakikanın verisini de gönderiyor:
+  - Sorun **son 2 dakikada** sürüyorsa: kırmızı, "ciddi sorun" ("son 2 dakikada N başarısız bağlantı denemesi").
+  - Sorun aralığın içinde olmuş ama **son 2 dakikadır tekrarlamamışsa**: sarı ve açıkça "sorun düzelmiş görünüyor". Geçmişte olduğu bilgisi kaybolmuyor.
+- Aynı ayrım log'dan gelen "çalışan sunucu olmadığı için 503 aldı" uyarısına da uygulandı.
+- Sayfanın üstündeki "N ciddi sorun var" başlığı böylece yalnızca şu an süren sorunları sayıyor.
+- Ajan açıldıktan hemen sonra son 2 dakikanın verisi henüz yoksa uyarı eskisi gibi aralığın toplamıyla yazılıyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 1.0.14
 
 - **Şeritlerde başlık ve değerler iki satıra kaymıyor.** Üst şeritte "Sunucu hatası oranı" başlığı ve "1 gün 2 saat" gibi değerler, tablette de log özetindeki "Yönlendirme (3xx)" gibi başlıklar iki satıra bölünüp komşu kutularla hizayı bozuyordu. Yazı boyutu artık kutunun genişliğine göre ayarlanıyor; geniş ekranda eski boyutunda. Üst şerit, sunucu şeridi ve log özeti birlikte düzeltildi.

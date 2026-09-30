@@ -398,13 +398,16 @@ func (p *StatsPoller) store(s *Snapshot) {
 }
 
 type StateResponse struct {
-	OK        bool         `json:"ok"`
-	Error     string       `json:"error,omitempty"`
-	ErrorAt   int64        `json:"errorAt,omitempty"`
-	Cur       *Snapshot    `json:"cur"`
-	Prev      *Snapshot    `json:"prev"`
-	History   []Point      `json:"history"`
-	Window    *Window      `json:"window"`
+	OK      bool      `json:"ok"`
+	Error   string    `json:"error,omitempty"`
+	ErrorAt int64     `json:"errorAt,omitempty"`
+	Cur     *Snapshot `json:"cur"`
+	Prev    *Snapshot `json:"prev"`
+	History []Point   `json:"history"`
+	Window  *Window   `json:"window"`
+	// Son 2 dakika, seçili aralıktan bağımsız. Bulgular "sorun şu an sürüyor mu, yoksa
+	// aralığın içinde olup düzelmiş mi" ayrımını bununla yapar.
+	Recent    *Window      `json:"recent,omitempty"`
 	Retention int          `json:"retention"` // dakika cinsinden saklama süresi
 	System    *SystemState `json:"system,omitempty"`
 }
@@ -455,6 +458,9 @@ func (r StateResponse) Minutes() int {
 	return 60
 }
 
+// "Şu an" sayılan süre: kritik bulgular bu süre içinde yeni olay var mı diye bakar
+const sonDakika = 2
+
 func (p *StatsPoller) State(minutes int) StateResponse {
 	minutes = p.clampMinutes(minutes)
 	p.mu.RLock()
@@ -476,6 +482,7 @@ func (p *StatsPoller) State(minutes int) StateResponse {
 	resp.History = downsample(ince, maxChartPts)
 
 	resp.Window = p.window(from, minutes)
+	resp.Recent = p.window(p.cur.At-sonDakika*60_000, sonDakika)
 	if minutes > fineWindowMin {
 		resp.Window = p.windowFromMinutes(from, minutes)
 	} else if dw := p.windowFromMinutes(from, minutes); dw != nil {

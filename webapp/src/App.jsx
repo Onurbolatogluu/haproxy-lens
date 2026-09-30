@@ -1114,7 +1114,11 @@ function computeRates(prevRows, rows, dt) {
   return out;
 }
 
-function buildFindings(model, rates, logs, wrates = {}, label = "") {
+// recent: son 2 dakikanın oranları (seçili aralıktan bağımsız). Kırmızı ("ciddi") bulgu
+// yalnızca sorun şu an sürüyorsa verilir; aralığın içinde olup düzelmiş bir sorun sarı
+// kalır ve düzeldiğini söyler. Eskiden 15 dakikalık görünümde düzelmiş bir sorun hâlâ
+// "bağlanılamıyor" diye kırmızı görünüyordu.
+function buildFindings(model, rates, logs, wrates = {}, label = "", recent = null) {
   const out = [];
   const add = (level, target, text) => out.push({ level, target, text });
   let nocheck = 0, total = 0;
@@ -1137,7 +1141,15 @@ function buildFindings(model, rates, logs, wrates = {}, label = "") {
       // Aralık toplamı kullanılıyor: saniyelik değer her yenilemede bulguyu görünüp kaybeder,
       // bu da listenin boyunu değiştirip sayfayı oynatırdı.
       const ec = wrates[keyOf(s)]?.econ || 0;
-      if (ec > 0) add(k === "nocheck" ? "bad" : "warn", name, `${s.svname} (${name}) sunucusuna bağlanılamıyor: ${label ? `${label} içinde` : "son ölçümde"} ${fmtNum(ec)} başarısız bağlantı denemesi.${k === "nocheck" ? " Sağlık kontrolü olmadığı için HAProxy onu devre dışı bırakmıyor, istekler ona gitmeye devam ediyor." : ""}`);
+      const ecSimdi = recent ? recent[keyOf(s)]?.econ || 0 : ec;
+      if (ec > 0 && ecSimdi > 0) {
+        // Son 2 dakikanın verisi yoksa (ajan yeni açıldıysa) sayı aralığın toplamıdır; öyle yazılır
+        const ne = recent ? `son 2 dakikada ${fmtNum(ecSimdi)} başarısız bağlantı denemesi${label && ec > ecSimdi ? ` (${label} içinde toplam ${fmtNum(ec)})` : ""}`
+          : `${label ? `${label} içinde` : "son ölçümde"} ${fmtNum(ec)} başarısız bağlantı denemesi`;
+        add(k === "nocheck" ? "bad" : "warn", name, `${s.svname} (${name}) sunucusuna bağlanılamıyor: ${ne}.${k === "nocheck" ? " Sağlık kontrolü olmadığı için HAProxy onu devre dışı bırakmıyor, istekler ona gitmeye devam ediyor." : ""}`);
+      } else if (ec > 0) {
+        add("warn", name, `${s.svname} (${name}) sunucusuna ${label ? `${label} içinde` : "yakın zamanda"} ${fmtNum(ec)} bağlantı denemesi başarısız oldu; son 2 dakikadır yeni başarısız deneme yok, sorun düzelmiş görünüyor.`);
+      }
       const cd = num(s.chkdown);
       if (cd >= 5) add("warn", name, `${s.svname} (${name}) HAProxy açıldığından beri ${cd} kez düşüp kalktı. Kararsız çalışıyor olabilir.`);
     }
@@ -1184,7 +1196,14 @@ function buildFindings(model, rates, logs, wrates = {}, label = "") {
       add("warn", "logs", `${sure} ${fmtNum(nm)} istek hiçbir backend'e eşleşmediği için 503 aldı.${t ? ` En çok: ${t.method} ${t.path} (${fmtNum(t.n)}).` : ""}`);
     }
     const ns = logs.kinds.noserver || 0;
-    if (ns > 0) add("bad", "logs", `${sure} ${fmtNum(ns)} istek, seçilen backend'de çalışan sunucu olmadığı için 503 aldı.`);
+    const nsSimdi = logs.recentKinds ? logs.recentKinds.noserver || 0 : ns;
+    if (ns > 0 && nsSimdi > 0) {
+      add("bad", "logs", logs.recentKinds
+        ? `Son 2 dakikada ${fmtNum(nsSimdi)} istek, seçilen backend'de çalışan sunucu olmadığı için 503 aldı${ns > nsSimdi ? ` (${sure.toLowerCase()} toplam ${fmtNum(ns)})` : ""}.`
+        : `${sure} ${fmtNum(ns)} istek, seçilen backend'de çalışan sunucu olmadığı için 503 aldı.`);
+    } else if (ns > 0) {
+      add("warn", "logs", `${sure} ${fmtNum(ns)} istek, seçilen backend'de çalışan sunucu olmadığı için 503 aldı; son 2 dakikadır yeni böyle istek yok, sorun düzelmiş görünüyor.`);
+    }
   }
   // Sağlık kontrolü olmayan sunucular artık "Yapılandırma notları" bölümünde (config'ten, backend adlarıyla)
   void nocheck; void total;
@@ -2395,9 +2414,10 @@ export default function App() {
   const model = useMemo(() => buildModel(cur?.rows || []), [cur]);
   const rates = useMemo(() => (cur && prev ? computeRates(prev.rows, cur.rows, (cur.at - prev.at) / 1000) : {}), [cur, prev]);
   const wrates = useMemo(() => windowToRates(state?.window), [state]);
+  const recentRates = useMemo(() => (state?.recent ? windowToRates(state.recent) : null), [state]);
   const label = winLabel(state?.window, minutes);
   const win = useMemo(() => ({ wrates, label, minutes, logs }), [wrates, label, minutes, logs]);
-  const findings = useMemo(() => buildFindings(model, rates, logs, wrates, label), [model, rates, logs, wrates, label]);
+  const findings = useMemo(() => buildFindings(model, rates, logs, wrates, label, recentRates), [model, rates, logs, wrates, label, recentRates]);
   const points = state?.history || [];
 
   const toggle = (name) => setExpanded((s) => {

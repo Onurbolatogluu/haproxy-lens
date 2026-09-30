@@ -1004,3 +1004,25 @@ func TestSistemGecmisiBirlestirme(t *testing.T) {
 		t.Fatal("en yeni nokta ince ölçümden gelmeli")
 	}
 }
+
+// Son 2 dakikanın tür sayıları seçili aralıktan bağımsız olmalı: kritik bulgu "şu an
+// sürüyor mu" diye buna bakar. Aralığın başındaki eski olaylar buraya girmemeli.
+func TestSonIkiDakikaTurleri(t *testing.T) {
+	a := NewLogAnalyzer("file:/yok", "")
+	simdi := time.Now()
+	kayit := func(ts time.Time, tur string) logRecord {
+		return logRecord{At: ts, Client: "203.0.113.5", Frontend: "fe", Backend: "be", Server: "<NOSRV>",
+			Status: 503, Method: "GET", Path: "/x", RawPath: "/x", Kind: tur}
+	}
+	for i := 0; i < 10; i++ {
+		a.add(kayit(simdi.Add(-10*time.Minute), KindNoServer)) // 10 dakika önce: düzelmiş sorun
+	}
+	a.add(kayit(simdi, KindNoServer)) // şu an
+	rep := a.Report(15)
+	if rep.Kinds[KindNoServer] != 11 {
+		t.Fatalf("aralık toplamı: %d, beklenen 11", rep.Kinds[KindNoServer])
+	}
+	if rep.RecentKinds[KindNoServer] != 1 {
+		t.Fatalf("son 2 dakika: %d, beklenen 1", rep.RecentKinds[KindNoServer])
+	}
+}
