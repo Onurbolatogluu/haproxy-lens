@@ -4,6 +4,26 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 1.1.1
+
+Olay incelemesi sadeleşti; ilk defa bakan birinin de anlayabilmesi için.
+
+- **Grafikler sade.** "Dakikada gelen istek" grafiğinde artık yalnızca iki renk var: sunucu hatası (5xx) alan istekler kırmızı, geri kalanı tek renk. Yanıt süresi grafiği tek çizgi: ortalama yanıt süresi. Bir sunucunun düştüğü an kesikli çizgiyle işaretli, öteki olaylar listede. Eksendeki süre yazıları ("700 ms") artık kesilmiyor.
+- **Kırmızı arka planlar kaldırıldı.** Sunucu hatası oranının eşiği aştığı dakikaları işaretliyordu. Hata oranı sürekli eşik civarında gezinen bir backend'de (ör. hep %8–14 hata veren bir test ortamı) dakikadan dakikaya açılıp kapanıyor, yamalı görünüyor ve ne anlama geldiği anlaşılmıyordu.
+- **Süregelen hata "olay" sayılmıyor.** Sorunlu dönem artık aralığın en sakin dakikalarıyla karşılaştırılarak bulunuyor. Hata oranı aralık boyunca hep yüksekse özet "arttı" demiyor, "aralığın tamamı boyunca yüksek; o saatte başlayan bir olaydan çok süregelen bir sorun" diyor.
+- **`http_front` artık backend listesinde değil.** HAProxy'nin hiçbir backend'e göndermeden kendisinin yanıtladığı istekler (yönlendirmeler, engellenenler, hiçbir backend'e uymayan adresler) log'a frontend'in adıyla yazılır; bu yüzden backend gibi görünüyordu. Artık tablonun altında "Hiçbir backend'e gitmeyen istekler" başlığıyla, türlerine göre ayrı gösteriliyor ("776 yönlendirme, 97 eşleşen backend yok"). Adres listelerinde de bu istekler "HAProxy yanıtladı" diye işaretli; özet, eşleşmeyen adres yüzünden 503 alan istekleri ayrıca yazıyor.
+- **Backend tablosu sade.** Sütunlar: Backend, İstek, Sunucu hatası, Yanıt süresi. Her backend'in yanında "Sorunlu", "Dikkat" ya da "Normal" yazıyor. "Çalışan sunucu yok" sütunu yalnızca böyle bir durum olduğunda görünüyor. 4xx ve %95 süre gibi ayrıntılar satır açılınca düz cümlelerle yazıyor. Başlığın altında backend'in ne olduğu bir cümleyle anlatılıyor.
+- **Üst şeritte yalnızca ortalama yanıt süresi.** "Ortalama / %95" yan yana yazılınca, birkaç çok yavaş istek ortalamayı %95'in üstüne çıkardığında kafa karıştırıyordu.
+- **HAProxy'ye ulaşılamadığında da** Olay incelemesi ve Log'da ara bölümleri görünüyor. İkisi de yalnızca log'u okuduğu için tam da HAProxy çöktüğünde işe yarıyorlar; eskiden stats okunamayınca hiç görünmüyorlardı.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 1.1.0
 
 - **Yeni: Olay incelemesi.** "Dün 14:00 ile 14:40 arasında ne oldu?" sorusu için. Başlangıç ve bitiş saati seçiyorsun (ya da son 30 dk, 1 saat, 6 saat, 24 saat, dün), ajan o aralığı doğrudan log dosyalarından okuyor; panelin 24 saatlik saklama süresine takılmıyor, log ne kadar geriye gidiyorsa oraya kadar bakabiliyor (tek incelemede en fazla 7 gün). Sayfanın üstündeki **Olay incelemesi** düğmesi bölüme götürür. Gösterilenler:

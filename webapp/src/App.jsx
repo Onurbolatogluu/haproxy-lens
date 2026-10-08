@@ -2277,8 +2277,8 @@ function olayOzeti(res) {
 
   // 1) Sunucu hatalarının arttığı dönem
   const oranlar = s.filter((d) => d.n >= 5).map((d) => d.c[3] / d.n).sort((a, b) => a - b);
-  const sakin = oranlar.length ? oranlar[Math.floor(oranlar.length / 4)] : 0;
-  const esik = Math.min(0.1, Math.max(0.05, sakin * 3));
+  const sakin = oranlar.length ? oranlar[Math.floor(oranlar.length / 10)] : 0;
+  const esik = Math.max(0.05, sakin * 2 + 0.03);
   const sorunlu = dilimGruplari(s, (d) => d.c[3] >= 3 && d.n > 0 && d.c[3] / d.n >= esik);
   let anaDonem = null;
   if (sorunlu.length) {
@@ -2301,8 +2301,11 @@ function olayOzeti(res) {
     if (basta && sonda) t = `Sunucu hataları (5xx) aralığın tamamı boyunca yüksek: ${fmtPct(e5 / res.n)}. Ne zaman başladığını görmek için daha erken bir başlangıç seç.`;
     else if (basta) t += " Sorun aralığın başında zaten vardı; ne zaman başladığını görmek için daha erken bir başlangıç seç.";
     else if (sonda) t += " Aralığın sonunda hâlâ sürüyordu.";
-    if (sorunlu.length > 1) t += ` Bu aralıkta ${sorunlu.length} ayrı artış var; grafikte kırmızı alanlar.`;
+    if (sorunlu.length > 1) t += ` Bu aralıkta ${sorunlu.length} ayrı artış var.`;
     out.push({ lvl: "bad", text: t });
+  } else if (res.n >= 100 && e5 / res.n >= 0.03) {
+    // Belirli bir anda artmamış, aralık boyunca hep yüksek: bir "olay" değil, süregelen bir sorun
+    out.push({ lvl: "bad", text: `Sunucu hataları (5xx) aralığın tamamı boyunca yüksek: isteklerin ${fmtPct(e5 / res.n)} kadarı. Belirli bir anda artmamış; bu, o saatte başlayan bir olaydan çok süregelen bir sorun gibi görünüyor.` });
   }
 
   // 2) Hangi backend
@@ -2312,10 +2315,11 @@ function olayOzeti(res) {
     // Genel 5xx oranı düşükse (%1'in altı) bu bir sorun değil, bilgi: sakin bir aralıkta birkaç
     // 502 her zaman olur ve "sorun var" gibi yazılınca yanıltıyordu
     const onemli = anaDonem || e5 / res.n >= 0.01;
+    const surekli = !anaDonem && res.n >= 100 && e5 / res.n >= 0.03;
     if (b && b.c[3] > 0) {
       const pay = b.c[3] / e5;
       out.push({
-        lvl: anaDonem ? "bad" : onemli ? "warn" : "info",
+        lvl: anaDonem || surekli ? "bad" : onemli ? "warn" : "info",
         text: (onemli ? "" : `Bu aralıkta ${fmtNum(e5)} sunucu hatası (5xx) var, isteklerin ${fmtPct(e5 / res.n)} kadarı. `)
           + `Sunucu hatalarının ${kadari(pay, "hepsi")} ${b.name} backend'inden; bu backend'in 5xx oranı ${fmtPct(b.c[3] / b.n)}.`
           + (pay <= 0.9995 && bes[1] && bes[1].c[3] > 0 ? ` Sonra ${bes[1].name} geliyor (${fmtNum(bes[1].c[3])} hata).` : ""),
@@ -2329,6 +2333,10 @@ function olayOzeti(res) {
       const pay = x.errors / e5;
       out.push({ lvl: "info", text: `${pay > 0.9995 ? "Bu hataların hepsinde" : `Bu hataların ${fmtPct(pay)} kadarında`} HAProxy'nin log'a yazdığı sebep (${x.code}): ${ilkKucuk(termAcikla(x.code))}.` });
     }
+  }
+  const eslesmeyen = (res.frontends || []).reduce((a, f) => a + (f.kinds?.nomatch || 0), 0);
+  if (eslesmeyen > 0) {
+    out.push({ lvl: eslesmeyen / res.n >= 0.01 ? "warn" : "info", text: `${fmtNum(eslesmeyen)} istek, gittiği adrese uyan bir backend olmadığı için HAProxy'nin kendisinden 503 aldı. Bu istekler hiçbir sunucuya ulaşmadı.` });
   }
   for (const b of bes) {
     const ns = b.kinds?.noserver || 0;
@@ -2421,18 +2429,19 @@ function KucukBtn({ children, onClick }) {
   );
 }
 
-function OlayGrafik({ res, sorunlu, onSec }) {
+// Sade grafikler: ilk grafikte yalnızca iki tür (sunucu hatası alanlar kırmızı, geri kalanı tek
+// renk), ikincisinde tek çizgi. Eskiden beş renkli yığın, iki çizgi ve 5xx eşiğini aşan
+// dakikaları gösteren kırmızı arka planlar vardı; hata oranı sürekli eşik civarında gezinen
+// bir backend'de bu arka planlar yamalı görünüyor ve ne anlama geldiği anlaşılmıyordu.
+function OlayGrafik({ res, onSec }) {
   const z = zamanYazici(res.from, res.to);
-  const adim = res.step;
-  const veri = (res.series || []).map((d) => ({
-    t: d.t,
-    ...Object.fromEntries(["2xx", "3xx", "4xx", "5xx", "Diğer"].map((k, i) => [k, d.c[i] / dilimDk(res, d)])),
-    Ortalama: d.avg >= 0 ? d.avg : null, "%95": d.p95 >= 0 ? d.p95 : null,
-  }));
+  const adimMs = res.step * 60000;
+  const veri = (res.series || []).map((d) => {
+    const dk = dilimDk(res, d);
+    return { t: d.t, Diğer: (d.n - d.c[3]) / dk, "5xx": d.c[3] / dk, Süre: d.avg >= 0 ? d.avg : null };
+  });
   const [sec, setSec] = useState(null);
   const tick = { fill: C.faint, fontSize: 11 };
-  const seriler = [["2xx", "Başarılı", C.ok], ["3xx", "Yönlendirme", C.info], ["4xx", "İstemci hatası", C.warn], ["5xx", "Sunucu hatası", C.bad], ["Diğer", "Yanıtsız", C.faint]];
-  const adimMs = adim * 60000;
   const bitir = () => {
     if (sec && sec.a != null && sec.b != null && sec.a !== sec.b) {
       const a = Math.min(sec.a, sec.b);
@@ -2442,177 +2451,211 @@ function OlayGrafik({ res, sorunlu, onSec }) {
     setSec(null);
   };
   const ortak = {
-    data: veri, margin: { top: 6, right: 6, left: -14, bottom: 0 },
+    data: veri, margin: { top: 6, right: 8, left: 0, bottom: 0 },
     onMouseDown: (e) => e && e.activeLabel != null && setSec({ a: e.activeLabel, b: null }),
     onMouseMove: (e) => sec && e && e.activeLabel != null && setSec({ ...sec, b: e.activeLabel }),
     onMouseUp: bitir,
   };
   const eksen = <XAxis dataKey="t" type="number" scale="time" domain={["dataMin", "dataMax"]} tickFormatter={z.eksen} tick={tick} tickLine={false} axisLine={false} minTickGap={48} />;
-  const isaret = (sorunlu || []).map((g, i) => (
-    <ReferenceArea key={i} x1={veri[g.bas]?.t} x2={veri[Math.min(g.son + 1, veri.length - 1)]?.t} fill={C.bad} fillOpacity={0.12} stroke="none" ifOverflow="hidden" />
+  // Yalnızca sunucu düşmeleri işaretlenir; öteki olaylar aşağıdaki listede
+  const dusme = (res.events || []).filter((o) => o.type === "down" && o.at >= res.from).slice(0, 20);
+  const olayCizgi = dusme.map((o, i) => (
+    <ReferenceLine key={i} x={Math.floor((o.at - res.from) / adimMs) * adimMs + res.from} stroke={C.bad} strokeDasharray="4 4" strokeOpacity={0.9} ifOverflow="hidden" />
   ));
   const secim = sec && sec.b != null ? <ReferenceArea x1={sec.a} x2={sec.b} fill={C.info} fillOpacity={0.18} stroke={C.info} strokeOpacity={0.5} /> : null;
-  const olaylar = (res.events || []).filter((o) => o.at >= res.from && (o.type === "down" || o.type === "noserver" || o.type === "start"));
-  const olayCizgi = olaylar.slice(0, 40).map((o, i) => (
-    <ReferenceLine key={i} x={Math.floor((o.at - res.from) / adimMs) * adimMs + res.from} stroke={OLAY_TUR[o.type][1]} strokeDasharray="3 3" strokeOpacity={0.8} ifOverflow="hidden" />
-  ));
   const Legend = ({ items }) => (
     <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs" style={{ color: C.muted }}>
       {items.map(([n, col, kesik]) => (
-        <span key={n} className="inline-flex items-center gap-2"><span style={{ width: 10, height: kesik ? 0 : 3, borderTop: kesik ? `2px dashed ${col}` : "none", background: kesik ? "none" : col, borderRadius: 2 }} />{n}</span>
+        <span key={n} className="inline-flex items-center gap-2">
+          <span style={{ width: 12, height: kesik ? 0 : 8, borderTop: kesik ? `2px dashed ${col}` : "none", background: kesik ? "none" : col, borderRadius: 2 }} />{n}
+        </span>
       ))}
     </div>
   );
-  const birimNot = adim === 1 ? "Her nokta bir dakika." : `Her nokta ${adim} dakika; değer o dilimin dakika ortalaması.`;
+  const dakika = res.step === 1 ? "Her nokta bir dakika." : `Her nokta ${res.step} dakikalık bir dilimin dakika ortalaması.`;
   return (
     <div className="grid gap-4 md:grid-cols-2 mt-4" style={{ userSelect: "none" }}>
-      <Panel title="Dakikadaki istek, yanıt türüne göre"
-        note={`${birimNot} Kırmızı alanlar sunucu hatalarının arttığı dönem, kesikli çizgiler sunucu olayları. Bir bölümü fareyle sürükleyerek seçersen o aralık incelenir.`}>
+      <Panel title="Dakikada gelen istek"
+        note={`${dakika} Kırmızı kısım sunucu hatası (5xx) alan istekler.${dusme.length ? " Kesikli çizgi: bir sunucunun düştüğü an." : ""} Grafikte fareyle sürükleyerek daha dar bir aralık seçebilirsin.`}>
         <ResponsiveContainer width="100%" height={220}>
           <AreaChart {...ortak}>
             <CartesianGrid stroke={C.line} vertical={false} />
             {eksen}
-            <YAxis tick={tick} tickLine={false} axisLine={false} width={48} />
+            <YAxis tick={tick} tickLine={false} axisLine={false} width={44} />
             <Tooltip cursor={{ stroke: C.faint }} content={<ChartTip birim={(v) => `${fmtRate(v)} istek/dk`} toplamGoster etiketYaz={z.kisa} />} />
-            {isaret}
+            <Area type="monotone" dataKey="Diğer" name="Sunucu hatası olmayan" stackId="1" stroke={C.info} strokeWidth={1.5} fill={C.info} fillOpacity={0.25} isAnimationActive={false} dot={false} />
+            <Area type="monotone" dataKey="5xx" name="Sunucu hatası (5xx)" stackId="1" stroke={C.bad} strokeWidth={1.5} fill={C.bad} fillOpacity={0.6} isAnimationActive={false} dot={false} />
             {olayCizgi}
-            {seriler.map(([key, name, col]) => (
-              <Area key={key} type="monotone" dataKey={key} name={name} stackId="1" stroke={col} strokeWidth={1} fill={col} fillOpacity={0.55} isAnimationActive={false} dot={false} />
-            ))}
             {secim}
           </AreaChart>
         </ResponsiveContainer>
-        <Legend items={[...seriler.map(([, n, c]) => [n, c]), ["Sunucu olayı", C.bad, true]]} />
+        <Legend items={[["Sunucu hatası olmayan", C.info], ["Sunucu hatası (5xx)", C.bad], ...(dusme.length ? [["Sunucu düştü", C.bad, true]] : [])]} />
       </Panel>
-      <Panel title="Yanıt süresi" note={`${birimNot} Ortalama ve %95: isteklerin %95'i bu süreden kısa sürede yanıtlandı. Süre, isteğin HAProxy'ye gelişinden yanıtın bitişine kadar.`}>
+      <Panel title="Ortalama yanıt süresi" note={`${dakika} İsteğin HAProxy'ye gelişinden yanıtın bitişine kadar geçen süre.`}>
         <ResponsiveContainer width="100%" height={220}>
           <AreaChart {...ortak}>
             <CartesianGrid stroke={C.line} vertical={false} />
             {eksen}
-            {/* Eksende kısa yazım ("30 sn", "500 ms"); "30,0 sn" dar eksene sığmayıp kesiliyordu */}
-            <YAxis tick={tick} tickLine={false} axisLine={false} width={56} tickFormatter={(v) => (v >= 1000 ? `${trDec(v / 1000, v % 1000 ? 1 : 0)} sn` : `${Math.round(v)} ms`)} />
+            {/* Eksende kısa yazım ("1,5 sn", "500 ms"); sol boşluk yazının kesilmemesi için */}
+            <YAxis tick={tick} tickLine={false} axisLine={false} width={60} tickFormatter={(v) => (v >= 1000 ? `${trDec(v / 1000, v % 1000 ? 1 : 0)} sn` : `${Math.round(v)} ms`)} />
             <Tooltip cursor={{ stroke: C.faint }} content={<ChartTip birim={(v) => fmtMs(v)} etiketYaz={z.kisa} />} />
-            {isaret}
+            <Area type="monotone" dataKey="Süre" name="Ortalama yanıt süresi" stroke={C.info} strokeWidth={2} fill={C.info} fillOpacity={0.15} isAnimationActive={false} dot={false} connectNulls={false} />
             {olayCizgi}
-            <Area type="monotone" dataKey="%95" name="%95" stroke={C.warn} fill={C.warn} fillOpacity={0.12} isAnimationActive={false} dot={false} connectNulls={false} />
-            <Area type="monotone" dataKey="Ortalama" stroke={C.info} fill={C.info} fillOpacity={0.12} isAnimationActive={false} dot={false} connectNulls={false} />
             {secim}
           </AreaChart>
         </ResponsiveContainer>
-        <Legend items={[["Ortalama", C.info], ["%95", C.warn]]} />
       </Panel>
     </div>
   );
 }
 
+// Backend'in durumu tek kelimeyle: ilk defa bakan biri hangisine bakması gerektiğini görsün
+function beDurum(b) {
+  const oran = b.n ? b.c[3] / b.n : 0;
+  if ((b.kinds?.noserver || 0) > 0 || oran >= 0.05) return ["Sorunlu", C.bad];
+  if (oran >= 0.01 || b.avg >= 2000) return ["Dikkat", C.warn];
+  return ["Normal", C.ok];
+}
+
+// HAProxy'nin backend'e göndermeden kendisinin yanıtladığı isteklerin türleri
+const ONYUZ_TUR = [["redirect", "yönlendirme (ör. http'den https'e)"], ["denied", "engellendi (403)"], ["nomatch", "eşleşen backend yok (503)"], ["proxy", "diğer (hatalı istek, zaman aşımı...)"]];
+
 function OlayBackendler({ res }) {
   const [acik, setAcik] = useState(() => new Set());
   const bes = res.backends || [];
-  if (!bes.length) return null;
+  const fes = res.frontends || [];
+  if (!bes.length && !fes.length) return null;
   const z = zamanYazici(res.from, res.to);
   const ac = (ad) => setAcik((s) => { const n = new Set(s); if (n.has(ad)) n.delete(ad); else n.add(ad); return n; });
+  const nsVar = bes.some((b) => (b.kinds?.noserver || 0) > 0);
+  const sutun = nsVar ? 5 : 4;
   return (
-    <Panel title="Backend'ler" note="Bu aralıkta log'da görünen her backend. Sunucu hatası en çok olan üstte. Satıra tıkla: sunucular ve HAProxy'nin isteği neden kestiği açılır.">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm" style={{ minWidth: 560 }}>
-          <thead>
-            <tr className="text-xs text-left" style={{ color: C.muted }}>
-              <th className="py-2 pr-3 font-normal">Backend</th>
-              <th className="py-2 pr-3 font-normal text-right">İstek</th>
-              <th className="py-2 pr-3 font-normal text-right">5xx</th>
-              <th className="py-2 pr-3 font-normal text-right">4xx</th>
-              <th className="py-2 pr-3 font-normal text-right"><Term k="ns_olay">Sunucu yok</Term></th>
-              <th className="py-2 pr-3 font-normal text-right">Ort. süre</th>
-              <th className="py-2 font-normal text-right">%95 süre</th>
-            </tr>
-          </thead>
-          <tbody>
-            {bes.map((b) => {
-              const o = acik.has(b.name);
-              const ns = b.kinds?.noserver || 0;
-              return (
-                <Fragment key={b.name}>
-                  <tr className="hl-row cursor-pointer" style={{ borderTop: `1px solid ${C.line}` }} onClick={() => ac(b.name)}>
-                    <td className="py-2 pr-3 brk">
-                      <span className="inline-flex items-center gap-1.5">
-                        {o ? <ChevronDown size={14} style={{ color: C.faint, flexShrink: 0 }} /> : <ChevronRight size={14} style={{ color: C.faint, flexShrink: 0 }} />}
-                        <span className="brk">{b.name}</span>
-                      </span>
-                    </td>
-                    <td className="py-2 pr-3 text-right tnum">{fmtNum(b.n)}</td>
-                    <td className="py-2 pr-3 text-right tnum nw" style={{ color: b.c[3] ? C.bad : C.faint }}>{b.c[3] ? <>{fmtNum(b.c[3])} <span className="text-xs">({fmtPct(b.c[3] / b.n)})</span></> : "0"}</td>
-                    <td className="py-2 pr-3 text-right tnum" style={{ color: b.c[2] ? C.warn : C.faint }}>{fmtNum(b.c[2])}</td>
-                    <td className="py-2 pr-3 text-right tnum" style={{ color: ns ? C.bad : C.faint }}>{fmtNum(ns)}</td>
-                    <td className="py-2 pr-3 text-right tnum nw">{b.avg >= 0 ? fmtMs(b.avg) : "—"}</td>
-                    <td className="py-2 text-right tnum nw">{b.p95 >= 0 ? fmtMs(b.p95) : "—"}</td>
-                  </tr>
-                  {o && (
-                    <tr>
-                      <td colSpan={7} className="pb-4 pt-1 pl-5">
-                        {b.c[3] > 0 && b.first5xx > 0 && (
-                          <p className="text-xs mb-2" style={{ color: C.muted }}>
-                            İlk sunucu hatası {z.sn(b.first5xx)}, son sunucu hatası {z.sn(b.last5xx)}.
-                          </p>
-                        )}
-                        {(b.servers || []).length > 0 && (
-                          <table className="w-full text-xs mb-3">
-                            <thead>
-                              <tr style={{ color: C.faint }}>
-                                <th className="py-1 pr-3 font-normal text-left">Sunucu</th>
-                                <th className="py-1 pr-3 font-normal text-right">İstek</th>
-                                <th className="py-1 pr-3 font-normal text-right">5xx</th>
-                                <th className="py-1 pr-3 font-normal text-right">Ort. süre</th>
-                                <th className="py-1 pr-3 font-normal text-right">%95</th>
-                                <th className="py-1 font-normal text-right">En uzun</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {b.servers.map((s) => (
-                                <tr key={s.name} style={{ borderTop: `1px solid ${C.line}` }}>
-                                  <td className="py-1 pr-3 brk">{s.name}</td>
-                                  <td className="py-1 pr-3 text-right tnum">{fmtNum(s.n)}</td>
-                                  <td className="py-1 pr-3 text-right tnum nw" style={{ color: s.c[3] ? C.bad : C.faint }}>{fmtNum(s.c[3])}{s.c[3] ? ` (${fmtPct(s.c[3] / s.n)})` : ""}</td>
-                                  <td className="py-1 pr-3 text-right tnum nw">{s.avg >= 0 ? fmtMs(s.avg) : "—"}</td>
-                                  <td className="py-1 pr-3 text-right tnum nw">{s.p95 >= 0 ? fmtMs(s.p95) : "—"}</td>
-                                  <td className="py-1 text-right tnum nw">{s.max >= 0 ? fmtMs(s.max) : "—"}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        )}
-                        {(b.terms || []).length > 0 && (
-                          <div className="text-xs mb-3">
-                            <div className="mb-1" style={{ color: C.faint }}>HAProxy'nin isteği normal bitirmediği durumlar:</div>
-                            <ul>
-                              {b.terms.map((x) => (
-                                <li key={x.code} className="flex items-baseline justify-between gap-3 py-0.5">
-                                  <span><b className="tnum" style={{ color: termRenk(x.code) }}>{x.code}</b> <span style={{ color: C.muted }}>{termAcikla(x.code)}</span></span>
-                                  <span className="tnum nw" style={{ color: C.muted }}>{fmtNum(x.n)}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        <div className="flex flex-wrap gap-4">
-                          {b.c[3] > 0 && <KucukBtn onClick={() => logdaGor(res, { backend: b.name, status: "5xx" })}>Bu backend'in 5xx isteklerini log'da gör</KucukBtn>}
-                          <KucukBtn onClick={() => logdaGor(res, { backend: b.name })}>Bu backend'in bütün isteklerini log'da gör</KucukBtn>
-                        </div>
+    <Panel title="Backend'ler"
+      note="Backend, HAProxy'nin istekleri ilettiği sunucu grubudur (ör. bir sitenin uygulama sunucuları). Sorunlu olanlar üstte. Ayrıntı için satıra tıkla.">
+      {bes.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm" style={{ minWidth: 420 }}>
+            <thead>
+              <tr className="text-xs text-left" style={{ color: C.muted }}>
+                <th className="py-2 pr-3 font-normal">Backend</th>
+                <th className="py-2 pr-3 font-normal text-right">İstek</th>
+                <th className="py-2 pr-3 font-normal text-right">Sunucu hatası</th>
+                {nsVar && <th className="py-2 pr-3 font-normal text-right"><Term k="ns_olay">Sunucu yok</Term></th>}
+                <th className="py-2 font-normal text-right">Yanıt süresi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bes.map((b) => {
+                const o = acik.has(b.name);
+                const ns = b.kinds?.noserver || 0;
+                const [durum, renk] = beDurum(b);
+                return (
+                  <Fragment key={b.name}>
+                    <tr className="hl-row cursor-pointer" style={{ borderTop: `1px solid ${C.line}` }} onClick={() => ac(b.name)}>
+                      <td className="py-2.5 pr-3">
+                        <span className="flex items-center gap-2 min-w-0">
+                          {o ? <ChevronDown size={14} style={{ color: C.faint, flexShrink: 0 }} /> : <ChevronRight size={14} style={{ color: C.faint, flexShrink: 0 }} />}
+                          <span title={durum} style={{ width: 8, height: 8, borderRadius: 99, background: renk, flexShrink: 0 }} />
+                          <span className="brk">{b.name}</span>
+                          <span className="text-xs nw hidden sm:inline" style={{ color: renk }}>{durum}</span>
+                        </span>
                       </td>
+                      <td className="py-2.5 pr-3 text-right tnum">{fmtNum(b.n)}</td>
+                      <td className="py-2.5 pr-3 text-right tnum nw" style={{ color: b.c[3] ? C.text : C.faint }}>
+                        {b.c[3] ? <>{fmtNum(b.c[3])} <span className="text-xs" style={{ color: b.c[3] / b.n >= 0.01 ? C.bad : C.muted }}>{fmtPct(b.c[3] / b.n)}</span></> : "yok"}
+                      </td>
+                      {nsVar && <td className="py-2.5 pr-3 text-right tnum" style={{ color: ns ? C.bad : C.faint }}>{ns ? fmtNum(ns) : "—"}</td>}
+                      <td className="py-2.5 text-right tnum nw">{b.avg >= 0 ? fmtMs(b.avg) : "—"}</td>
                     </tr>
-                  )}
-                </Fragment>
+                    {o && (
+                      <tr>
+                        <td colSpan={sutun} className="pb-4 pt-1 pl-6">
+                          <ul className="text-sm leading-relaxed mb-3" style={{ color: C.muted }}>
+                            <li>
+                              {fmtNum(b.n)} istek geldi.{" "}
+                              {b.c[3] > 0
+                                ? <>{fmtNum(b.c[3])} tanesi sunucu hatası (5xx) aldı ({fmtPct(b.c[3] / b.n)}); ilki {z.sn(b.first5xx)}, sonuncusu {z.sn(b.last5xx)}.</>
+                                : "Hiçbiri sunucu hatası almadı."}
+                            </li>
+                            {ns > 0 && <li style={{ color: C.text }}>{fmtNum(ns)} istek, backend'de çalışan sunucu kalmadığı için 503 aldı.</li>}
+                            {b.c[2] > 0 && <li>{fmtNum(b.c[2])} istek istemci hatası (4xx) aldı: bulunamadı, yetkisiz gibi. Bunlar çoğu zaman kullanıcı ya da bot kaynaklıdır, sunucu sorunu değildir.</li>}
+                            {b.avg >= 0 && <li>Yanıt süresi ortalama {fmtMs(b.avg)}; isteklerin %95'i {fmtMs(b.p95)} içinde yanıtlandı, en uzunu {fmtMs(b.max)}.</li>}
+                          </ul>
+                          {(b.servers || []).length > 0 && (
+                            <table className="w-full text-xs mb-3">
+                              <thead>
+                                <tr style={{ color: C.faint }}>
+                                  <th className="py-1 pr-3 font-normal text-left">Sunucu</th>
+                                  <th className="py-1 pr-3 font-normal text-right">İstek</th>
+                                  <th className="py-1 pr-3 font-normal text-right">Sunucu hatası</th>
+                                  <th className="py-1 font-normal text-right">Yanıt süresi</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {b.servers.map((s) => (
+                                  <tr key={s.name} style={{ borderTop: `1px solid ${C.line}` }}>
+                                    <td className="py-1 pr-3 brk">{s.name}</td>
+                                    <td className="py-1 pr-3 text-right tnum">{fmtNum(s.n)}</td>
+                                    <td className="py-1 pr-3 text-right tnum nw" style={{ color: s.c[3] ? C.bad : C.faint }}>{s.c[3] ? `${fmtNum(s.c[3])} · ${fmtPct(s.c[3] / s.n)}` : "yok"}</td>
+                                    <td className="py-1 text-right tnum nw">{s.avg >= 0 ? fmtMs(s.avg) : "—"}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                          {(b.terms || []).length > 0 && (
+                            <div className="text-xs mb-3">
+                              <div className="mb-1" style={{ color: C.faint }}>HAProxy'nin isteği normal bitirmediği durumlar:</div>
+                              <ul>
+                                {b.terms.map((x) => (
+                                  <li key={x.code} className="flex items-baseline justify-between gap-3 py-0.5">
+                                    <span><b className="tnum" style={{ color: termRenk(x.code) }}>{x.code}</b> <span style={{ color: C.muted }}>{termAcikla(x.code)}</span></span>
+                                    <span className="tnum nw" style={{ color: C.muted }}>{fmtNum(x.n)}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          <div className="flex flex-wrap gap-4">
+                            {b.c[3] > 0 && <KucukBtn onClick={() => logdaGor(res, { backend: b.name, status: "5xx" })}>Sunucu hatası alan istekleri log'da gör</KucukBtn>}
+                            <KucukBtn onClick={() => logdaGor(res, { backend: b.name })}>Bütün isteklerini log'da gör</KucukBtn>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {fes.length > 0 && (
+        <div className="mt-4 pt-3 text-sm" style={{ borderTop: `1px solid ${C.line}` }}>
+          <div className="font-medium">Hiçbir backend'e gitmeyen istekler</div>
+          <p className="text-xs mt-1 mb-2" style={{ color: C.muted }}>
+            Bunları HAProxy, hiçbir sunucuya göndermeden kendisi yanıtladı. Log'da backend yerine frontend'in (girişin) adı yazar; bu yüzden backend değildir.
+          </p>
+          <ul>
+            {fes.map((f) => {
+              const parca = ONYUZ_TUR.map(([k, t]) => [f.kinds?.[k] || 0, t]).filter(([n]) => n > 0);
+              return (
+                <li key={f.name} className="py-1 leading-relaxed">
+                  <b className="brk">{f.name}</b>: {fmtNum(f.n)} istek
+                  {parca.length > 0 && <span style={{ color: C.muted }}> — {parca.map(([n, t]) => `${fmtNum(n)} ${t}`).join(", ")}</span>}
+                </li>
               );
             })}
-          </tbody>
-        </table>
-      </div>
+          </ul>
+        </div>
+      )}
     </Panel>
   );
 }
 
 function OlaySonuc({ res, onSec }) {
   const z = zamanYazici(res.from, res.to);
-  const { cumleler, sorunlu } = useMemo(() => olayOzeti(res), [res]);
+  const { cumleler } = useMemo(() => olayOzeti(res), [res]);
   const renk = { bad: C.bad, warn: C.warn, ok: C.ok, info: C.info };
   const ns = res.kinds?.noserver || 0;
   const terms = (res.terms || []).filter((x) => x.n > 0);
@@ -2637,7 +2680,7 @@ function OlaySonuc({ res, onSec }) {
               ["İstemci hatası (4xx)", fmtNum(res.c[2]), res.c[2] ? C.warn : C.text],
               ["Sunucu hatası (5xx)", `${fmtNum(res.c[3])} · ${fmtPct(res.c[3] / res.n)}`, res.c[3] ? C.bad : C.text],
               ["Çalışan sunucu yok (503)", fmtNum(ns), ns ? C.bad : C.text],
-              ["Yanıt süresi ort. / %95", `${fmtMs(res.avg)} / ${fmtMs(res.p95)}`, C.text],
+              ["Ortalama yanıt süresi", fmtMs(res.avg), C.text],
             ].map(([k, v, col]) => (
               <div key={k} className="px-3 py-2.5 hl-hucre" style={{ background: C.panel }}>
                 <div className="hl-etiket" style={{ color: C.muted }}>{k}</div>
@@ -2646,7 +2689,7 @@ function OlaySonuc({ res, onSec }) {
             ))}
           </div>
 
-          <OlayGrafik res={res} sorunlu={sorunlu} onSec={onSec} />
+          <OlayGrafik res={res} onSec={onSec} />
 
           {olaylar.length > 0 && (
             <div className="mt-4">
@@ -2695,7 +2738,7 @@ function OlaySonuc({ res, onSec }) {
                   {res.errorPaths.map((y, i) => (
                     <li key={`${y.method} ${y.path} ${y.backend}`} className="py-2 hl-satir" style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
                       <div className="flex items-start justify-between gap-3 hl-yigin">
-                        <YontemYol method={y.method} path={y.path} alt={y.backend} />
+                        <YontemYol method={y.method} path={y.path} alt={yolAlt(y)} />
                         <SinifSayilari c={y.c} n={y.n} />
                       </div>
                       {y.path !== otherKeyUI && <div className="mt-1"><KucukBtn onClick={() => logdaGor(res, { path: y.path, method: y.method, exact: true, status: y.c[3] ? "5xx" : "" })}>Log'da gör</KucukBtn></div>}
@@ -2709,7 +2752,7 @@ function OlaySonuc({ res, onSec }) {
                 {(res.topPaths || []).map((y, i) => (
                   <li key={`${y.method} ${y.path} ${y.backend}`} className="py-2 hl-satir" style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
                     <div className="flex items-start justify-between gap-3 hl-yigin">
-                      <YontemYol method={y.method} path={y.path} alt={y.backend} />
+                      <YontemYol method={y.method} path={y.path} alt={yolAlt(y)} />
                       <SinifSayilari c={y.c} n={y.n} />
                     </div>
                   </li>
@@ -2777,6 +2820,7 @@ function OlaySonuc({ res, onSec }) {
   );
 }
 const otherKeyUI = "(diğer)";
+const yolAlt = (y) => (y.frontend ? `HAProxy yanıtladı (${y.backend})` : y.backend);
 
 function IncidentSection({ inputRef }) {
   const simdi = () => Date.now();
@@ -3229,7 +3273,13 @@ export default function App() {
           </div>
         )}
         {!cur ? (
-          <p className="mt-10" style={{ color: C.muted }}>{problem ? "" : "HAProxy'den ilk veri bekleniyor..."}</p>
+          <>
+            <p className="mt-10" style={{ color: C.muted }}>{problem ? "" : "HAProxy'den ilk veri bekleniyor..."}</p>
+            {/* Olay incelemesi ve log araması yalnızca log'u okur; HAProxy'ye ulaşılamadığında
+                (tam da HAProxy çöktüğünde) da kullanılabilmeli */}
+            <IncidentSection inputRef={incidentRef} />
+            <SearchSection inputRef={searchRef} />
+          </>
         ) : (
           <>
             <StatusHero findings={findings} model={model} onJump={jump} />

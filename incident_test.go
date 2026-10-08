@@ -34,6 +34,12 @@ func (u *olayUretici) satir(yazma time.Time) (string, time.Time) {
 	if kod == 503 && r.Intn(2) == 0 {
 		srv = "<NOSRV>"
 	}
+	// Ara sıra hiçbir backend'e gitmeyen istek: HAProxy yönlendirdi, engelledi ya da eşleşen backend yok.
+	// Log'da backend yerine frontend'in adı yazar.
+	if r.Intn(25) == 0 {
+		be, srv = "http_front", "<NOSRV>"
+		kod, term = []int{301, 403, 503}[r.Intn(3)], []string{"LR--", "PR--", "SC--"}[r.Intn(3)]
+	}
 	ip := fmt.Sprintf("198.51.100.%d", r.Intn(40))
 	yol := fmt.Sprintf("/urun/%d/yorum", r.Intn(5))
 	if r.Intn(3) == 0 {
@@ -109,13 +115,14 @@ type kabaSonuc struct {
 	n     int64
 	c     [5]int64
 	be    map[string][5]int64
+	fe    map[string][5]int64
 	term  map[string]int64
 	dilim map[int64]int64
 	olay  int
 }
 
 func kabaKuvvet(ul uretilenLog, from, to time.Time, adim time.Duration) kabaSonuc {
-	k := kabaSonuc{be: map[string][5]int64{}, term: map[string]int64{}, dilim: map[int64]int64{}}
+	k := kabaSonuc{be: map[string][5]int64{}, fe: map[string][5]int64{}, term: map[string]int64{}, dilim: map[int64]int64{}}
 	for _, zmn := range ul.olayZ {
 		if !zmn.Before(from.Add(-olayPay)) && !zmn.After(to) {
 			k.olay++
@@ -128,9 +135,13 @@ func kabaKuvvet(ul uretilenLog, from, to time.Time, adim time.Duration) kabaSonu
 		i := sinifIdx(rec.Status)
 		k.n++
 		k.c[i]++
-		b := k.be[rec.Backend]
+		hedef := k.be
+		if rec.Server == "<NOSRV>" && rec.Backend == rec.Frontend {
+			hedef = k.fe
+		}
+		b := hedef[rec.Backend]
 		b[i]++
-		k.be[rec.Backend] = b
+		hedef[rec.Backend] = b
 		if rec.Term[:2] != "--" {
 			k.term[rec.Term[:2]]++
 		}
@@ -151,6 +162,19 @@ func karsilastir(t *testing.T, ad string, r OlayRapor, k kabaSonuc) {
 	for _, b := range r.Backends {
 		if b.C != k.be[b.Ad] {
 			t.Fatalf("%s: backend %s %v, beklenen %v", ad, b.Ad, b.C, k.be[b.Ad])
+		}
+	}
+	for _, f := range r.Frontends {
+		if f.C != k.fe[f.Ad] {
+			t.Fatalf("%s: HAProxy'nin yanıtladığı %s %v, beklenen %v", ad, f.Ad, f.C, k.fe[f.Ad])
+		}
+	}
+	if len(r.Frontends) != len(k.fe) {
+		t.Fatalf("%s: %d frontend, beklenen %d", ad, len(r.Frontends), len(k.fe))
+	}
+	for _, b := range r.Backends {
+		if b.Ad == "http_front" {
+			t.Fatalf("%s: frontend backend listesinde görünüyor", ad)
 		}
 	}
 	if len(r.Backends) != len(k.be) {

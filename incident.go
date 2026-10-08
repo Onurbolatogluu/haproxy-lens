@@ -149,6 +149,13 @@ type OlayBackend struct {
 	Kesinti []OlayTerm       `json:"terms"` // bu backend'de en sık sonlandırma kodları (normal olanlar hariç)
 }
 
+type OlayFrontend struct {
+	Ad    string           `json:"name"`
+	N     int64            `json:"n"`
+	C     [5]int64         `json:"c"`
+	Kinds map[string]int64 `json:"kinds"`
+}
+
 // HAProxy'nin isteği neden ve hangi aşamada sonlandırdığı (log'daki iki harfli kod)
 type OlayTerm struct {
 	Kod     string `json:"code"`
@@ -161,6 +168,7 @@ type OlayYol struct {
 	Yontem  string   `json:"method"`
 	Yol     string   `json:"path"`
 	Backend string   `json:"backend"`
+	OnYuz   bool     `json:"frontend,omitempty"` // backend'e gitmedi, HAProxy yanıtladı; Backend frontend'in adı
 	N       int64    `json:"n"`
 	C       [5]int64 `json:"c"`
 }
@@ -189,41 +197,52 @@ type OlayKaydi struct {
 }
 
 type OlayRapor struct {
-	From       int64            `json:"from"`
-	To         int64            `json:"to"`
-	Step       int              `json:"step"` // dilim uzunluğu, dakika
-	N          int64            `json:"n"`
-	C          [5]int64         `json:"c"`
-	Kinds      map[string]int64 `json:"kinds"`
-	Codes      []CodeCount      `json:"codes"`
-	Ort        int              `json:"avg"`
-	P95        int              `json:"p95"`
-	Seri       []OlayDilim      `json:"series"`
-	Backends   []OlayBackend    `json:"backends"`
-	Terms      []OlayTerm       `json:"terms"`
-	Hatali     []OlayYol        `json:"errorPaths"` // en çok 5xx/4xx alan adresler
-	Yogun      []OlayYol        `json:"topPaths"`   // en çok istenen adresler
-	IPs        []OlayIP         `json:"ips"`
-	Hosts      []OlayHost       `json:"hosts"`
-	HostLines  int64            `json:"hostLines"`
-	Olaylar    []OlayKaydi      `json:"events"`
-	OlayYok    bool             `json:"eventsUnknown"`
-	OlayKesik  bool             `json:"eventsCut"` // olay sayısı sınırı aşıldı; ilk olaylar gösteriliyor // olay satırlarının zamanı okunamadı (zaman damgasız log)
-	TCP        int64            `json:"tcp"`       // http olmayan (tcp modu) kayıtlar; sayılmaz
-	Okunamayan int64            `json:"unparsed"`  // aralıktaki okunamayan trafik satırları
-	FirstAt    int64            `json:"firstAt,omitempty"`
-	LastAt     int64            `json:"lastAt,omitempty"`
-	Scanned    int64            `json:"scanned"`
-	Files      []string         `json:"files"`
-	Skipped    int              `json:"skipped"`
-	Truncated  bool             `json:"truncated"`
-	Took       int64            `json:"took"`
-	Note       string           `json:"note,omitempty"`
+	From     int64            `json:"from"`
+	To       int64            `json:"to"`
+	Step     int              `json:"step"` // dilim uzunluğu, dakika
+	N        int64            `json:"n"`
+	C        [5]int64         `json:"c"`
+	Kinds    map[string]int64 `json:"kinds"`
+	Codes    []CodeCount      `json:"codes"`
+	Ort      int              `json:"avg"`
+	P95      int              `json:"p95"`
+	Seri     []OlayDilim      `json:"series"`
+	Backends []OlayBackend    `json:"backends"`
+	// Hiçbir backend'e gitmeyen, HAProxy'nin kendisinin yanıtladığı istekler, frontend başına
+	Frontends  []OlayFrontend `json:"frontends"`
+	Terms      []OlayTerm     `json:"terms"`
+	Hatali     []OlayYol      `json:"errorPaths"` // en çok 5xx/4xx alan adresler
+	Yogun      []OlayYol      `json:"topPaths"`   // en çok istenen adresler
+	IPs        []OlayIP       `json:"ips"`
+	Hosts      []OlayHost     `json:"hosts"`
+	HostLines  int64          `json:"hostLines"`
+	Olaylar    []OlayKaydi    `json:"events"`
+	OlayYok    bool           `json:"eventsUnknown"`
+	OlayKesik  bool           `json:"eventsCut"` // olay sayısı sınırı aşıldı; ilk olaylar gösteriliyor // olay satırlarının zamanı okunamadı (zaman damgasız log)
+	TCP        int64          `json:"tcp"`       // http olmayan (tcp modu) kayıtlar; sayılmaz
+	Okunamayan int64          `json:"unparsed"`  // aralıktaki okunamayan trafik satırları
+	FirstAt    int64          `json:"firstAt,omitempty"`
+	LastAt     int64          `json:"lastAt,omitempty"`
+	Scanned    int64          `json:"scanned"`
+	Files      []string       `json:"files"`
+	Skipped    int            `json:"skipped"`
+	Truncated  bool           `json:"truncated"`
+	Took       int64          `json:"took"`
+	Note       string         `json:"note,omitempty"`
 }
 
 // ---------- Toplayıcı ----------
 
-type olayYolAnahtar struct{ m, p, b string }
+type olayYolAnahtar struct {
+	m, p, b string
+	fe      bool // HAProxy'nin kendisi yanıtladı (b frontend'in adı)
+}
+
+type olayFE struct {
+	n     int64
+	c     [5]int64
+	kinds map[string]int64
+}
 
 type olayBE struct {
 	n          int64
@@ -263,6 +282,7 @@ type olayToplayici struct {
 	sure     sureDagilim
 	kodlar   map[int]int64
 	be       map[string]*olayBE
+	fe       map[string]*olayFE
 	term     map[string]*olayTermAgg
 	yol      map[olayYolAnahtar]*[5]int64
 	ip       map[string]*[5]int64
@@ -295,7 +315,7 @@ func olayAdim(d time.Duration) int {
 func yeniOlayToplayici(from, to time.Time, parser *LogParser, cf func(string) bool) *olayToplayici {
 	adim := olayAdim(to.Sub(from))
 	t := &olayToplayici{from: from, to: to, step: time.Duration(adim) * time.Minute, parser: parser, cf: cf,
-		kodlar: map[int]int64{}, be: map[string]*olayBE{}, term: map[string]*olayTermAgg{},
+		kodlar: map[int]int64{}, be: map[string]*olayBE{}, fe: map[string]*olayFE{}, term: map[string]*olayTermAgg{},
 		yol: map[olayYolAnahtar]*[5]int64{}, ip: map[string]*[5]int64{}, host: map[string]*[5]int64{},
 		olaySon: map[string]int64{}}
 	t.r.From, t.r.To, t.r.Step = from.UnixMilli(), to.UnixMilli(), adim
@@ -344,8 +364,24 @@ func (t *olayToplayici) kayit(r logRecord) {
 	}
 	d.sure.ekle(r.Ta)
 
+	// Hiçbir backend'e gönderilmeyip HAProxy'nin kendisinin yanıtladığı istekler (yönlendirme,
+	// engelleme, eşleşmeyen adres): log'da backend yerine frontend'in adı yazar. Bunlar
+	// backend listesine girmez, ayrı gösterilir; eskiden "http_front" bir backend gibi görünüyordu.
+	onYuz := r.Server == "<NOSRV>" && r.Backend == r.Frontend
+	if onYuz {
+		f := t.fe[r.Frontend]
+		if f == nil {
+			f = &olayFE{kinds: map[string]int64{}}
+			t.fe[r.Frontend] = f
+		}
+		f.n++
+		f.c[k]++
+		f.kinds[r.Kind]++
+	}
 	b := t.be[r.Backend]
-	if b == nil {
+	if onYuz {
+		b = &olayBE{kinds: map[string]int64{}, sunucu: map[string]*olaySrv{}, term: map[string]int64{}} // atılır
+	} else if b == nil {
 		b = &olayBE{kinds: map[string]int64{}, sunucu: map[string]*olaySrv{}, term: map[string]int64{}}
 		t.be[r.Backend] = b
 	}
@@ -385,16 +421,18 @@ func (t *olayToplayici) kayit(r logRecord) {
 			if k == 3 || k == 4 {
 				ta.hata++
 			}
-			ta.be[r.Backend]++
+			if !onYuz {
+				ta.be[r.Backend]++
+			}
 			b.term[kod]++
 		}
 	}
 
-	yk := olayYolAnahtar{r.Method, r.Path, r.Backend}
+	yk := olayYolAnahtar{r.Method, r.Path, r.Backend, onYuz}
 	y := t.yol[yk]
 	if y == nil {
 		if len(t.yol) >= olayYolSin {
-			yk = olayYolAnahtar{"", otherKey, ""}
+			yk = olayYolAnahtar{"", otherKey, "", false}
 			y = t.yol[yk]
 		}
 		if y == nil {
@@ -810,6 +848,13 @@ func (t *olayToplayici) bitir() {
 		}
 		return a.Ad < b.Ad
 	})
+	for ad, f := range t.fe {
+		r.Frontends = append(r.Frontends, OlayFrontend{Ad: ad, N: f.n, C: f.c, Kinds: f.kinds})
+	}
+	sort.Slice(r.Frontends, func(i, j int) bool {
+		a, b := r.Frontends[i], r.Frontends[j]
+		return a.N > b.N || a.N == b.N && a.Ad < b.Ad
+	})
 	for kod, ta := range t.term {
 		ot := OlayTerm{Kod: kod, N: ta.n, Hata: ta.hata}
 		var en int64
@@ -837,7 +882,7 @@ func (t *olayToplayici) bitir() {
 		for _, v := range c {
 			n += v
 		}
-		yollar = append(yollar, OlayYol{Yontem: k.m, Yol: k.p, Backend: k.b, N: n, C: *c})
+		yollar = append(yollar, OlayYol{Yontem: k.m, Yol: k.p, Backend: k.b, OnYuz: k.fe, N: n, C: *c})
 	}
 	sirala := func(l []OlayYol, once func(a, b OlayYol) int) []OlayYol {
 		out := append([]OlayYol(nil), l...)
