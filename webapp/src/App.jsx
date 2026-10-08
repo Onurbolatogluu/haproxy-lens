@@ -32,6 +32,14 @@ const CSS = `
 /* Sayı + birim ("218 ms", "1,5 sn") alt satıra bölünmesin */
 .nw{white-space:nowrap}
 .hl-root button:focus-visible{outline:2px solid ${C.info};outline-offset:2px}
+/* Açılır menüler: tarayıcının kendi oku kutunun sağ kenarına yapışık çiziliyor, Mac'te
+   çerçevenin üstüne taşıyordu. Ok kendimiz çiziliyor, kutunun içinde sabit yerde; sağda ona
+   yer açılıyor. Satır içi "background" kısaltması resmi sıfırlamasın diye !important. */
+.hl-root select{-webkit-appearance:none;-moz-appearance:none;appearance:none;padding-right:32px !important;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2393A6B8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") !important;
+  background-repeat:no-repeat !important;background-position:right 10px center !important;background-size:12px 12px !important;cursor:pointer}
+/* Form alanları aynı yükseklikte: menü, metin kutusu ve tarih kutusu yan yana hizalı dursun */
+.hl-root form select,.hl-root form input{height:36px;line-height:1.25;box-sizing:border-box}
 .hl-row:hover{background:${C.panel2}}
 .be-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 20px}
 .be-head{display:none}

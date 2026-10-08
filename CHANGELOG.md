@@ -4,6 +4,11 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 1.1.3
+
+- **Açılır menülerin oku kutunun içinde.** Tarayıcının kendi oku kutunun sağ kenarına yapışık çiziliyordu, Mac'te çerçevenin üstüne taşıyordu ("Yöntem", "Zaman aralığı"). Ok artık panelin kendisi tarafından, kutunun içinde sabit bir yere çiziliyor; her tarayıcıda aynı görünüyor.
+- **Form alanları aynı yükseklikte.** Menü, metin kutusu ve tarih kutusu yan yana hizalı duruyor; başlıkları da aynı hizada.
+
 ## 1.1.2
 
 - **Olay incelemesi: grafiğin üzerine gelince yanıt kodları.** "Dakikada gelen istek" grafiği iki renkle sade kalıyor, ama bir dakikanın üzerine gelince açılan kutu artık o dakikanın tam dökümünü gösteriyor:
