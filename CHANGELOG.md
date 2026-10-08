@@ -11,6 +11,7 @@ sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
   - "Sunucu hatası olmayan" türlerine ayrılmış hali: başarılı (2xx), yönlendirme (3xx), istemci hatası (4xx), yanıtsız. Her birinin altında yine gerçek kodlar (200, 301, 304, 404, 403…) ve oranı.
   - Bir dakikalık dilimde sayılar tam yazılıyor ("2", "2,0" değil); daha uzun aralıklarda dakika ortalaması.
 - Ajan bunun için her dakikanın yanıt kodu dökümünü de gönderiyor; test, her dilimde kodların toplamının yanıt türü sayılarıyla tutarlı olduğunu denetliyor.
+- **Release'ler artık otomatik.** `CHANGELOG.md`'nin en üstüne yeni sürüm bölümünü ekleyip `main`'e göndermek yeterli: GitHub Actions testleri çalıştırıyor, paketleri derliyor ve release'i bu bölümü açıklama yaparak, paketleriyle birlikte yayımlıyor. Elle release açmak, etiket oluşturmak ve açıklama yapıştırmak gerekmiyor. Bu sürüm de bu yolla yayımlandı.
 
 ### Kurulum ve güncelleme
 

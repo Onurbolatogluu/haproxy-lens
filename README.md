@@ -382,11 +382,11 @@ Files:
 
 ## Publishing a new release
 
-1. Add the new version to `CHANGELOG.md`. Copy the "Kurulum ve güncelleme" (installation and update) part of the previous version as is; it is the same for every version.
-2. On GitHub, go to **Releases > Draft a new release**, create a new tag (e.g. `v1.1.0`), and set the title to `haproxy-lens 1.1.0`.
-3. Paste that version's whole section from `CHANGELOG.md` into the description (except the version number line at the top). This way the installation commands are ready on the release page.
-4. Click **Publish release**. **Set as a pre-release** must not be checked, otherwise the `latest` address will not point to that version.
-5. The `release` job in the **Actions** tab builds the packages and attaches them to the release within a few minutes. Wait for that job to turn green before running `wget` on the servers.
+Releases are automatic. Add a new section at the top of `CHANGELOG.md` with the new version as its heading (`## 1.2.0`) and push to `main`. That is all.
+
+On every push, the `release` workflow in the **Actions** tab reads the first version heading in `CHANGELOG.md`. If that version has no tag yet, it runs the tests, builds the packages and publishes the release (tag `v1.2.0`, title `haproxy-lens 1.2.0`, marked as latest) with that version's section as its description. If the section has no "Kurulum ve güncelleme" (installation and update) part, the standard one is added. The release only appears once its packages are attached, so a server running `wget` on the `latest` address never gets a half-finished release; it takes a few minutes after the push. If the version is already released (a documentation-only change, say), nothing happens. If the tests fail, no release is published.
+
+A release can still be published by hand on GitHub (**Releases > Draft a new release**); the same workflow then attaches the packages. To rebuild the packages of an existing release, run the workflow by hand (**Actions > release > Run workflow**) with its tag.
 
 Version numbers: the last digit goes up for bug fixes (1.0.0 → 1.0.1), the middle one for new features (1.0.0 → 1.1.0).
 

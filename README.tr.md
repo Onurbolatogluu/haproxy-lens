@@ -382,11 +382,11 @@ Dosyalar:
 
 ## Yeni sürüm yayınlama
 
-1. `CHANGELOG.md` dosyasına yeni sürümü yaz. Bir önceki sürümün "Kurulum ve güncelleme" bölümünü olduğu gibi kopyala; her sürümde aynıdır.
-2. GitHub'da **Releases > Draft a new release**, yeni bir etiket oluştur (ör. `v1.1.0`), başlığa `haproxy-lens 1.1.0` yaz.
-3. Açıklama kutusuna `CHANGELOG.md`'deki o sürüm bölümünün tamamını yapıştır (en üstteki sürüm numarası satırı hariç). Kurulum komutları böylece release sayfasında hazır gelir.
-4. **Publish release**'e bas. **Set as a pre-release** işaretli olmamalı, yoksa `latest` adresi o sürümü göstermez.
-5. **Actions** sekmesindeki `release` işi birkaç dakika içinde paketleri derleyip release'e ekler. Sunucularda `wget` çekmeden önce bu işin yeşile dönmesini bekle.
+Release otomatik çıkar. `CHANGELOG.md`'nin en üstüne yeni sürüm başlığıyla (`## 1.2.0`) bir bölüm ekleyip `main`'e göndermek yeterli.
+
+Her gönderimde **Actions** sekmesindeki `release` işi `CHANGELOG.md`'deki ilk sürüm başlığına bakar. O sürümün etiketi henüz yoksa testleri çalıştırır, paketleri derler ve release'i yayımlar (etiket `v1.2.0`, başlık `haproxy-lens 1.2.0`, en son sürüm olarak işaretli); açıklaması CHANGELOG'daki o bölümdür. Bölümde "Kurulum ve güncelleme" kısmı yoksa standart olanı eklenir. Release ancak paketleri eklendikten sonra görünür; sunucuda `latest` adresinden `wget` çeken biri yarım bir release'e denk gelmez. Gönderimden sonra birkaç dakika sürer. Sürüm zaten yayımlanmışsa (ör. yalnızca belge değişikliği) hiçbir şey olmaz. Testler başarısız olursa release çıkmaz.
+
+İstersen release'i GitHub'dan elle de yayımlayabilirsin (**Releases > Draft a new release**); aynı iş paketleri ekler. Var olan bir release'in paketlerini yeniden derlemek için işi elle çalıştır (**Actions > release > Run workflow**) ve etiketini ver.
 
 Sürüm numarası: hata düzeltmesinde son hane (1.0.0 → 1.0.1), yeni özellikte ortadaki hane (1.0.0 → 1.1.0) artar.
 
