@@ -4,6 +4,17 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 1.2.0
+
+- **Düzeltme: olay incelemesinde okunamayan kısım "trafik yok" gibi görünüyordu.** Uzun bir aralıkta (ör. 24 saat) inceleme 1 dakikalık süre sınırına takılınca yalnızca aralığın başını okuyabiliyordu; grafik ise okunmayan kısmı sıfır istek gibi çiziyordu, sanki trafik bir anda kesilmiş gibi. Artık:
+  - Özetin ilk cümlesi hangi kısmın okunduğunu yazıyor: "Süre sınırına ulaşıldı: yalnızca 17:30 ile 21:31 arası okundu (aralığın %17 kadarı). Aşağıdaki sayılar ve cümleler yalnızca bu kısım için." Altında **Kalan kısmı incele** düğmesi var.
+  - Grafikte okunmayan kısım boş ve gri, üstünde "okunmadı" yazıyor; üzerine gelince "bu kısım okunmadı" diyor.
+  - Özetteki cümleler yalnızca okunan kısma göre kuruluyor ("okunan kısım boyunca yüksek").
+- **İnceleme arka planda, ilerlemeyle.** Tarayıcı artık bir dakika boyunca cevap beklemiyor: inceleme ajanda arka planda çalışıyor, sayfa saniyede bir nereye kadar okunduğunu gösteriyor ("00:00 – 10:21 arası okundu, %21, 12 sn"). **Durdur ve okunan kısmı göster** ile istediğin an o ana kadar okunanı görebiliyorsun. Süre sınırı 1 dakikadan 3 dakikaya çıktı. Yeni bir aralık istenince öncekisi kendiliğinden durduruluyor.
+- **Log okuma yaklaşık 2,5 kat hızlı.** Satırları çözmek için kullanılan düzenli ifade (regex), satır başına sürenin üçte ikisini harcıyordu. Log biçimleri artık bu iş için yazılmış bir çözücüyle okunuyor; tarih ve adres düzenleme de hafifletildi. Ölçümde 24 saatlik bir log saniyede ~150 bin satır yerine ~380 bin satır hızla okundu. Bu hızlanma olay incelemesine, log aramasına ve canlı log okumaya birlikte yansıyor; ajanın işlemci tavanı aynı.
+  - Doğruluk: yeni çözücü, 12 farklı log biçiminde rastgele üretilmiş ve yarısı bozulmuş 480 bin satırda düzenli ifadeyle birebir aynı sonucu veriyor; koda bilerek sokulan hatayı test yakalıyor. Çözücü emin olamadığı satırı (ASCII dışı karakter, alışılmadık biçim, çok fazla olasılık) eski yöntemle okuyor.
+- Düzeltme: sonuçta hiç istek olmayan bir aralıkta özet bölümü hata verebiliyordu.
+
 ## 1.1.3
 
 - **Açılır menülerin oku kutunun içinde.** Tarayıcının kendi oku kutunun sağ kenarına yapışık çiziliyordu, Mac'te çerçevenin üstüne taşıyordu ("Yöntem", "Zaman aralığı"). Ok artık panelin kendisi tarafından, kutunun içinde sabit bir yere çiziliyor; her tarayıcıda aynı görünüyor.

@@ -423,3 +423,74 @@ func TestAramaOzelAralik(t *testing.T) {
 		t.Fatal("boş arama hata vermeli")
 	}
 }
+
+// Arka plandaki inceleme: aynı aralık tekrar istenince aynı iş döner, yeni aralık eskisini
+// durdurur; durdurulan incelemede "nereye kadar okundu" bilgisi doğrudur ve o noktaya kadarki
+// dakikalar eksiksizdir (okunmayan kısım "istek yok" sanılmamalı).
+func TestOlayIncelemesiArkaPlanVeKapsam(t *testing.T) {
+	a, ul := olayOrtami(t, 21, 1, 120)
+	from := time.Now().Add(-23 * time.Hour).Truncate(time.Minute)
+	to := time.Now().Add(-1 * time.Hour).Truncate(time.Minute)
+	d1 := a.IncidentStart(from, to)
+	d2 := a.IncidentStart(from, to)
+	if d1.Job != d2.Job {
+		t.Fatalf("aynı aralık için ikinci iş açıldı: %s, %s", d1.Job, d2.Job)
+	}
+	// Biraz okusun, sonra durdur
+	for i := 0; i < 200; i++ {
+		d, _ := IncidentStatus(d1.Job, false)
+		if d.Okunan > from.Add(time.Hour).UnixMilli() || d.Durum == "bitti" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	IncidentStatus(d1.Job, true)
+	var d OlayDurum
+	for i := 0; i < 500; i++ {
+		d, _ = IncidentStatus(d1.Job, false)
+		if d.Durum == "bitti" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if d.Durum != "bitti" || d.Rapor == nil {
+		t.Fatalf("durdurulan inceleme bitmedi: %+v", d)
+	}
+	r := d.Rapor
+	if r.KapsamSon >= r.To {
+		t.Logf("inceleme durdurulmadan bitti (makine hızlı); kapsam bütün aralık")
+	} else {
+		if !r.Durduruldu || !r.Truncated || r.KapsamSon <= r.From {
+			t.Fatalf("durdurma bilgisi yanlış: durduruldu=%v kesik=%v kapsam=%d", r.Durduruldu, r.Truncated, r.KapsamSon)
+		}
+	}
+	// Kapsamın pay kadar öncesine kadarki her dilim kaba kuvvetle aynı olmalı
+	k := kabaKuvvet(ul, from, to, time.Duration(r.Step)*time.Minute)
+	sinir := time.UnixMilli(r.KapsamSon).Add(-olayPay)
+	for i, dl := range r.Seri {
+		if time.UnixMilli(dl.T).Add(time.Duration(r.Step) * time.Minute).After(sinir) {
+			break
+		}
+		if dl.N != k.dilim[int64(i)] {
+			t.Fatalf("okunan kısımdaki %d. dilim %d, beklenen %d", i, dl.N, k.dilim[int64(i)])
+		}
+	}
+	// Başka bir aralık istenince yeni iş açılır, eskisi bulunamaz
+	d3 := a.IncidentStart(from.Add(time.Minute), to)
+	if d3.Job == d1.Job {
+		t.Fatal("yeni aralık için yeni iş açılmadı")
+	}
+	if _, ok := IncidentStatus(d1.Job, false); ok {
+		t.Fatal("eski iş hâlâ bulunuyor")
+	}
+	for i := 0; i < 3000; i++ {
+		if d, _ := IncidentStatus(d3.Job, false); d.Durum == "bitti" {
+			if d.Rapor.KapsamSon != d.Rapor.To || d.Rapor.Truncated {
+				t.Fatalf("tamamlanan incelemede kapsam bütün aralık olmalı: %+v", d.Rapor.KapsamSon)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("ikinci inceleme bitmedi")
+}

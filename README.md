@@ -184,7 +184,9 @@ What you get:
 - **Addresses with the most errors, most requested addresses, top client IPs**, host names (if they are in the log) and all status codes.
 - From any backend, address or IP, **"Log'da gör"** opens the log search with the same window, so you can see the individual requests with their exact times.
 
-How it stays fast: in an uncompressed file the start of the window is found by binary search and only the window is read; in a compressed file the lines before the window are skipped in groups without being parsed. A 40-minute window in a 900,000-line log reads about 18,000 lines. It shares the log search's lock and 1-minute limit; with the agent's 10% CPU limit, a few hours take a few seconds, while a full busy day may hit the limit. If it does, the part from the start of the window is complete and the result says so.
+How it stays fast: in an uncompressed file the start of the window is found by binary search and only the window is read; in a compressed file the lines before the window are skipped in groups without being parsed. A 40-minute window in a 900,000-line log reads about 18,000 lines. Log lines are decoded by a purpose-built matcher instead of a regular expression, about 2.5 times faster; it is checked against the regular expression on hundreds of thousands of random and corrupted lines, and any line it is unsure about is decoded the old way.
+
+The review runs in the background on the agent: while it reads, the page shows how far it has got ("00:00 – 10:21 read, 21%") and you can stop it to see what has been read so far. It reads for at most 3 minutes; with the agent's 10% CPU limit a few hours take seconds, and a full busy day usually fits. If the limit is reached or you stop it, the result says exactly which part was read (from the start of the window, complete), the unread part is shown greyed out as "okunmadı" (not read) instead of as zero traffic, and a button reviews the rest. It shares the log search's lock: while a review runs, a search waits, and the other way round.
 
 What it cannot see: anything not written to the log. If log files have been rotated away, those days cannot be reviewed. Server DOWN/UP events appear only if HAProxy writes them to the same log (it does so at "notice" level) and only for servers with health checks. If a site failed before reaching HAProxy (DNS, Cloudflare), the review shows it only as a drop in traffic.
 
@@ -367,6 +369,7 @@ Files:
 | `haproxy.go` | Reading from the stats socket (the allowed commands are here), time range calculation |
 | `config.go` | Reading haproxy.cfg: sections, `defaults` inheritance, log targets, Host capture |
 | `logformat.go` | Turning a `log-format` definition into a parser (httplog, httpslog, tcplog, custom) |
+| `fastmatch.go` | Fast line decoder used instead of the regular expression (checked against it in `fastmatch_test.go`) |
 | `logtail.go` | Following the log file / journald, per-minute summaries, path and code breakdowns |
 | `watch.go` | Following the configuration, log source and socket while running; `/api/config` |
 | `notes.go` | Configuration notes (what is missing, what it affects, which line could be added) |

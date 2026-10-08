@@ -1,0 +1,150 @@
+name: release
+
+# Release otomatik çıkar: main'e gönderilen her commit'te CHANGELOG.md'nin en üstündeki
+# sürüme ("## 1.1.2") bakılır. Bu sürümün etiketi (v1.1.2) henüz yoksa testler çalışır,
+# paketler derlenir ve release, açıklaması CHANGELOG'daki o bölüm olacak şekilde, paketleriyle
+# birlikte tek seferde yayımlanır. Etiket zaten varsa (yalnızca belge ya da ara değişiklik)
+# hiçbir şey yapılmaz. Yani yeni sürüm çıkarmak için CHANGELOG'a yeni bölümü eklemek yeterli.
+#
+# Release paketleri eklendikten SONRA görünür hale gelir; "latest" adresinden wget çeken bir
+# sunucu yarım bir release'e denk gelmez.
+#
+# Elle de çalıştırılabilir (Actions > release > Run workflow): verilen mevcut bir etiketin
+# paketlerini yeniden derleyip ekler. GitHub'da elle yayımlanan release'ler de eskisi gibi
+# paketlenir.
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Paketlerin ekleneceği mevcut release etiketi (ör. v1.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+# Aynı anda iki release işi çalışmasın (art arda iki push)
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag || github.sha }}
+
+      - name: Sürümü belirle
+        id: surum
+        env:
+          OLAY: ${{ github.event_name }}
+          ETIKET: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          if [ "$OLAY" != "push" ]; then
+            # Elle yayımlanan ya da elle istenen: var olan release'e paket eklenir
+            echo "tag=$ETIKET" >> "$GITHUB_OUTPUT"
+            echo "yeni=hayir" >> "$GITHUB_OUTPUT"
+            echo "calis=evet" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          SURUM=$(grep -m1 -E '^## [0-9]+\.[0-9]+\.[0-9]+[[:space:]]*$' CHANGELOG.md | sed -E 's/^## ([0-9.]+).*/\1/')
+          if [ -z "$SURUM" ]; then
+            echo "CHANGELOG.md'nin başında '## 1.2.3' biçiminde bir sürüm başlığı yok; release çıkarılmadı."
+            echo "calis=hayir" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$SURUM" >/dev/null; then
+            echo "v$SURUM zaten yayımlanmış; bu commit için yeni release yok."
+            echo "calis=hayir" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Yeni sürüm: v$SURUM"
+          echo "tag=v$SURUM" >> "$GITHUB_OUTPUT"
+          echo "yeni=evet" >> "$GITHUB_OUTPUT"
+          echo "calis=evet" >> "$GITHUB_OUTPUT"
+          # Release açıklaması: CHANGELOG'daki bu sürümün bölümü, başlık satırı hariç
+          awk -v s="$SURUM" '
+            /^## / { if (icinde) exit; t = $0; sub(/[[:space:]]+$/, "", t); if (t == "## " s) { icinde = 1; next } }
+            icinde { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notlar.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notlar.md"; then
+            echo "::error::CHANGELOG.md'de $SURUM bölümü boş; release çıkarılmadı."
+            exit 1
+          fi
+          # Kurulum komutları her sürümde aynı; bölümde yoksa eklenir, elle kopyalamak gerekmez
+          if ! grep -q '^### Kurulum ve güncelleme' "$RUNNER_TEMP/notlar.md"; then
+            cat >> "$RUNNER_TEMP/notlar.md" <<'SON'
+
+          ### Kurulum ve güncelleme
+
+          Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+              cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+          Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+          SON
+            # Heredoc YAML girintisiyle geldi; satır başındaki 10 boşluk atılır (kod satırındaki 4 boşluk kalır)
+            sed -i -E 's/^ {10}//' "$RUNNER_TEMP/notlar.md"
+          fi
+          cat "$RUNNER_TEMP/notlar.md"
+
+      - uses: actions/setup-go@v7
+        if: steps.surum.outputs.calis == 'evet'
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/setup-node@v7
+        if: steps.surum.outputs.calis == 'evet'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+
+      - name: Arayüzü derle
+        if: steps.surum.outputs.calis == 'evet'
+        run: cd webapp && npm ci && npm run build
+
+      - name: Testler
+        if: steps.surum.outputs.calis == 'evet'
+        run: go vet ./... && go test ./...
+
+      - name: Paketle
+        if: steps.surum.outputs.calis == 'evet'
+        env:
+          TAG: ${{ steps.surum.outputs.tag }}
+        run: |
+          VERSION="${TAG#v}"
+          mkdir -p dist
+          for ARCH in amd64 arm64; do
+            rm -rf build && mkdir -p build/haproxy-lens
+            CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -trimpath \
+              -ldflags="-s -w -X main.version=$VERSION" -o build/haproxy-lens/haproxy-lens .
+            cp deploy/install.sh deploy/uninstall.sh README.md README.tr.md LICENSE build/haproxy-lens/
+            chmod 0755 build/haproxy-lens/haproxy-lens build/haproxy-lens/install.sh build/haproxy-lens/uninstall.sh
+            tar -C build -czf "dist/haproxy-lens-linux-$ARCH.tar.gz" haproxy-lens
+          done
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS && cat SHA256SUMS)
+
+      - name: Release'i yayımla
+        if: steps.surum.outputs.calis == 'evet' && steps.surum.outputs.yeni == 'evet'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.surum.outputs.tag }}
+        # Etiket bu commit'e konur; release paketleriyle birlikte tek komutta yayımlanır
+        # ve "latest" olarak işaretlenir.
+        run: |
+          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --title "haproxy-lens ${TAG#v}" \
+            --notes-file "$RUNNER_TEMP/notlar.md" --latest
+
+      - name: Var olan release'e ekle
+        if: steps.surum.outputs.calis == 'evet' && steps.surum.outputs.yeni == 'hayir'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.surum.outputs.tag }}
+        run: gh release upload "$TAG" dist/* --clobber

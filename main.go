@@ -192,19 +192,26 @@ func main() {
 			writeJSON(w, map[string]string{"error": "Bu sunucuda log analizi kapalı; inceleme log'dan yapılır."})
 			return
 		}
-		from, to, err := incidentRange(r.URL.Query().Get, time.Now())
+		q := r.URL.Query()
+		// Arka planda çalışır: ?from&to başlatır, ?job=… durumunu (bitince sonucunu) verir,
+		// &stop=1 okumayı keser ve o ana kadar okunanı raporlar
+		if id := q.Get("job"); id != "" {
+			d, ok := IncidentStatus(id, q.Get("stop") == "1")
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				writeJSON(w, map[string]string{"error": "Bu inceleme artık yok; yeniden başlat."})
+				return
+			}
+			writeJSON(w, d)
+			return
+		}
+		from, to, err := incidentRange(q.Get, time.Now())
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			writeJSON(w, map[string]string{"error": err.Error()})
 			return
 		}
-		res, err := logs.Incident(from, to)
-		if err != nil {
-			w.WriteHeader(http.StatusTooManyRequests)
-			writeJSON(w, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, res)
+		writeJSON(w, logs.IncidentStart(from, to))
 	})
 	mux.HandleFunc("/api/ranges", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ranges": stats.Ranges(), "retention": retMin})

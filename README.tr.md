@@ -184,7 +184,9 @@ Neler gösterir:
 - **En çok hata alan adresler, en çok istenen adresler, en çok istek atan IP'ler**, alan adları (log'da varsa) ve bütün yanıt kodları.
 - Herhangi bir backend, adres ya da IP'den **"Log'da gör"**, aynı aralıkla log aramasını açar; tek tek istekleri tam zamanlarıyla görürsün.
 
-Nasıl hızlı kalır: sıkıştırılmamış dosyada aralığın başlangıcı ikili aramayla bulunur, yalnızca aralık okunur; sıkıştırılmış dosyada aralıktan önceki satırlar ayrıştırılmadan gruplar halinde geçilir. 900 bin satırlık bir log'da 40 dakikalık bir aralık için yaklaşık 18 bin satır okunur. Log aramasıyla aynı kilidi ve 1 dakikalık sınırı kullanır; ajanın %10 işlemci tavanıyla birkaç saatlik bir aralık birkaç saniye sürer, yoğun bir LB'de bütün bir gün sınıra takılabilir. Takılırsa aralığın başından itibaren okunan kısım eksiksizdir ve sonuç bunu yazar.
+Nasıl hızlı kalır: sıkıştırılmamış dosyada aralığın başlangıcı ikili aramayla bulunur, yalnızca aralık okunur; sıkıştırılmış dosyada aralıktan önceki satırlar ayrıştırılmadan gruplar halinde geçilir. 900 bin satırlık bir log'da 40 dakikalık bir aralık için yaklaşık 18 bin satır okunur. Log satırları düzenli ifade yerine bu iş için yazılmış bir çözücüyle okunur, yaklaşık 2,5 kat hızlı; sonuçları yüz binlerce rastgele ve bozuk satırda düzenli ifadeyle karşılaştırılarak doğrulanır, emin olamadığı satır eski yöntemle okunur.
+
+İnceleme ajanda arka planda çalışır: okurken sayfa nereye kadar okunduğunu gösterir ("00:00 – 10:21 arası okundu, %21") ve istersen durdurup o ana kadar okunanı görebilirsin. En fazla 3 dakika okur; ajanın %10 işlemci tavanıyla birkaç saat saniyeler sürer, yoğun bir LB'nin bütün bir günü de çoğu zaman sığar. Sınıra ulaşılır ya da durdurursan sonuç hangi kısmın okunduğunu açıkça yazar (aralığın başından itibaren, eksiksiz); okunmayan kısım grafikte sıfır trafik gibi değil, gri ve "okunmadı" diye görünür; bir düğmeyle kalan kısım incelenir. Log aramasıyla aynı kilidi kullanır: inceleme sürerken arama bekler, tersi de geçerli.
 
 Neyi göremez: log'a yazılmamış olan hiçbir şeyi. Log dosyaları döndürülüp silindiyse o günler incelenemez. Sunucu düşme/kalkma olayları yalnızca HAProxy bunları aynı log'a yazıyorsa ("notice" seviyesinde yazar) ve yalnızca sağlık kontrolü olan sunucular için görünür. Bir site HAProxy'ye ulaşmadan çöktüyse (DNS, Cloudflare), inceleme bunu yalnızca trafikte düşüş olarak gösterebilir.
 
@@ -367,6 +369,7 @@ Dosyalar:
 | `haproxy.go` | Stats socket'inden okuma (izin verilen komutlar burada), zaman aralığı hesabı |
 | `config.go` | haproxy.cfg'yi okuma: bölümler, `defaults` mirası, log hedefleri, Host yakalama |
 | `logformat.go` | `log-format` tanımını ayrıştırıcıya çevirme (httplog, httpslog, tcplog, özel) |
+| `fastmatch.go` | Düzenli ifade yerine kullanılan hızlı satır çözücü (`fastmatch_test.go`'da düzenli ifadeyle karşılaştırılır) |
 | `logtail.go` | Log dosyasını / journald'ı izleme, dakikalık özetler, yol ve kod dökümü |
 | `watch.go` | Çalışırken config, log kaynağı ve socket izleme; `/api/config` |
 | `notes.go` | Yapılandırma notları (ne eksik, neyi etkiliyor, hangi satır eklenebilir) |

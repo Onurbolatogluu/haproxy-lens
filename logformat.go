@@ -111,6 +111,7 @@ type compiledFormat struct {
 	slots  []int       // roleCapSlot için slot numarası (roles ile aynı sırada)
 	has    map[fieldRole]bool
 	hits   int64
+	hizli  *hizliEslestirici // düzenli ifadesiz hızlı yol (fastmatch.go); kurulamazsa nil
 }
 
 type fmtItem struct {
@@ -219,10 +220,16 @@ func compileFormat(kind, format string) *compiledFormat {
 	cf := &compiledFormat{Kind: kind, Source: format, has: map[fieldRole]bool{}}
 	var b strings.Builder
 	b.WriteString(`^`)
+	// Aynı biçimin hızlı eşleştiricisi düzenli ifadeyle adım adım birlikte kurulur
+	hz := &hizliEslestirici{}
+	hizliOlur := true
 	for i := 0; i < len(items); i++ {
 		it := items[i]
 		if !it.isVar {
 			b.WriteString(regexp.QuoteMeta(it.lit))
+			if it.lit != "" {
+				hz.ogeler = append(hz.ogeler, hizliOge{tur: hLit, lit: it.lit})
+			}
 			continue
 		}
 		if it.v.pat == "" { // %o gibi çıktısı olmayan
@@ -232,6 +239,20 @@ func compileFormat(kind, format string) *compiledFormat {
 		if it.quote {
 			pat = `"[^"]*"|-`
 		}
+		ho := hizliOge{}
+		if tur, ok := hizliDesen[pat]; ok {
+			ho.tur = tur
+			switch pat {
+			case `\S{4}`:
+				ho.n = 4
+			case `\S{2}`:
+				ho.n = 2
+			case `\d{3}`:
+				ho.n = 3
+			}
+		} else {
+			hizliOlur = false
+		}
 		grp := `(` + pat + `)`
 		if it.v.role == roleNone {
 			grp = `(?:` + pat + `)`
@@ -239,23 +260,33 @@ func compileFormat(kind, format string) *compiledFormat {
 			cf.roles = append(cf.roles, it.v.role)
 			cf.slots = append(cf.slots, it.slot)
 			cf.has[it.v.role] = true
+			ho.grup = len(cf.roles)
 		}
 		if it.v.opt {
+			ho.ops = true
 			// boşsa kendisi ve ardındaki tek boşluk yazılmaz
 			if i+1 < len(items) && !items[i+1].isVar && strings.HasPrefix(items[i+1].lit, " ") {
 				b.WriteString(`(?:` + grp + ` )?`)
 				items[i+1].lit = items[i+1].lit[1:]
+				ho.opsBosluk = true
 			} else {
 				b.WriteString(`(?:` + grp + `)?`)
 			}
+			hz.ogeler = append(hz.ogeler, ho)
 			continue
 		}
 		b.WriteString(grp)
+		hz.ogeler = append(hz.ogeler, ho)
 	}
 	// Fazladan alanlara izin ver (sonuna eklenmiş alanlar); alan adı için taranır
 	b.WriteString(`(?:\s+(.*?))?\s*$`)
 	cf.roles = append(cf.roles, roleTrailing)
 	cf.slots = append(cf.slots, 0)
+	if hizliOlur {
+		hz.gruplar = len(cf.roles)
+		hz.hazirla()
+		cf.hizli = hz
+	}
 	re, err := regexp.Compile(b.String())
 	if err != nil {
 		return nil
@@ -277,7 +308,14 @@ func unquote(v string) string {
 // hostSlot: frontend'in Host yakalama slotu (-1 bilinmiyor/yok, -2 config yok: sezgisel ara)
 func (cf *compiledFormat) parse(msg string, hostSlotOf func(fe string) int) (logRecord, bool) {
 	var rec logRecord
-	m := cf.re.FindStringSubmatch(msg)
+	var m []string
+	kesin := false
+	if cf.hizli != nil && hizliUygun(msg) {
+		m, kesin = cf.hizli.eslestir(msg)
+	}
+	if !kesin {
+		m = cf.re.FindStringSubmatch(msg)
+	}
 	if m == nil {
 		return rec, false
 	}
@@ -290,7 +328,9 @@ func (cf *compiledFormat) parse(msg string, hostSlotOf func(fe string) int) (log
 		case roleClient:
 			rec.Client = v
 		case roleDateMs:
-			if t, err := time.ParseInLocation("02/Jan/2006:15:04:05.000", v, time.Local); err == nil {
+			if t, ok := hizliTarihMs(v); ok {
+				rec.At, haveDate = t, true
+			} else if t, err := time.ParseInLocation("02/Jan/2006:15:04:05.000", v, time.Local); err == nil {
 				rec.At, haveDate = t, true
 			}
 		case roleDateTZ:

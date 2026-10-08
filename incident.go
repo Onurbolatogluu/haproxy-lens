@@ -26,18 +26,24 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
 const (
-	olayEnUzun  = 7 * 24 * time.Hour // en uzun inceleme aralığı
-	olayPay     = 5 * time.Minute    // log satırları kabul zamanına göre tam sıralı değildir; sınırlarda pay
-	olayYolSin  = 20000              // en fazla bu kadar farklı adres izlenir, gerisi "(diğer)"
-	olayIPSin   = 50000
-	olayHostSin = 2000
-	olayListe   = 15 // listelerde gösterilen satır
-	olayOlaySin = 500
-	olayGrup    = 256 // sıkıştırılmış dosyada aralık öncesi satırlar bu büyüklükte gruplarla geçilir
+	// İnceleme arka planda çalışır (tarayıcı ilerlemeyi sorar), bu yüzden süresi log aramasının
+	// 1 dakikasından uzun olabilir. Ajanın işlemci tavanı düşük; yoğun bir LB'nin bütün bir günü
+	// bu sürede okunabilsin.
+	olaySureSiniri = 3 * time.Minute
+	olayEnUzun     = 7 * 24 * time.Hour // en uzun inceleme aralığı
+	olayPay        = 5 * time.Minute    // log satırları kabul zamanına göre tam sıralı değildir; sınırlarda pay
+	olayYolSin     = 20000              // en fazla bu kadar farklı adres izlenir, gerisi "(diğer)"
+	olayIPSin      = 50000
+	olayHostSin    = 2000
+	olayListe      = 15 // listelerde gösterilen satır
+	olayOlaySin    = 500
+	olayGrup       = 256 // sıkıştırılmış dosyada aralık öncesi satırlar bu büyüklükte gruplarla geçilir
 )
 
 // Yanıt süresi dağılımı için kova sınırları (ms). Yüzdelik değeri kovanın içinde doğrusal
@@ -229,8 +235,12 @@ type OlayRapor struct {
 	Files      []string       `json:"files"`
 	Skipped    int            `json:"skipped"`
 	Truncated  bool           `json:"truncated"`
-	Took       int64          `json:"took"`
-	Note       string         `json:"note,omitempty"`
+	// Aralığın nereye kadar okunduğu (ms). Süre sınırına takılırsa ya da durdurulursa bitişten
+	// önce kalır; arayüz bu noktadan sonrasını "okunmadı" diye gösterir, "istek yok" diye değil.
+	KapsamSon  int64  `json:"coveredTo"`
+	Durduruldu bool   `json:"stopped,omitempty"`
+	Took       int64  `json:"took"`
+	Note       string `json:"note,omitempty"`
 }
 
 // ---------- Toplayıcı ----------
@@ -292,6 +302,9 @@ type olayToplayici struct {
 	host     map[string]*[5]int64
 	olaySon  map[string]int64 // aynı olayın tekrarını ayıklamak için (ör. her proxy için "started")
 	bitis    time.Time
+	sonZaman time.Time     // okunan satırların en geç zamanı: nereye kadar okunduğu
+	ilerleme *atomic.Int64 // arka plandaki iş için: nereye kadar okundu (ms)
+	iptal    *atomic.Bool  // kullanıcı "durdur" dedi
 	bayt     int64
 	satir    int64
 	olayZmn  int64 // zamanı okunabilen olay satırı
@@ -582,6 +595,9 @@ func (t *olayToplayici) satirIsle(line string) (time.Time, bool) {
 	t.bayt += int64(len(line)) + 1
 	if rec, ok := t.parser.Parse(line); ok {
 		t.kayit(rec)
+		if rec.At.After(t.sonZaman) {
+			t.sonZaman = rec.At
+		}
 		return rec.At, true
 	}
 	msg := syslogMessage(line)
@@ -598,6 +614,13 @@ func (t *olayToplayici) satirIsle(line string) (time.Time, bool) {
 }
 
 func (t *olayToplayici) sureDoldu() bool {
+	if t.ilerleme != nil {
+		t.ilerleme.Store(t.sonZaman.UnixMilli())
+	}
+	if t.iptal != nil && t.iptal.Load() {
+		t.r.Truncated, t.r.Durduruldu = true, true
+		return true
+	}
 	if time.Now().After(t.bitis) || t.bayt > aramaBaytSiniri {
 		t.r.Truncated = true
 		return true
@@ -973,15 +996,21 @@ func (t *olayToplayici) bitir() {
 	r.Scanned = t.satir
 }
 
-// Seçilen aralığı log dosyalarından inceler
+// Seçilen aralığı log dosyalarından inceler (beklemeden; testler ve tek seferlik kullanım için)
 func (a *LogAnalyzer) Incident(from, to time.Time) (OlayRapor, error) {
-	basla := time.Now()
 	if !aramaKilidi.TryLock() {
 		return OlayRapor{}, ErrAramaSuruyor // arama ile aynı kilit: ikisi aynı anda çalışmaz
 	}
 	defer aramaKilidi.Unlock()
+	return a.incele(from, to, nil, nil), nil
+}
+
+// Kilit çağıranda. ilerleme ve iptal arka plandaki iş içindir (nil olabilir).
+func (a *LogAnalyzer) incele(from, to time.Time, ilerleme *atomic.Int64, iptal *atomic.Bool) OlayRapor {
+	basla := time.Now()
 	t := yeniOlayToplayici(from, to, a.parser.Load(), a.isCloudflare)
-	t.bitis = basla.Add(aramaSureSiniri)
+	t.bitis = basla.Add(olaySureSiniri)
+	t.ilerleme, t.iptal = ilerleme, iptal
 	kaynak := a.Source()
 	switch {
 	case kaynak == "":
@@ -1006,11 +1035,136 @@ func (a *LogAnalyzer) Incident(from, to time.Time) (OlayRapor, error) {
 	}
 	t.bitir()
 	t.r.Took = time.Since(basla).Milliseconds()
-	if t.r.Truncated && t.r.Note == "" {
-		t.r.Note = "Süre sınırına ulaşıldı; aralığın tamamı okunamadı. Okunan kısım aralığın başından " +
-			"itibaren eksiksiz. Daha kısa bir aralık seçerek tamamını görebilirsin."
+	t.r.KapsamSon = to.UnixMilli()
+	if t.r.Truncated {
+		// Okuma eskiden yeniye gittiği için okunan kısım aralığın başından bu noktaya kadar
+		kapsam := t.sonZaman
+		if kapsam.Before(from) {
+			kapsam = from
+		}
+		if kapsam.Before(to) {
+			t.r.KapsamSon = kapsam.UnixMilli()
+		}
+		if t.r.Note == "" {
+			t.r.Note = "Süre sınırına ulaşıldı; aralığın tamamı okunamadı. Okunan kısım aralığın başından " +
+				"itibaren eksiksiz. Daha kısa bir aralık seçerek tamamını görebilirsin."
+			if t.r.Durduruldu {
+				t.r.Note = "İnceleme durduruldu. Okunan kısım aralığın başından itibaren eksiksiz."
+			}
+		}
 	}
-	return t.r, nil
+	return t.r
+}
+
+// ---------- Arka planda çalışan inceleme ----------
+//
+// Uzun bir aralığı okumak, ajanın düşük işlemci tavanıyla dakikalar sürebilir. Tarayıcı bu
+// sürede bir HTTP isteğini açık tutmaz: inceleme başlatılır, tarayıcı saniyede bir nereye
+// kadar okunduğunu sorar ve bittiğinde sonucu alır. Aynı anda tek inceleme çalışır; yeni bir
+// aralık istenirse eskisi durdurulur.
+
+type olayIsi struct {
+	id        string
+	from, to  time.Time
+	basla     time.Time
+	ilerleme  atomic.Int64
+	iptal     atomic.Bool
+	calisiyor atomic.Bool
+	bekliyor  atomic.Bool // başka bir arama ya da inceleme kilidi tutuyor
+	mu        sync.Mutex
+	rapor     *OlayRapor
+}
+
+type OlayDurum struct {
+	Job    string     `json:"job"`
+	Durum  string     `json:"state"` // bekliyor, okunuyor, bitti
+	From   int64      `json:"from"`
+	To     int64      `json:"to"`
+	Okunan int64      `json:"readTo"` // nereye kadar okundu (ms)
+	Gecen  int64      `json:"elapsed"`
+	Rapor  *OlayRapor `json:"report,omitempty"`
+}
+
+var (
+	olayIsMu  sync.Mutex
+	olayIsSon *olayIsi
+)
+
+func (j *olayIsi) durum() OlayDurum {
+	d := OlayDurum{Job: j.id, From: j.from.UnixMilli(), To: j.to.UnixMilli(), Okunan: j.ilerleme.Load(),
+		Gecen: time.Since(j.basla).Milliseconds()}
+	j.mu.Lock()
+	d.Rapor = j.rapor
+	j.mu.Unlock()
+	switch {
+	case d.Rapor != nil:
+		d.Durum = "bitti"
+	case j.bekliyor.Load():
+		d.Durum = "bekliyor" // başka bir arama ya da inceleme bitmeyi bekliyor
+	default:
+		d.Durum = "okunuyor"
+	}
+	if d.Okunan < d.From {
+		d.Okunan = d.From
+	}
+	return d
+}
+
+// İncelemeyi başlatır; aynı aralık zaten çalışıyorsa onu döndürür
+func (a *LogAnalyzer) IncidentStart(from, to time.Time) OlayDurum {
+	olayIsMu.Lock()
+	defer olayIsMu.Unlock()
+	if j := olayIsSon; j != nil && j.from.Equal(from) && j.to.Equal(to) && !j.iptal.Load() {
+		j.mu.Lock()
+		bitmedi := j.rapor == nil
+		j.mu.Unlock()
+		if bitmedi {
+			return j.durum()
+		}
+	}
+	if j := olayIsSon; j != nil {
+		j.iptal.Store(true) // yeni aralık istendi: eskisi bıraksın
+	}
+	j := &olayIsi{id: strconv.FormatInt(time.Now().UnixNano(), 36), from: from, to: to, basla: time.Now()}
+	olayIsSon = j
+	go func() {
+		// "bekliyor" yalnızca kilit gerçekten başkasındaysa gösterilir (eskiden iş başlarken bir
+		// an "başka bir arama sürüyor" yazıyordu)
+		if !aramaKilidi.TryLock() {
+			j.bekliyor.Store(true)
+			aramaKilidi.Lock()
+			j.bekliyor.Store(false)
+		}
+		defer aramaKilidi.Unlock()
+		if j.iptal.Load() {
+			r := OlayRapor{From: from.UnixMilli(), To: to.UnixMilli(), KapsamSon: from.UnixMilli(), Durduruldu: true, Truncated: true}
+			j.mu.Lock()
+			j.rapor = &r
+			j.mu.Unlock()
+			return
+		}
+		j.calisiyor.Store(true)
+		r := a.incele(from, to, &j.ilerleme, &j.iptal)
+		j.mu.Lock()
+		j.rapor = &r
+		j.mu.Unlock()
+		j.calisiyor.Store(false)
+	}()
+	return j.durum()
+}
+
+// Çalışan ya da biten incelemenin durumu; durdur true ise okumayı keser (okunan kısım raporlanır)
+func IncidentStatus(id string, durdur bool) (OlayDurum, bool) {
+	olayIsMu.Lock()
+	j := olayIsSon
+	olayIsMu.Unlock()
+	if j == nil || j.id != id {
+		return OlayDurum{}, false
+	}
+	if durdur {
+		j.iptal.Store(true)
+	}
+	return j.durum(), true
 }
 
 // HTTP parametrelerinden aralık: from, to (unix ms)

@@ -2271,15 +2271,29 @@ const ilkKucuk = (t) => t.charAt(0).toLocaleLowerCase("tr-TR") + t.slice(1);
 const dilimDk = (res, d) => Math.max(1 / 60, Math.min(res.step, (res.to - d.t) / 60000));
 
 // Raporu düz cümlelere çevirir. Her cümle: { lvl: bad|warn|ok|info, text }
+// Aralığın nereye kadar okunduğu. Süre sınırına takılan ya da durdurulan incelemede bitişten
+// önce kalır; ondan sonrası "okunmadı"dır, "istek yok" değil.
+const olayKapsam = (res) => (res.coveredTo && res.coveredTo < res.to ? res.coveredTo : res.to);
+
 function olayOzeti(res) {
   const z = zamanYazici(res.from, res.to);
   const adim = res.step * 60000;
-  // Trafik karşılaştırması dakika başına yapılır; kısa son dilim "düşüş" sayılmasın
-  const s = (res.series || []).map((d) => ({ ...d, dk: d.n / dilimDk(res, d) }));
+  const kapsam = olayKapsam(res);
+  const eksik = kapsam < res.to;
+  // Yalnızca okunan dilimler değerlendirilir. Trafik karşılaştırması dakika başına yapılır; kısa
+  // son dilim (aralığın ya da okunan kısmın sonu) "düşüş" sayılmasın.
+  const s = (res.series || []).filter((d) => d.t < kapsam)
+    .map((d) => ({ ...d, dk: d.n / Math.max(1 / 60, Math.min(res.step, (kapsam - d.t) / 60000)) }));
   const out = [];
+  if (eksik) {
+    out.push({
+      lvl: "warn", kalan: true,
+      text: `${res.stopped ? "İnceleme durduruldu" : "Süre sınırına ulaşıldı"}: yalnızca ${z.kisa(res.from)} ile ${z.kisa(kapsam)} arası okundu (aralığın ${fmtPct((kapsam - res.from) / (res.to - res.from))} kadarı). Aşağıdaki sayılar ve cümleler yalnızca bu kısım için; grafikte okunmayan kısım gri.`,
+    });
+  }
   if (!res.n) {
-    out.push({ lvl: "warn", text: "Bu aralıkta log'da hiç istek yok. Log o saatlerde yazılmamış, döndürülüp silinmiş ya da trafik HAProxy'ye hiç ulaşmamış olabilir (DNS, Cloudflare, ağ)." });
-    return out;
+    out.push({ lvl: "warn", text: eksik ? "Okunan kısımda log'da hiç istek yok." : "Bu aralıkta log'da hiç istek yok. Log o saatlerde yazılmamış, döndürülüp silinmiş ya da trafik HAProxy'ye hiç ulaşmamış olabilir (DNS, Cloudflare, ağ)." });
+    return { cumleler: out, anaDonem: null, sorunlu: [] };
   }
   const e5 = res.c[3];
 
@@ -2306,14 +2320,14 @@ function olayOzeti(res) {
     let t = `Sunucu hataları (5xx) ${z.kisa(basT)} ile ${z.kisa(Math.min(bitT, res.to))} arasında arttı (${sureYazi(dk)}). `
       + `En kötü dilim ${z.kisa(tepe.t)}: 5xx oranı ${fmtPct(tepe.c[3] / tepe.n)}`
       + (disOran == null ? "." : disOran > 0.001 ? `, bu dönemin dışında ${fmtPct(disOran)}.` : ", bu dönemin dışında neredeyse hiç yok.");
-    if (basta && sonda) t = `Sunucu hataları (5xx) aralığın tamamı boyunca yüksek: ${fmtPct(e5 / res.n)}. Ne zaman başladığını görmek için daha erken bir başlangıç seç.`;
+    if (basta && sonda) t = `Sunucu hataları (5xx) ${eksik ? "okunan kısım" : "aralığın tamamı"} boyunca yüksek: ${fmtPct(e5 / res.n)}. Ne zaman başladığını görmek için daha erken bir başlangıç seç.`;
     else if (basta) t += " Sorun aralığın başında zaten vardı; ne zaman başladığını görmek için daha erken bir başlangıç seç.";
-    else if (sonda) t += " Aralığın sonunda hâlâ sürüyordu.";
+    else if (sonda) t += eksik ? " Okunan kısmın sonunda hâlâ sürüyordu." : " Aralığın sonunda hâlâ sürüyordu.";
     if (sorunlu.length > 1) t += ` Bu aralıkta ${sorunlu.length} ayrı artış var.`;
     out.push({ lvl: "bad", text: t });
   } else if (res.n >= 100 && e5 / res.n >= 0.03) {
     // Belirli bir anda artmamış, aralık boyunca hep yüksek: bir "olay" değil, süregelen bir sorun
-    out.push({ lvl: "bad", text: `Sunucu hataları (5xx) aralığın tamamı boyunca yüksek: isteklerin ${fmtPct(e5 / res.n)} kadarı. Belirli bir anda artmamış; bu, o saatte başlayan bir olaydan çok süregelen bir sorun gibi görünüyor.` });
+    out.push({ lvl: "bad", text: `Sunucu hataları (5xx) ${eksik ? "okunan kısım" : "aralığın tamamı"} boyunca yüksek: isteklerin ${fmtPct(e5 / res.n)} kadarı. Belirli bir anda artmamış; bu, o saatte başlayan bir olaydan çok süregelen bir sorun gibi görünüyor.` });
   }
 
   // 2) Hangi backend
@@ -2406,13 +2420,13 @@ function olayOzeti(res) {
     });
   }
 
-  if (!out.some((x) => x.lvl === "bad" || x.lvl === "warn")) {
-    out.unshift({
+  if (!out.some((x) => (x.lvl === "bad" || x.lvl === "warn") && !x.kalan)) {
+    out.splice(eksik ? 1 : 0, 0, {
       lvl: "ok",
       text: `Bu aralıkta belirgin bir sorun görünmüyor: 5xx oranı ${fmtPct(e5 / res.n)}, trafikte düşüş yok, sunucu düşmesi yok. Sorun HAProxy'ye ulaşmadan (DNS, Cloudflare) ya da uygulamanın içinde (200 dönüp yanlış içerik vermek gibi) olmuş olabilir.`,
     });
   }
-  if (res.truncated) out.push({ lvl: "warn", text: res.note });
+  // Süre sınırı ya da durdurma notu en başta (kapsam cümlesi); burada tekrar yazılmaz
   return { cumleler: out, anaDonem, sorunlu };
 }
 
@@ -2444,8 +2458,11 @@ function KucukBtn({ children, onClick }) {
 function OlayGrafik({ res, onSec }) {
   const z = zamanYazici(res.from, res.to);
   const adimMs = res.step * 60000;
+  const kapsam = olayKapsam(res);
   const veri = (res.series || []).map((d) => {
-    const dk = dilimDk(res, d);
+    // Okunmayan kısım boş bırakılır (çizgi kesilir); "0 istek" diye çizilmez
+    if (d.t >= kapsam) return { t: d.t, Diğer: null, "5xx": null, Süre: null, okunmadi: true };
+    const dk = Math.max(1 / 60, Math.min(res.step, (kapsam - d.t) / 60000));
     return { t: d.t, Diğer: (d.n - d.c[3]) / dk, "5xx": d.c[3] / dk, Süre: d.avg >= 0 ? d.avg : null, dk, c: d.c, codes: d.codes || {} };
   });
   const [sec, setSec] = useState(null);
@@ -2471,6 +2488,10 @@ function OlayGrafik({ res, onSec }) {
     <ReferenceLine key={i} x={Math.floor((o.at - res.from) / adimMs) * adimMs + res.from} stroke={C.bad} strokeDasharray="4 4" strokeOpacity={0.9} ifOverflow="hidden" />
   ));
   const secim = sec && sec.b != null ? <ReferenceArea x1={sec.a} x2={sec.b} fill={C.info} fillOpacity={0.18} stroke={C.info} strokeOpacity={0.5} /> : null;
+  const okunmadi = kapsam < res.to ? (
+    <ReferenceArea x1={Math.max(kapsam, veri[0]?.t ?? kapsam)} x2={veri[veri.length - 1]?.t} fill={C.faint} fillOpacity={0.12} stroke="none"
+      label={{ value: "okunmadı", position: "insideTop", fill: C.muted, fontSize: 11 }} ifOverflow="hidden" />
+  ) : null;
   const Legend = ({ items }) => (
     <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs" style={{ color: C.muted }}>
       {items.map(([n, col, kesik]) => (
@@ -2494,6 +2515,7 @@ function OlayGrafik({ res, onSec }) {
             <Area type="monotone" dataKey="Diğer" name="Sunucu hatası olmayan" stackId="1" stroke={C.info} strokeWidth={1.5} fill={C.info} fillOpacity={0.25} isAnimationActive={false} dot={false} />
             <Area type="monotone" dataKey="5xx" name="Sunucu hatası (5xx)" stackId="1" stroke={C.bad} strokeWidth={1.5} fill={C.bad} fillOpacity={0.6} isAnimationActive={false} dot={false} />
             {olayCizgi}
+            {okunmadi}
             {secim}
           </AreaChart>
         </ResponsiveContainer>
@@ -2509,6 +2531,7 @@ function OlayGrafik({ res, onSec }) {
             <Tooltip cursor={{ stroke: C.faint }} content={<ChartTip birim={(v) => fmtMs(v)} etiketYaz={z.kisa} />} />
             <Area type="monotone" dataKey="Süre" name="Ortalama yanıt süresi" stroke={C.info} strokeWidth={2} fill={C.info} fillOpacity={0.15} isAnimationActive={false} dot={false} connectNulls={false} />
             {olayCizgi}
+            {okunmadi}
             {secim}
           </AreaChart>
         </ResponsiveContainer>
@@ -2526,6 +2549,13 @@ const IPUCU_GRUP = [
 function OlayIstekTip({ active, payload, label, etiketYaz }) {
   if (!active || !payload || !payload.length) return null;
   const d = payload[0].payload;
+  if (d.okunmadi) {
+    return (
+      <div style={{ background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 6, padding: "8px 10px", fontSize: 12, color: C.muted }}>
+        {etiketYaz ? etiketYaz(label) : label}: bu kısım okunmadı
+      </div>
+    );
+  }
   const dk = d.dk || 1;
   const toplam = d.c.reduce((a, x) => a + x, 0);
   if (!toplam) return null;
@@ -2742,7 +2772,17 @@ function OlaySonuc({ res, onSec }) {
       </p>
       <div className="flex flex-col gap-2">
         {cumleler.map((x, i) => (
-          <div key={i} className="rounded-md px-4 py-3 text-sm leading-relaxed" style={{ background: C.panel2, boxShadow: `inset 3px 0 0 ${renk[x.lvl]}` }}>{x.text}</div>
+          <div key={i} className="rounded-md px-4 py-3 text-sm leading-relaxed" style={{ background: C.panel2, boxShadow: `inset 3px 0 0 ${renk[x.lvl]}` }}>
+            {x.text}
+            {x.kalan && (
+              <div className="mt-2">
+                <button type="button" onClick={() => onSec(olayKapsam(res), res.to)} className="rounded-md px-3 py-1.5 text-xs"
+                  style={{ border: `1px solid ${C.info}`, color: C.text }}>
+                  Kalan kısmı incele ({zamanYazici(res.from, res.to).kisa(olayKapsam(res))} – {zamanYazici(res.from, res.to).kisa(res.to)})
+                </button>
+              </div>
+            )}
+          </div>
         ))}
       </div>
 
@@ -2897,12 +2937,46 @@ function OlaySonuc({ res, onSec }) {
 const otherKeyUI = "(diğer)";
 const yolAlt = (y) => (y.frontend ? `HAProxy yanıtladı (${y.backend})` : y.backend);
 
+// Okuma sürerken: nereye kadar okundu, yüzde kaç, ne kadar sürdü; istenirse durdurulur ve o
+// ana kadar okunan kısım gösterilir
+function IncelemeIlerleme({ d, onDurdur }) {
+  if (!d) return <p className="text-sm mt-3" style={{ color: C.muted }}>İnceleme başlatılıyor...</p>;
+  const z = zamanYazici(d.from, d.to);
+  const oran = Math.min(1, Math.max(0, (d.readTo - d.from) / Math.max(1, d.to - d.from)));
+  const sn = Math.round(d.elapsed / 1000);
+  return (
+    <div className="mt-4 text-sm" style={{ maxWidth: 560 }}>
+      {d.state === "bekliyor" ? (
+        <p style={{ color: C.muted }}>Başka bir arama ya da inceleme sürüyor; o bitince başlayacak.</p>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1" style={{ color: C.muted }}>
+            <span>Log okunuyor: <span className="tnum" style={{ color: C.text }}>{z.kisa(d.from)} – {z.kisa(Math.max(d.from, d.readTo))}</span> arası okundu</span>
+            <span className="tnum nw">{fmtPct(oran)} · {sn}{NB}sn</span>
+          </div>
+          <div style={{ height: 6, background: C.line, borderRadius: 3, marginTop: 6 }}>
+            <div style={{ width: `${Math.max(2, oran * 100)}%`, height: 6, background: C.info, borderRadius: 3, transition: "width .5s" }} />
+          </div>
+        </>
+      )}
+      <div className="flex flex-wrap items-center gap-3 mt-3">
+        <button type="button" onClick={onDurdur} className="rounded-md px-3 py-1.5 text-xs" style={{ border: `1px solid ${C.line}`, color: C.text }}>
+          Durdur ve okunan kısmı göster
+        </button>
+        <span className="text-xs" style={{ color: C.faint }}>Uzun aralıklar birkaç dakika sürebilir; en fazla 3 dakika okunur.</span>
+      </div>
+    </div>
+  );
+}
+
 function IncidentSection({ inputRef }) {
   const simdi = () => Date.now();
   const [form, setForm] = useState(() => ({ from: yerelGiris(simdi() - 3600e3), to: yerelGiris(simdi()) }));
   const [durum, setDurum] = useState("hazir");
   const [res, setRes] = useState(null);
   const [hata, setHata] = useState("");
+  const [ilerleme, setIlerleme] = useState(null);
+  const isRef = useRef(null);
 
   const incele = async (f = form) => {
     const a = girisMs(f.from);
@@ -2912,17 +2986,38 @@ function IncidentSection({ inputRef }) {
     if (b - a > 7 * 86400e3) { setHata("Aralık en fazla 7 gün olabilir."); setDurum("hata"); return; }
     setDurum("inceleniyor");
     setHata("");
+    setIlerleme(null);
+    // İnceleme ajanda arka planda çalışır; saniyede bir nereye kadar okunduğu sorulur
     try {
-      const r = await fetch(`/api/incident?from=${a}&to=${b}`, { cache: "no-store" });
-      const j = await r.json();
+      let r = await fetch(`/api/incident?from=${a}&to=${b}`, { cache: "no-store" });
+      let j = await r.json();
       if (j.error) { setHata(j.error); setDurum("hata"); return; }
-      setRes(j);
-      setDurum("bitti");
+      const id = j.job;
+      isRef.current = id;
+      for (;;) {
+        if (isRef.current !== id) return; // yeni bir inceleme başlatıldı
+        setIlerleme(j);
+        if (j.state === "bitti") {
+          setRes(j.report);
+          setDurum("bitti");
+          return;
+        }
+        await new Promise((ok) => setTimeout(ok, 1000));
+        if (isRef.current !== id) return;
+        r = await fetch(`/api/incident?job=${id}`, { cache: "no-store" });
+        j = await r.json();
+        if (j.error) { setHata(j.error); setDurum("hata"); return; }
+      }
     } catch (err) {
       setHata("İnceleme yapılamadı: " + err.message);
       setDurum("hata");
     }
   };
+  const durdur = () => {
+    if (isRef.current) fetch(`/api/incident?job=${isRef.current}&stop=1`, { cache: "no-store" }).catch(() => {});
+  };
+  // Bölüm kapanırsa (sayfa değişirse) sormayı bırak
+  useEffect(() => () => { isRef.current = null; }, []);
   const hizli = (dk) => {
     const f = { from: yerelGiris(simdi() - dk * 60000), to: yerelGiris(simdi()) };
     setForm(f);
@@ -2972,11 +3067,7 @@ function IncidentSection({ inputRef }) {
           İpucu: sorunun yaşandığı saatin biraz öncesinden başlat. Sorunsuz dönemle karşılaştırınca neyin değiştiği daha kolay görünür.
         </p>
         {durum === "hata" && <p className="text-sm mt-3" style={{ color: C.warn }}>{hata}</p>}
-        {durum === "inceleniyor" && (
-          <p className="text-sm mt-3" style={{ color: C.muted }}>
-            Log dosyaları okunuyor. Uzun aralıklarda bu biraz sürebilir; inceleme en fazla 1 dakika çalışır.
-          </p>
-        )}
+        {durum === "inceleniyor" && <IncelemeIlerleme d={ilerleme} onDurdur={durdur} />}
         {durum === "bitti" && res && <OlaySonuc res={res} onSec={sec} />}
       </Panel>
     </section>

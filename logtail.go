@@ -149,13 +149,26 @@ func normPath(uri string) string {
 			uri = "/"
 		}
 	}
-	segs := strings.Split(uri, "/")
-	for i, s := range segs {
-		if isID(s) {
-			segs[i] = "{id}"
+	// Kimlik gibi görünen parça yoksa (çoğu yol) bölüp birleştirmeye gerek yok
+	idVar := false
+	for bas := 0; bas <= len(uri) && !idVar; {
+		son := strings.IndexByte(uri[bas:], '/')
+		if son < 0 {
+			son = len(uri) - bas
 		}
+		idVar = isID(uri[bas : bas+son])
+		bas += son + 1
 	}
-	p := strings.Join(segs, "/")
+	p := uri
+	if idVar {
+		segs := strings.Split(uri, "/")
+		for i, s := range segs {
+			if isID(s) {
+				segs[i] = "{id}"
+			}
+		}
+		p = strings.Join(segs, "/")
+	}
 	if len(p) > 120 {
 		p = p[:120] + "…"
 	}

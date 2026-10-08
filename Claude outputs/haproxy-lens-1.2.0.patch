@@ -1,0 +1,1747 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index aa51397..afca17e 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -4,6 +4,17 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
+ GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
+ sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
+ 
++## 1.2.0
++
++- **Düzeltme: olay incelemesinde okunamayan kısım "trafik yok" gibi görünüyordu.** Uzun bir aralıkta (ör. 24 saat) inceleme 1 dakikalık süre sınırına takılınca yalnızca aralığın başını okuyabiliyordu; grafik ise okunmayan kısmı sıfır istek gibi çiziyordu, sanki trafik bir anda kesilmiş gibi. Artık:
++  - Özetin ilk cümlesi hangi kısmın okunduğunu yazıyor: "Süre sınırına ulaşıldı: yalnızca 17:30 ile 21:31 arası okundu (aralığın %17 kadarı). Aşağıdaki sayılar ve cümleler yalnızca bu kısım için." Altında **Kalan kısmı incele** düğmesi var.
++  - Grafikte okunmayan kısım boş ve gri, üstünde "okunmadı" yazıyor; üzerine gelince "bu kısım okunmadı" diyor.
++  - Özetteki cümleler yalnızca okunan kısma göre kuruluyor ("okunan kısım boyunca yüksek").
++- **İnceleme arka planda, ilerlemeyle.** Tarayıcı artık bir dakika boyunca cevap beklemiyor: inceleme ajanda arka planda çalışıyor, sayfa saniyede bir nereye kadar okunduğunu gösteriyor ("00:00 – 10:21 arası okundu, %21, 12 sn"). **Durdur ve okunan kısmı göster** ile istediğin an o ana kadar okunanı görebiliyorsun. Süre sınırı 1 dakikadan 3 dakikaya çıktı. Yeni bir aralık istenince öncekisi kendiliğinden durduruluyor.
++- **Log okuma yaklaşık 2,5 kat hızlı.** Satırları çözmek için kullanılan düzenli ifade (regex), satır başına sürenin üçte ikisini harcıyordu. Log biçimleri artık bu iş için yazılmış bir çözücüyle okunuyor; tarih ve adres düzenleme de hafifletildi. Ölçümde 24 saatlik bir log saniyede ~150 bin satır yerine ~380 bin satır hızla okundu. Bu hızlanma olay incelemesine, log aramasına ve canlı log okumaya birlikte yansıyor; ajanın işlemci tavanı aynı.
++  - Doğruluk: yeni çözücü, 12 farklı log biçiminde rastgele üretilmiş ve yarısı bozulmuş 480 bin satırda düzenli ifadeyle birebir aynı sonucu veriyor; koda bilerek sokulan hatayı test yakalıyor. Çözücü emin olamadığı satırı (ASCII dışı karakter, alışılmadık biçim, çok fazla olasılık) eski yöntemle okuyor.
++- Düzeltme: sonuçta hiç istek olmayan bir aralıkta özet bölümü hata verebiliyordu.
++
+ ## 1.1.3
+ 
+ - **Açılır menülerin oku kutunun içinde.** Tarayıcının kendi oku kutunun sağ kenarına yapışık çiziliyordu, Mac'te çerçevenin üstüne taşıyordu ("Yöntem", "Zaman aralığı"). Ok artık panelin kendisi tarafından, kutunun içinde sabit bir yere çiziliyor; her tarayıcıda aynı görünüyor.
+diff --git a/README.md b/README.md
+index f0c8702..02fead4 100644
+--- a/README.md
++++ b/README.md
+@@ -184,7 +184,9 @@ What you get:
+ - **Addresses with the most errors, most requested addresses, top client IPs**, host names (if they are in the log) and all status codes.
+ - From any backend, address or IP, **"Log'da gör"** opens the log search with the same window, so you can see the individual requests with their exact times.
+ 
+-How it stays fast: in an uncompressed file the start of the window is found by binary search and only the window is read; in a compressed file the lines before the window are skipped in groups without being parsed. A 40-minute window in a 900,000-line log reads about 18,000 lines. It shares the log search's lock and 1-minute limit; with the agent's 10% CPU limit, a few hours take a few seconds, while a full busy day may hit the limit. If it does, the part from the start of the window is complete and the result says so.
++How it stays fast: in an uncompressed file the start of the window is found by binary search and only the window is read; in a compressed file the lines before the window are skipped in groups without being parsed. A 40-minute window in a 900,000-line log reads about 18,000 lines. Log lines are decoded by a purpose-built matcher instead of a regular expression, about 2.5 times faster; it is checked against the regular expression on hundreds of thousands of random and corrupted lines, and any line it is unsure about is decoded the old way.
++
++The review runs in the background on the agent: while it reads, the page shows how far it has got ("00:00 – 10:21 read, 21%") and you can stop it to see what has been read so far. It reads for at most 3 minutes; with the agent's 10% CPU limit a few hours take seconds, and a full busy day usually fits. If the limit is reached or you stop it, the result says exactly which part was read (from the start of the window, complete), the unread part is shown greyed out as "okunmadı" (not read) instead of as zero traffic, and a button reviews the rest. It shares the log search's lock: while a review runs, a search waits, and the other way round.
+ 
+ What it cannot see: anything not written to the log. If log files have been rotated away, those days cannot be reviewed. Server DOWN/UP events appear only if HAProxy writes them to the same log (it does so at "notice" level) and only for servers with health checks. If a site failed before reaching HAProxy (DNS, Cloudflare), the review shows it only as a drop in traffic.
+ 
+@@ -367,6 +369,7 @@ Files:
+ | `haproxy.go` | Reading from the stats socket (the allowed commands are here), time range calculation |
+ | `config.go` | Reading haproxy.cfg: sections, `defaults` inheritance, log targets, Host capture |
+ | `logformat.go` | Turning a `log-format` definition into a parser (httplog, httpslog, tcplog, custom) |
++| `fastmatch.go` | Fast line decoder used instead of the regular expression (checked against it in `fastmatch_test.go`) |
+ | `logtail.go` | Following the log file / journald, per-minute summaries, path and code breakdowns |
+ | `watch.go` | Following the configuration, log source and socket while running; `/api/config` |
+ | `notes.go` | Configuration notes (what is missing, what it affects, which line could be added) |
+diff --git a/README.tr.md b/README.tr.md
+index 216ba06..13e128b 100644
+--- a/README.tr.md
++++ b/README.tr.md
+@@ -184,7 +184,9 @@ Neler gösterir:
+ - **En çok hata alan adresler, en çok istenen adresler, en çok istek atan IP'ler**, alan adları (log'da varsa) ve bütün yanıt kodları.
+ - Herhangi bir backend, adres ya da IP'den **"Log'da gör"**, aynı aralıkla log aramasını açar; tek tek istekleri tam zamanlarıyla görürsün.
+ 
+-Nasıl hızlı kalır: sıkıştırılmamış dosyada aralığın başlangıcı ikili aramayla bulunur, yalnızca aralık okunur; sıkıştırılmış dosyada aralıktan önceki satırlar ayrıştırılmadan gruplar halinde geçilir. 900 bin satırlık bir log'da 40 dakikalık bir aralık için yaklaşık 18 bin satır okunur. Log aramasıyla aynı kilidi ve 1 dakikalık sınırı kullanır; ajanın %10 işlemci tavanıyla birkaç saatlik bir aralık birkaç saniye sürer, yoğun bir LB'de bütün bir gün sınıra takılabilir. Takılırsa aralığın başından itibaren okunan kısım eksiksizdir ve sonuç bunu yazar.
++Nasıl hızlı kalır: sıkıştırılmamış dosyada aralığın başlangıcı ikili aramayla bulunur, yalnızca aralık okunur; sıkıştırılmış dosyada aralıktan önceki satırlar ayrıştırılmadan gruplar halinde geçilir. 900 bin satırlık bir log'da 40 dakikalık bir aralık için yaklaşık 18 bin satır okunur. Log satırları düzenli ifade yerine bu iş için yazılmış bir çözücüyle okunur, yaklaşık 2,5 kat hızlı; sonuçları yüz binlerce rastgele ve bozuk satırda düzenli ifadeyle karşılaştırılarak doğrulanır, emin olamadığı satır eski yöntemle okunur.
++
++İnceleme ajanda arka planda çalışır: okurken sayfa nereye kadar okunduğunu gösterir ("00:00 – 10:21 arası okundu, %21") ve istersen durdurup o ana kadar okunanı görebilirsin. En fazla 3 dakika okur; ajanın %10 işlemci tavanıyla birkaç saat saniyeler sürer, yoğun bir LB'nin bütün bir günü de çoğu zaman sığar. Sınıra ulaşılır ya da durdurursan sonuç hangi kısmın okunduğunu açıkça yazar (aralığın başından itibaren, eksiksiz); okunmayan kısım grafikte sıfır trafik gibi değil, gri ve "okunmadı" diye görünür; bir düğmeyle kalan kısım incelenir. Log aramasıyla aynı kilidi kullanır: inceleme sürerken arama bekler, tersi de geçerli.
+ 
+ Neyi göremez: log'a yazılmamış olan hiçbir şeyi. Log dosyaları döndürülüp silindiyse o günler incelenemez. Sunucu düşme/kalkma olayları yalnızca HAProxy bunları aynı log'a yazıyorsa ("notice" seviyesinde yazar) ve yalnızca sağlık kontrolü olan sunucular için görünür. Bir site HAProxy'ye ulaşmadan çöktüyse (DNS, Cloudflare), inceleme bunu yalnızca trafikte düşüş olarak gösterebilir.
+ 
+@@ -367,6 +369,7 @@ Dosyalar:
+ | `haproxy.go` | Stats socket'inden okuma (izin verilen komutlar burada), zaman aralığı hesabı |
+ | `config.go` | haproxy.cfg'yi okuma: bölümler, `defaults` mirası, log hedefleri, Host yakalama |
+ | `logformat.go` | `log-format` tanımını ayrıştırıcıya çevirme (httplog, httpslog, tcplog, özel) |
++| `fastmatch.go` | Düzenli ifade yerine kullanılan hızlı satır çözücü (`fastmatch_test.go`'da düzenli ifadeyle karşılaştırılır) |
+ | `logtail.go` | Log dosyasını / journald'ı izleme, dakikalık özetler, yol ve kod dökümü |
+ | `watch.go` | Çalışırken config, log kaynağı ve socket izleme; `/api/config` |
+ | `notes.go` | Yapılandırma notları (ne eksik, neyi etkiliyor, hangi satır eklenebilir) |
+diff --git a/fastmatch.go b/fastmatch.go
+new file mode 100644
+index 0000000..1ecb3f2
+--- /dev/null
++++ b/fastmatch.go
+@@ -0,0 +1,656 @@
++package main
++
++import (
++	"strings"
++	"time"
++)
++
++// Log satırlarını düzenli ifade (regexp) kullanmadan çözen hızlı yol.
++//
++// Bir log biçimi ("%ci:%cp [%tr] %ft %b/%s ...") birkaç alan türünden oluşur: boşluksuz metin,
++// sayı, tırnaklı metin, süslü parantezli yakalama, tarih. compileFormat bunlardan bir düzenli
++// ifade kurar; Go'nun düzenli ifade motoru her satırda geri izleme (backtracking) yaptığı için
++// satır başına ~5 mikrosaniye harcıyordu. Ajanın %10 işlemci tavanıyla bu, olay incelemesinde
++// 24 saatlik bir log'u 1 dakikada okumaya yetmiyordu.
++//
++// Burada aynı biçim, alan türlerini doğrudan tanıyan bir eşleştiriciye çevrilir. Eşleştirici
++// düzenli ifadeyle AYNI tercih sırasını izler (açgözlü alanlar önce en uzun hali dener, sonra
++// kısaltır; isteğe bağlı parçalar önce "var" sonra "yok" diye denenir). Böylece aynı satırdan
++// aynı alanları çıkarır; bu, rastgele üretilen ve bozulan yüz binlerce satırla düzenli ifadeye
++// karşı testle doğrulanıyor (fastmatch_test.go).
++//
++// Güvenli çıkışlar: tanınmayan bir alan türü varsa biçim için hızlı yol kurulmaz; satırda ASCII
++// dışı bir bayt ya da satır sonu varsa (düzenli ifade bunları bayt bayt değil harf harf işler)
++// ya da bir satırda deneme sayısı sınırı aşılırsa o satır düzenli ifadeyle çözülür.
++
++type hizliTur uint8
++
++const (
++	hLit            hizliTur = iota
++	hBosluksuz               // \S+
++	hBosluksuz0              // \S*
++	hRakam                   // \d+
++	hIsaretRakam             // \+?-?\d+
++	hEksiRakam               // -?\d+
++	hArtiRakam               // \+?\d+
++	hSabitBosluksuz          // \S{n}
++	hSabitRakam              // \d{n}
++	hTarihMs                 // 02/Jan/2006:15:04:05.000
++	hTarihTZ                 // 02/Jan/2006:15:04:05 -0700
++	hSuslu                   // \{[^}]*\}
++	hIstek                   // \S+ \S+(?: \S+)?
++	hHex                     // [0-9A-Fa-f]+
++	hTirnakli                // "[^"]*"|-
++)
++
++var hizliDesen = map[string]hizliTur{
++	`\S+`: hBosluksuz, `\S*`: hBosluksuz0, `\d+`: hRakam, `\+?-?\d+`: hIsaretRakam,
++	`-?\d+`: hEksiRakam, `\+?\d+`: hArtiRakam, `\S{4}`: hSabitBosluksuz, `\S{2}`: hSabitBosluksuz,
++	`\d{3}`: hSabitRakam,
++	`\d{2}/\w{3}/\d{4}:\d{2}:\d{2}:\d{2}\.\d{3}`:    hTarihMs,
++	`\d{2}/\w{3}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4}`: hTarihTZ,
++	`\{[^}]*\}`: hSuslu, `\S+ \S+(?: \S+)?`: hIstek, `[0-9A-Fa-f]+`: hHex, `"[^"]*"|-`: hTirnakli,
++}
++
++type hizliOge struct {
++	tur       hizliTur
++	lit       string
++	n         int  // sabit uzunluk (\S{n}, \d{n})
++	grup      int  // yakalanıyorsa grup numarası (1'den), değilse 0
++	ops       bool // isteğe bağlı: (?:(…) )? ya da (?:(…))?
++	opsBosluk bool // isteğe bağlıysa ardından tek boşluk gelir ve o da isteğe dahildir
++	// Budama: bu öğeden hemen sonra ne gelmeli. Ardından sabit bir metin geliyorsa onun ilk
++	// karakteri; biçimin sonuysa boşluk ya da satır sonu. Aday bitişlerin çoğu böylece hiç
++	// denenmeden elenir; biçime uymayan satırlarda deneme sayısı patlamaz.
++	ardKar byte
++	ardSon bool
++}
++
++type hizliEslestirici struct {
++	ogeler  []hizliOge
++	gruplar int // sondaki alan grubu dahil
++}
++
++// Bir satır için en fazla bu kadar adım; aşılırsa satır düzenli ifadeyle çözülür
++const hizliAdimSiniri = 4000
++
++// Budama bilgisini doldurur (compileFormat öğeleri ekledikten sonra çağırır)
++func (h *hizliEslestirici) hazirla() {
++	for i := range h.ogeler {
++		o := &h.ogeler[i]
++		if o.ops && o.opsBosluk {
++			o.ardKar = ' '
++			continue
++		}
++		if i+1 == len(h.ogeler) {
++			o.ardSon = true
++		} else if s := &h.ogeler[i+1]; s.tur == hLit && !s.ops {
++			o.ardKar = s.lit[0]
++		}
++	}
++}
++
++// Aday bitiş, ardından gelmesi gerekenle uyuşuyor mu (ucuz ön kontrol)
++func (o *hizliOge) uyar(s string, son int) bool {
++	if o.ardKar != 0 {
++		return son < len(s) && s[son] == o.ardKar
++	}
++	if o.ardSon {
++		return son == len(s) || bosluk(s[son])
++	}
++	return true
++}
++
++// Go'nun düzenli ifadesindeki \s: [\t\n\f\r ]
++func bosluk(c byte) bool  { return c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r' }
++func rakamMi(c byte) bool { return c >= '0' && c <= '9' }
++func kelimeMi(c byte) bool {
++	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_'
++}
++func hexMi(c byte) bool { return rakamMi(c) || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' }
++
++// Hızlı yolun güvenle kullanılabileceği satır: yalnızca ASCII, satır sonu yok
++func hizliUygun(s string) bool {
++	for i := 0; i < len(s); i++ {
++		if s[i] >= 0x80 || s[i] == '\n' {
++			return false
++		}
++	}
++	return true
++}
++
++type hizliCalisma struct {
++	s    string
++	m    []string
++	adim int
++}
++
++// Satırı çözer. Dönen dilim FindStringSubmatch ile aynı biçimde: [0] bütün satır, sonra gruplar
++// (katılmayan grup boş metin); eşleşme yoksa nil. İkinci değer sonucun kesin olup olmadığı:
++// deneme sınırı aşıldıysa false döner ve çağıran düzenli ifadeye başvurur.
++func (h *hizliEslestirici) eslestir(s string) ([]string, bool) {
++	// Önce düz geçiş: her öğede düzenli ifadenin İLK tercih edeceği bitiş alınır. Satırların
++	// neredeyse hepsi böyle tek geçişte çözülür. Düz geçiş sonuna kadar giderse bu, geri izlemenin
++	// denediği ilk yoldur ve başarılıdır; yani düzenli ifadenin sonucuyla aynıdır. Bir yerde
++	// tıkanırsa (başka bir tercih gerekebilir) ayrıntılı aramaya geçilir.
++	if m := h.dogrusal(s); m != nil {
++		return m, true
++	}
++	c := hizliCalisma{s: s, m: make([]string, h.gruplar+1)}
++	ok := h.git(&c, 0, 0)
++	if c.adim > hizliAdimSiniri {
++		return nil, false
++	}
++	if !ok {
++		return nil, true
++	}
++	c.m[0] = s
++	return c.m, true
++}
++
++func (h *hizliEslestirici) git(c *hizliCalisma, i, pos int) bool {
++	if c.adim++; c.adim > hizliAdimSiniri {
++		return false
++	}
++	if i == len(h.ogeler) {
++		return h.son(c, pos)
++	}
++	o := &h.ogeler[i]
++	if o.ops {
++		// Açgözlü "?": önce parçayı alarak dene, olmazsa atla
++		if h.dene(c, i, pos) {
++			return true
++		}
++		if c.adim > hizliAdimSiniri {
++			return false
++		}
++		if o.grup > 0 {
++			c.m[o.grup] = ""
++		}
++		return h.git(c, i+1, pos)
++	}
++	return h.dene(c, i, pos)
++}
++
++// Aday bitişle devam: yakalanan değeri yazar, sonraki öğeye geçer
++func (h *hizliEslestirici) devam(c *hizliCalisma, i, pos, son int) bool {
++	o := &h.ogeler[i]
++	if !o.uyar(c.s, son) {
++		return false
++	}
++	sonraki := son
++	if o.ops && o.opsBosluk {
++		sonraki = son + 1
++	}
++	if o.grup > 0 {
++		c.m[o.grup] = c.s[pos:son]
++	}
++	return h.git(c, i+1, sonraki)
++}
++
++// Öğeyi pos'tan başlayarak, düzenli ifadenin tercih sırasıyla aday bitişlerle dener
++func (h *hizliEslestirici) dene(c *hizliCalisma, i, pos int) bool {
++	o := &h.ogeler[i]
++	s := c.s
++	n := len(s)
++	switch o.tur {
++	case hLit:
++		if n-pos >= len(o.lit) && s[pos:pos+len(o.lit)] == o.lit {
++			return h.devam(c, i, pos, pos+len(o.lit))
++		}
++		return false
++	case hBosluksuz, hBosluksuz0:
++		e := pos
++		for e < n && !bosluk(s[e]) {
++			e++
++		}
++		alt := pos + 1
++		if o.tur == hBosluksuz0 {
++			alt = pos
++		}
++		return h.adaylar(c, i, pos, alt, e, func(b byte) bool { return !bosluk(b) })
++	case hRakam:
++		return h.rakamlar(c, i, pos, pos)
++	case hHex:
++		e := pos
++		for e < n && hexMi(s[e]) {
++			e++
++		}
++		return h.adaylar(c, i, pos, pos+1, e, hexMi)
++	case hIsaretRakam, hEksiRakam, hArtiRakam:
++		// \+? ve -? açgözlü: işaret varsa önce onunla dene
++		artiOlabilir := o.tur != hEksiRakam
++		eksiOlabilir := o.tur != hArtiRakam
++		for _, arti := range [2]bool{true, false} {
++			p := pos
++			if arti {
++				if !artiOlabilir || p >= n || s[p] != '+' {
++					continue
++				}
++				p++
++			}
++			for _, eksi := range [2]bool{true, false} {
++				q := p
++				if eksi {
++					if !eksiOlabilir || q >= n || s[q] != '-' {
++						continue
++					}
++					q++
++				}
++				if h.rakamlar(c, i, pos, q) {
++					return true
++				}
++			}
++		}
++		return false
++	case hSabitBosluksuz:
++		if pos+o.n > n {
++			return false
++		}
++		for k := pos; k < pos+o.n; k++ {
++			if bosluk(s[k]) {
++				return false
++			}
++		}
++		return h.devam(c, i, pos, pos+o.n)
++	case hSabitRakam:
++		if pos+o.n > n {
++			return false
++		}
++		for k := pos; k < pos+o.n; k++ {
++			if !rakamMi(s[k]) {
++				return false
++			}
++		}
++		return h.devam(c, i, pos, pos+o.n)
++	case hTarihMs, hTarihTZ:
++		// 02/Jan/2006:15:04:05.000 ya da 02/Jan/2006:15:04:05 -0700
++		kalip := "dd/www/dddd:dd:dd:dd.ddd"
++		if o.tur == hTarihTZ {
++			kalip = "dd/www/dddd:dd:dd:dd sdddd"
++		}
++		if pos+len(kalip) > n {
++			return false
++		}
++		for k := 0; k < len(kalip); k++ {
++			ch := s[pos+k]
++			switch kalip[k] {
++			case 'd':
++				if !rakamMi(ch) {
++					return false
++				}
++			case 'w':
++				if !kelimeMi(ch) {
++					return false
++				}
++			case 's':
++				if ch != '+' && ch != '-' {
++					return false
++				}
++			default:
++				if ch != kalip[k] {
++					return false
++				}
++			}
++		}
++		return h.devam(c, i, pos, pos+len(kalip))
++	case hSuslu:
++		if pos >= n || s[pos] != '{' {
++			return false
++		}
++		for k := pos + 1; k < n; k++ {
++			if s[k] == '}' {
++				return h.devam(c, i, pos, k+1)
++			}
++		}
++		return false
++	case hTirnakli:
++		// "[^"]*" önce, olmazsa "-"
++		if pos < n && s[pos] == '"' {
++			for k := pos + 1; k < n; k++ {
++				if s[k] == '"' {
++					if h.devam(c, i, pos, k+1) {
++						return true
++					}
++					break
++				}
++			}
++		}
++		if pos < n && s[pos] == '-' {
++			return h.devam(c, i, pos, pos+1)
++		}
++		return false
++	case hIstek:
++		// \S+ \S+(?: \S+)? : birinci parça boşluksuz ve ardında tek boşluk olmalı
++		e1 := pos
++		for e1 < n && !bosluk(s[e1]) {
++			e1++
++		}
++		if e1 == pos || e1 >= n || s[e1] != ' ' {
++			return false
++		}
++		p2 := e1 + 1
++		e2 := p2
++		for e2 < n && !bosluk(s[e2]) {
++			e2++
++		}
++		for b2 := e2; b2 >= p2+1; b2-- {
++			// Üçüncü parça (açgözlü ?): önce varsa onunla
++			if b2 < n && s[b2] == ' ' {
++				p3 := b2 + 1
++				e3 := p3
++				for e3 < n && !bosluk(s[e3]) {
++					e3++
++				}
++				for b3 := e3; b3 >= p3+1; b3-- {
++					if h.devam(c, i, pos, b3) {
++						return true
++					}
++				}
++			}
++			if h.devam(c, i, pos, b2) {
++				return true
++			}
++		}
++		return false
++	}
++	return false
++}
++
++// \d+ : basla'dan itibaren rakamlar, en uzundan kısaya; yakalanan değer pos'tan başlar
++// (önündeki işaret dahil)
++func (h *hizliEslestirici) rakamlar(c *hizliCalisma, i, pos, basla int) bool {
++	e := basla
++	for e < len(c.s) && rakamMi(c.s[e]) {
++		e++
++	}
++	return h.adaylar(c, i, pos, basla+1, e, rakamMi)
++}
++
++// [alt, e] aralığındaki aday bitişleri en uzundan kısaya dener. Aralıktaki her konumdaki
++// karakter sinif'a uyar (e'deki uymaz). Ardından gelmesi gereken karakter biliniyorsa yalnızca
++// onun bulunduğu konumlar aday olabilir; çoğu zaman tek aday kalır (en uzunu).
++func (h *hizliEslestirici) adaylar(c *hizliCalisma, i, pos, alt, e int, sinif func(byte) bool) bool {
++	if e < alt {
++		return false
++	}
++	o := &h.ogeler[i]
++	if o.ardSon || o.ardKar != 0 && !sinif(o.ardKar) {
++		// Ardından boşluk/satır sonu ya da sınıf dışı bir karakter gelmeli: e'den kısası olamaz
++		return h.devam(c, i, pos, e)
++	}
++	if o.ardKar != 0 {
++		for son := e; son >= alt; son-- {
++			if (son == len(c.s) || c.s[son] != o.ardKar) && son != e {
++				continue
++			}
++			if h.devam(c, i, pos, son) {
++				return true
++			}
++		}
++		return false
++	}
++	for son := e; son >= alt; son-- {
++		if h.devam(c, i, pos, son) {
++			return true
++		}
++	}
++	return false
++}
++
++// Biçimin sonu: (?:\s+(.*?))?\s*$ — satırın sonuna eklenmiş alanlar (alan adı için taranır)
++func (h *hizliEslestirici) son(c *hizliCalisma, pos int) bool {
++	s := c.s
++	if pos == len(s) {
++		c.m[h.gruplar] = ""
++		return true
++	}
++	if !bosluk(s[pos]) {
++		return false
++	}
++	bas := pos
++	for bas < len(s) && bosluk(s[bas]) {
++		bas++
++	}
++	bit := len(s)
++	for bit > bas && bosluk(s[bit-1]) {
++		bit--
++	}
++	c.m[h.gruplar] = s[bas:bit]
++	return true
++}
++
++// Düz geçiş. Her öğe için tercih sırasındaki ilk uygun bitiş (ardından gelmesi gerekenle uyuşan)
++// seçilir; isteğe bağlı öğe önce "var" diye denenir. Tıkanırsa nil.
++func (h *hizliEslestirici) dogrusal(s string) []string {
++	m := make([]string, h.gruplar+1)
++	pos := 0
++	for i := range h.ogeler {
++		o := &h.ogeler[i]
++		son, ok := h.ilkAday(s, i, pos)
++		if !ok {
++			if !o.ops {
++				return nil
++			}
++			if o.grup > 0 {
++				m[o.grup] = ""
++			}
++			continue
++		}
++		if o.grup > 0 {
++			m[o.grup] = s[pos:son]
++		}
++		pos = son
++		if o.ops && o.opsBosluk {
++			pos++
++		}
++	}
++	c := hizliCalisma{s: s, m: m}
++	if !h.son(&c, pos) {
++		return nil
++	}
++	m[0] = s
++	return m
++}
++
++// Öğenin pos'tan başlayan, tercih sırasındaki ilk uygun bitişi
++func (h *hizliEslestirici) ilkAday(s string, i, pos int) (int, bool) {
++	o := &h.ogeler[i]
++	n := len(s)
++	enUzun := func(alt, e int, sinif func(byte) bool) (int, bool) {
++		if e < alt {
++			return 0, false
++		}
++		if o.ardSon || o.ardKar != 0 && !sinif(o.ardKar) {
++			return e, o.uyar(s, e)
++		}
++		for son := e; son >= alt; son-- {
++			if o.uyar(s, son) {
++				return son, true
++			}
++		}
++		return 0, false
++	}
++	tek := func(son int) (int, bool) { return son, o.uyar(s, son) }
++	switch o.tur {
++	case hLit:
++		if n-pos >= len(o.lit) && s[pos:pos+len(o.lit)] == o.lit {
++			return tek(pos + len(o.lit))
++		}
++	case hBosluksuz, hBosluksuz0:
++		e := pos
++		for e < n && !bosluk(s[e]) {
++			e++
++		}
++		alt := pos + 1
++		if o.tur == hBosluksuz0 {
++			alt = pos
++		}
++		return enUzun(alt, e, func(b byte) bool { return !bosluk(b) })
++	case hRakam, hIsaretRakam, hEksiRakam, hArtiRakam:
++		q := pos
++		if o.tur != hRakam && o.tur != hEksiRakam && q < n && s[q] == '+' {
++			q++
++		}
++		if o.tur != hRakam && o.tur != hArtiRakam && q < n && s[q] == '-' {
++			q++
++		}
++		e := q
++		for e < n && rakamMi(s[e]) {
++			e++
++		}
++		// İşaret alındıysa ve ardından rakam yoksa, işaretsiz hali de denenmeliydi: ayrıntılı aramaya bırak
++		if son, ok := enUzun(q+1, e, rakamMi); ok {
++			return son, true
++		}
++		return 0, false
++	case hHex:
++		e := pos
++		for e < n && hexMi(s[e]) {
++			e++
++		}
++		return enUzun(pos+1, e, hexMi)
++	case hSabitBosluksuz:
++		if pos+o.n > n {
++			return 0, false
++		}
++		for k := pos; k < pos+o.n; k++ {
++			if bosluk(s[k]) {
++				return 0, false
++			}
++		}
++		return tek(pos + o.n)
++	case hSabitRakam:
++		if pos+o.n > n {
++			return 0, false
++		}
++		for k := pos; k < pos+o.n; k++ {
++			if !rakamMi(s[k]) {
++				return 0, false
++			}
++		}
++		return tek(pos + o.n)
++	case hTarihMs, hTarihTZ:
++		kalip := "dd/www/dddd:dd:dd:dd.ddd"
++		if o.tur == hTarihTZ {
++			kalip = "dd/www/dddd:dd:dd:dd sdddd"
++		}
++		if pos+len(kalip) > n {
++			return 0, false
++		}
++		for k := 0; k < len(kalip); k++ {
++			ch := s[pos+k]
++			switch kalip[k] {
++			case 'd':
++				if !rakamMi(ch) {
++					return 0, false
++				}
++			case 'w':
++				if !kelimeMi(ch) {
++					return 0, false
++				}
++			case 's':
++				if ch != '+' && ch != '-' {
++					return 0, false
++				}
++			default:
++				if ch != kalip[k] {
++					return 0, false
++				}
++			}
++		}
++		return tek(pos + len(kalip))
++	case hSuslu:
++		if pos < n && s[pos] == '{' {
++			for k := pos + 1; k < n; k++ {
++				if s[k] == '}' {
++					return tek(k + 1)
++				}
++			}
++		}
++	case hTirnakli:
++		if pos < n && s[pos] == '"' {
++			for k := pos + 1; k < n; k++ {
++				if s[k] == '"' {
++					if o.uyar(s, k+1) {
++						return k + 1, true
++					}
++					return 0, false // "-" seçeneği bu konumda olamaz (ilk karakter tırnak)
++				}
++			}
++			return 0, false
++		}
++		if pos < n && s[pos] == '-' {
++			return tek(pos + 1)
++		}
++	case hIstek:
++		// Yalnızca en olağan durum: üç parça da en uzun haliyle ve ardından gelmesi gerekenle uyuşuyor
++		e1 := pos
++		for e1 < n && !bosluk(s[e1]) {
++			e1++
++		}
++		if e1 == pos || e1 >= n || s[e1] != ' ' {
++			return 0, false
++		}
++		e2 := e1 + 1
++		for e2 < n && !bosluk(s[e2]) {
++			e2++
++		}
++		if e2 == e1+1 {
++			return 0, false
++		}
++		if e2 < n && s[e2] == ' ' {
++			e3 := e2 + 1
++			for e3 < n && !bosluk(s[e3]) {
++				e3++
++			}
++			if e3 > e2+1 && o.uyar(s, e3) {
++				return e3, true
++			}
++			return 0, false
++		}
++		return tek(e2)
++	}
++	return 0, false
++}
++
++var ayKisa = [12]string{"jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"}
++
++// "07/Oct/2026:14:05:01.123" biçimindeki kabul zamanını time.ParseInLocation'dan ~10 kat hızlı
++// çözer. Emin olamadığı her durumda (ayın 28'inden sonrası, beklenmeyen karakter) false döner;
++// çağıran o zaman time.ParseInLocation kullanır, sonuç aynı kalır.
++func hizliTarihMs(v string) (time.Time, bool) {
++	if len(v) != 24 || v[2] != '/' || v[6] != '/' || v[11] != ':' || v[14] != ':' || v[17] != ':' || v[20] != '.' {
++		return time.Time{}, false
++	}
++	sayi := func(a, b int) (int, bool) {
++		n := 0
++		for k := a; k < b; k++ {
++			if !rakamMi(v[k]) {
++				return 0, false
++			}
++			n = n*10 + int(v[k]-'0')
++		}
++		return n, true
++	}
++	gun, ok1 := sayi(0, 2)
++	yil, ok2 := sayi(7, 11)
++	sa, ok3 := sayi(12, 14)
++	dk, ok4 := sayi(15, 17)
++	sn, ok5 := sayi(18, 20)
++	ms, ok6 := sayi(21, 24)
++	if !(ok1 && ok2 && ok3 && ok4 && ok5 && ok6) || gun < 1 || gun > 28 || sa > 23 || dk > 59 || sn > 59 {
++		return time.Time{}, false
++	}
++	ay := -1
++	for k, a := range ayKisa {
++		if strings.EqualFold(v[3:6], a) {
++			ay = k
++			break
++		}
++	}
++	if ay < 0 {
++		return time.Time{}, false
++	}
++	return time.Date(yil, time.Month(ay+1), gun, sa, dk, sn, ms*1e6, time.Local), true
++}
+diff --git a/fastmatch_test.go b/fastmatch_test.go
+new file mode 100644
+index 0000000..a2dd2e5
+--- /dev/null
++++ b/fastmatch_test.go
+@@ -0,0 +1,246 @@
++package main
++
++import (
++	"fmt"
++	"math/rand"
++	"strings"
++	"testing"
++	"time"
++)
++
++// Hızlı çözücü, düzenli ifadeyle birebir aynı sonucu vermeli: aynı satır eşleşmeli ya da
++// eşleşmemeli, eşleşiyorsa her alan aynı çıkmalı. Her biçim için o biçime uyan rastgele
++// satırlar üretilir, sonra bunlar rastgele bozulur (karakter eklenir, silinir, değiştirilir;
++// alanlara iki nokta, eğik çizgi, tırnak, süslü parantez, boşluk girer) ve iki yöntem
++// karşılaştırılır. Hızlı çözücü emin olamadığında "bilmiyorum" diyebilir; o zaman düzenli
++// ifade kullanılır, bu da doğrudur. Yanlış bir sonuç ise asla kabul edilmez.
++var hizliTestBicimleri = []string{
++	fmtHTTPLog,
++	fmtHTTPSLog,
++	fmtTCPLog,
++	`%ci:%cp [%tr] %ft %b/%s %Ta %ST %{+Q}r %[req.hdr(host)]`,
++	`%ci %ST %HM %HP %b/%s %[req.hdr(host)]`,
++	`{"ip":"%ci","st":%ST,"u":"%HU","b":"%b","s":"%s","t":%Ta}`,
++	`%ci:%cp [%trg] %ft %b/%s %TR/%Tw/%Tc/%Tr/%Ta %ST %B %tsc %{+Q}HM %{+Q}HU %{+Q}HV`,
++	`%Ts %{+X}Ts %ci %b %ST %hr %HP`,
++	`%ci:%cp %hr %hs [%tr] %ft %b/%s %ST %{+Q}r`,
++	`%ci %o %zz %ST %b/%s %{+Q}r %[capture.req.hdr(0)] %[ssl_fc_sni]`,
++	`%ci:%cp [%t] %ft %b/%s %Tw/%Tc/%Tt %B %ts %ac/%fc/%bc/%sc/%rc %sq/%bq %hr`,
++	`%HM %HU %HQ %ci`,
++}
++
++// Satırlarda sık geçen ve sınırları zorlayan karakterler
++const hizliZorKarakter = ` :/"{}|-+[]0123456789abcXYZ.?&=` + "\t"
++
++func hizliRastgeleDeger(r *rand.Rand, o hizliOge) string {
++	kel := func(n int, alfabe string) string {
++		var b strings.Builder
++		for i := 0; i < n; i++ {
++			b.WriteByte(alfabe[r.Intn(len(alfabe))])
++		}
++		return b.String()
++	}
++	bosluksuz := "abcdefXYZ0123456789.:/-_~?&=%[]+"
++	switch o.tur {
++	case hBosluksuz:
++		return kel(1+r.Intn(12), bosluksuz)
++	case hBosluksuz0:
++		return kel(r.Intn(8), bosluksuz)
++	case hRakam:
++		return kel(1+r.Intn(6), "0123456789")
++	case hIsaretRakam:
++		return []string{"", "+", "-", "+-"}[r.Intn(4)] + kel(1+r.Intn(5), "0123456789")
++	case hEksiRakam:
++		return []string{"", "-"}[r.Intn(2)] + kel(1+r.Intn(5), "0123456789")
++	case hArtiRakam:
++		return []string{"", "+"}[r.Intn(2)] + kel(1+r.Intn(5), "0123456789")
++	case hSabitBosluksuz:
++		return kel(o.n, "-CDHRSPLcs")
++	case hSabitRakam:
++		return kel(o.n, "0123456789")
++	case hTarihMs:
++		return fmt.Sprintf("%02d/%s/20%02d:%02d:%02d:%02d.%03d", r.Intn(32), []string{"Oct", "Feb", "oct", "Xyz"}[r.Intn(4)], r.Intn(100), r.Intn(25), r.Intn(61), r.Intn(61), r.Intn(1000))
++	case hTarihTZ:
++		return fmt.Sprintf("%02d/Oct/2026:%02d:%02d:%02d %s%04d", r.Intn(32), r.Intn(24), r.Intn(60), r.Intn(60), []string{"+", "-"}[r.Intn(2)], r.Intn(1500))
++	case hSuslu:
++		return "{" + kel(r.Intn(20), "abc.|/ :-XY0") + "}"
++	case hIstek:
++		s := kel(1+r.Intn(6), "GETPOSabc") + " " + kel(1+r.Intn(14), bosluksuz)
++		if r.Intn(3) > 0 {
++			s += " " + kel(1+r.Intn(8), "HTP/1.0")
++		}
++		return s
++	case hHex:
++		return kel(1+r.Intn(10), "0123456789abcdefABCDEF")
++	case hTirnakli:
++		if r.Intn(5) == 0 {
++			return "-"
++		}
++		return `"` + kel(r.Intn(20), "GET /a?b=c HTTP/1.1:{}|") + `"`
++	}
++	return ""
++}
++
++func hizliRastgeleSatir(r *rand.Rand, h *hizliEslestirici) string {
++	var b strings.Builder
++	atlaBosluk := false
++	for _, o := range h.ogeler {
++		if o.tur == hLit {
++			l := o.lit
++			if atlaBosluk && strings.HasPrefix(l, " ") {
++				l = l[1:]
++			}
++			atlaBosluk = false
++			b.WriteString(l)
++			continue
++		}
++		atlaBosluk = false
++		if o.ops && r.Intn(3) == 0 {
++			continue // isteğe bağlı alan yazılmadı (ardındaki boşluk da)
++		}
++		b.WriteString(hizliRastgeleDeger(r, o))
++		if o.ops && o.opsBosluk {
++			b.WriteByte(' ')
++		}
++	}
++	switch r.Intn(4) {
++	case 0:
++		b.WriteString(" www.example.com")
++	case 1:
++		b.WriteString("  ")
++	}
++	return b.String()
++}
++
++func hizliBoz(r *rand.Rand, s string) string {
++	b := []byte(s)
++	for k := r.Intn(4); k > 0 && len(b) > 0; k-- {
++		i := r.Intn(len(b))
++		c := hizliZorKarakter[r.Intn(len(hizliZorKarakter))]
++		switch r.Intn(3) {
++		case 0:
++			b[i] = c
++		case 1:
++			b = append(b[:i], b[i+1:]...)
++		default:
++			b = append(b[:i], append([]byte{c}, b[i:]...)...)
++		}
++	}
++	return string(b)
++}
++
++func TestHizliCozucuDuzenliIfadeyleAyni(t *testing.T) {
++	r := rand.New(rand.NewSource(20261008))
++	adet := 40000
++	if testing.Short() {
++		adet = 8000
++	}
++	var toplam, eslesen, emin, bozuk int
++	for _, bicim := range hizliTestBicimleri {
++		cf := compileFormat("test", bicim)
++		if cf == nil {
++			t.Fatalf("biçim derlenemedi: %s", bicim)
++		}
++		if cf.hizli == nil {
++			t.Fatalf("hızlı yol kurulmadı: %s", bicim)
++		}
++		for i := 0; i < adet; i++ {
++			satir := hizliRastgeleSatir(r, cf.hizli)
++			if i%2 == 1 {
++				satir = hizliBoz(r, satir)
++				bozuk++
++			}
++			if !hizliUygun(satir) {
++				continue
++			}
++			toplam++
++			beklenen := cf.re.FindStringSubmatch(satir)
++			m, kesin := cf.hizli.eslestir(satir)
++			if !kesin {
++				continue
++			}
++			emin++
++			if (m == nil) != (beklenen == nil) {
++				t.Fatalf("biçim %q\nsatır %q\ndüzenli ifade eşleşti mi: %v, hızlı: %v", bicim, satir, beklenen != nil, m != nil)
++			}
++			if m == nil {
++				continue
++			}
++			eslesen++
++			for g := range beklenen {
++				if m[g] != beklenen[g] {
++					t.Fatalf("biçim %q\nsatır %q\n%d. alan: düzenli ifade %q, hızlı %q", bicim, satir, g, beklenen[g], m[g])
++				}
++			}
++		}
++	}
++	t.Logf("%d satır (%d bozulmuş): %d tanesinde hızlı çözücü kesin sonuç verdi, %d eşleşme; hepsi düzenli ifadeyle aynı", toplam, bozuk, emin, eslesen)
++	if emin < toplam*9/10 {
++		t.Fatalf("hızlı çözücü satırların yalnızca %d/%d tanesinde kesin sonuç verdi", emin, toplam)
++	}
++}
++
++// Ayrıştırılmış kayıt da aynı olmalı (hızlı yol açık ve kapalıyken)
++func TestHizliCozucuKayitAyni(t *testing.T) {
++	r := rand.New(rand.NewSource(7))
++	for _, bicim := range hizliTestBicimleri {
++		hizli := compileFormat("test", bicim)
++		yavas := compileFormat("test", bicim)
++		yavas.hizli = nil
++		for i := 0; i < 3000; i++ {
++			satir := hizliRastgeleSatir(r, hizli.hizli)
++			if i%3 == 0 {
++				satir = hizliBoz(r, satir)
++			}
++			a, okA := hizli.parse(satir, nil)
++			b, okB := yavas.parse(satir, nil)
++			// Tarih okunamayan satırda (tarih alanı yok ya da geçersiz) zaman "şimdi" olur; iki
++			// çağrı arasında birkaç mikrosaniye geçtiği için bu durumda karşılaştırılmaz
++			if a.At.Sub(b.At).Abs() < time.Second && time.Since(a.At) < time.Minute {
++				a.At, b.At = time.Time{}, time.Time{}
++			}
++			// Zamanlar değerce karşılaştırılır (saat dilimi nesneleri her çözümde ayrı oluşur)
++			if a.At.Equal(b.At) {
++				a.At, b.At = time.Time{}, time.Time{}
++			}
++			if okA != okB || a != b {
++				t.Fatalf("biçim %q\nsatır %q\nhızlı %+v (%v)\nyavaş %+v (%v)", bicim, satir, a, okA, b, okB)
++			}
++		}
++	}
++}
++
++// Hızlı tarih çözme, time.ParseInLocation ile aynı sonucu vermeli
++func TestHizliTarih(t *testing.T) {
++	r := rand.New(rand.NewSource(3))
++	aylar := []string{"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "oct", "OCT", "Xyz"}
++	var hizli int
++	for i := 0; i < 200000; i++ {
++		v := fmt.Sprintf("%02d/%s/%04d:%02d:%02d:%02d.%03d", r.Intn(33), aylar[r.Intn(len(aylar))], 1990+r.Intn(60), r.Intn(25), r.Intn(61), r.Intn(61), r.Intn(1000))
++		a, okA := hizliTarihMs(v)
++		if !okA {
++			continue
++		}
++		hizli++
++		b, err := time.ParseInLocation("02/Jan/2006:15:04:05.000", v, time.Local)
++		if err != nil || !a.Equal(b) {
++			t.Fatalf("%q: hızlı %v, ParseInLocation %v (%v)", v, a, b, err)
++		}
++	}
++	if hizli < 50000 {
++		t.Fatalf("hızlı yol çok az kullanıldı: %d", hizli)
++	}
++}
++
++// Biçime hiç uymayan uzun satırlarda (başka bir programın satırı) deneme sayısı patlamamalı
++func TestHizliCozucuUyumsuzSatirdaYavaslamaz(t *testing.T) {
++	cf := compileFormat("httplog", fmtHTTPLog)
++	satir := strings.Repeat("a:b/c d:e/f ", 400)
++	bas := time.Now()
++	for i := 0; i < 200; i++ {
++		cf.parse(satir, nil)
++	}
++	if gecen := time.Since(bas); gecen > 2*time.Second {
++		t.Fatalf("uyumsuz satır çok yavaş: 200 satır %v", gecen)
++	}
++}
+diff --git a/incident.go b/incident.go
+index 64ab6d8..978ae65 100644
+--- a/incident.go
++++ b/incident.go
+@@ -26,18 +26,24 @@ import (
+ 	"sort"
+ 	"strconv"
+ 	"strings"
++	"sync"
++	"sync/atomic"
+ 	"time"
+ )
+ 
+ const (
+-	olayEnUzun  = 7 * 24 * time.Hour // en uzun inceleme aralığı
+-	olayPay     = 5 * time.Minute    // log satırları kabul zamanına göre tam sıralı değildir; sınırlarda pay
+-	olayYolSin  = 20000              // en fazla bu kadar farklı adres izlenir, gerisi "(diğer)"
+-	olayIPSin   = 50000
+-	olayHostSin = 2000
+-	olayListe   = 15 // listelerde gösterilen satır
+-	olayOlaySin = 500
+-	olayGrup    = 256 // sıkıştırılmış dosyada aralık öncesi satırlar bu büyüklükte gruplarla geçilir
++	// İnceleme arka planda çalışır (tarayıcı ilerlemeyi sorar), bu yüzden süresi log aramasının
++	// 1 dakikasından uzun olabilir. Ajanın işlemci tavanı düşük; yoğun bir LB'nin bütün bir günü
++	// bu sürede okunabilsin.
++	olaySureSiniri = 3 * time.Minute
++	olayEnUzun     = 7 * 24 * time.Hour // en uzun inceleme aralığı
++	olayPay        = 5 * time.Minute    // log satırları kabul zamanına göre tam sıralı değildir; sınırlarda pay
++	olayYolSin     = 20000              // en fazla bu kadar farklı adres izlenir, gerisi "(diğer)"
++	olayIPSin      = 50000
++	olayHostSin    = 2000
++	olayListe      = 15 // listelerde gösterilen satır
++	olayOlaySin    = 500
++	olayGrup       = 256 // sıkıştırılmış dosyada aralık öncesi satırlar bu büyüklükte gruplarla geçilir
+ )
+ 
+ // Yanıt süresi dağılımı için kova sınırları (ms). Yüzdelik değeri kovanın içinde doğrusal
+@@ -229,8 +235,12 @@ type OlayRapor struct {
+ 	Files      []string       `json:"files"`
+ 	Skipped    int            `json:"skipped"`
+ 	Truncated  bool           `json:"truncated"`
+-	Took       int64          `json:"took"`
+-	Note       string         `json:"note,omitempty"`
++	// Aralığın nereye kadar okunduğu (ms). Süre sınırına takılırsa ya da durdurulursa bitişten
++	// önce kalır; arayüz bu noktadan sonrasını "okunmadı" diye gösterir, "istek yok" diye değil.
++	KapsamSon  int64  `json:"coveredTo"`
++	Durduruldu bool   `json:"stopped,omitempty"`
++	Took       int64  `json:"took"`
++	Note       string `json:"note,omitempty"`
+ }
+ 
+ // ---------- Toplayıcı ----------
+@@ -292,6 +302,9 @@ type olayToplayici struct {
+ 	host     map[string]*[5]int64
+ 	olaySon  map[string]int64 // aynı olayın tekrarını ayıklamak için (ör. her proxy için "started")
+ 	bitis    time.Time
++	sonZaman time.Time     // okunan satırların en geç zamanı: nereye kadar okunduğu
++	ilerleme *atomic.Int64 // arka plandaki iş için: nereye kadar okundu (ms)
++	iptal    *atomic.Bool  // kullanıcı "durdur" dedi
+ 	bayt     int64
+ 	satir    int64
+ 	olayZmn  int64 // zamanı okunabilen olay satırı
+@@ -582,6 +595,9 @@ func (t *olayToplayici) satirIsle(line string) (time.Time, bool) {
+ 	t.bayt += int64(len(line)) + 1
+ 	if rec, ok := t.parser.Parse(line); ok {
+ 		t.kayit(rec)
++		if rec.At.After(t.sonZaman) {
++			t.sonZaman = rec.At
++		}
+ 		return rec.At, true
+ 	}
+ 	msg := syslogMessage(line)
+@@ -598,6 +614,13 @@ func (t *olayToplayici) satirIsle(line string) (time.Time, bool) {
+ }
+ 
+ func (t *olayToplayici) sureDoldu() bool {
++	if t.ilerleme != nil {
++		t.ilerleme.Store(t.sonZaman.UnixMilli())
++	}
++	if t.iptal != nil && t.iptal.Load() {
++		t.r.Truncated, t.r.Durduruldu = true, true
++		return true
++	}
+ 	if time.Now().After(t.bitis) || t.bayt > aramaBaytSiniri {
+ 		t.r.Truncated = true
+ 		return true
+@@ -973,15 +996,21 @@ func (t *olayToplayici) bitir() {
+ 	r.Scanned = t.satir
+ }
+ 
+-// Seçilen aralığı log dosyalarından inceler
++// Seçilen aralığı log dosyalarından inceler (beklemeden; testler ve tek seferlik kullanım için)
+ func (a *LogAnalyzer) Incident(from, to time.Time) (OlayRapor, error) {
+-	basla := time.Now()
+ 	if !aramaKilidi.TryLock() {
+ 		return OlayRapor{}, ErrAramaSuruyor // arama ile aynı kilit: ikisi aynı anda çalışmaz
+ 	}
+ 	defer aramaKilidi.Unlock()
++	return a.incele(from, to, nil, nil), nil
++}
++
++// Kilit çağıranda. ilerleme ve iptal arka plandaki iş içindir (nil olabilir).
++func (a *LogAnalyzer) incele(from, to time.Time, ilerleme *atomic.Int64, iptal *atomic.Bool) OlayRapor {
++	basla := time.Now()
+ 	t := yeniOlayToplayici(from, to, a.parser.Load(), a.isCloudflare)
+-	t.bitis = basla.Add(aramaSureSiniri)
++	t.bitis = basla.Add(olaySureSiniri)
++	t.ilerleme, t.iptal = ilerleme, iptal
+ 	kaynak := a.Source()
+ 	switch {
+ 	case kaynak == "":
+@@ -1006,11 +1035,136 @@ func (a *LogAnalyzer) Incident(from, to time.Time) (OlayRapor, error) {
+ 	}
+ 	t.bitir()
+ 	t.r.Took = time.Since(basla).Milliseconds()
+-	if t.r.Truncated && t.r.Note == "" {
+-		t.r.Note = "Süre sınırına ulaşıldı; aralığın tamamı okunamadı. Okunan kısım aralığın başından " +
+-			"itibaren eksiksiz. Daha kısa bir aralık seçerek tamamını görebilirsin."
++	t.r.KapsamSon = to.UnixMilli()
++	if t.r.Truncated {
++		// Okuma eskiden yeniye gittiği için okunan kısım aralığın başından bu noktaya kadar
++		kapsam := t.sonZaman
++		if kapsam.Before(from) {
++			kapsam = from
++		}
++		if kapsam.Before(to) {
++			t.r.KapsamSon = kapsam.UnixMilli()
++		}
++		if t.r.Note == "" {
++			t.r.Note = "Süre sınırına ulaşıldı; aralığın tamamı okunamadı. Okunan kısım aralığın başından " +
++				"itibaren eksiksiz. Daha kısa bir aralık seçerek tamamını görebilirsin."
++			if t.r.Durduruldu {
++				t.r.Note = "İnceleme durduruldu. Okunan kısım aralığın başından itibaren eksiksiz."
++			}
++		}
++	}
++	return t.r
++}
++
++// ---------- Arka planda çalışan inceleme ----------
++//
++// Uzun bir aralığı okumak, ajanın düşük işlemci tavanıyla dakikalar sürebilir. Tarayıcı bu
++// sürede bir HTTP isteğini açık tutmaz: inceleme başlatılır, tarayıcı saniyede bir nereye
++// kadar okunduğunu sorar ve bittiğinde sonucu alır. Aynı anda tek inceleme çalışır; yeni bir
++// aralık istenirse eskisi durdurulur.
++
++type olayIsi struct {
++	id        string
++	from, to  time.Time
++	basla     time.Time
++	ilerleme  atomic.Int64
++	iptal     atomic.Bool
++	calisiyor atomic.Bool
++	bekliyor  atomic.Bool // başka bir arama ya da inceleme kilidi tutuyor
++	mu        sync.Mutex
++	rapor     *OlayRapor
++}
++
++type OlayDurum struct {
++	Job    string     `json:"job"`
++	Durum  string     `json:"state"` // bekliyor, okunuyor, bitti
++	From   int64      `json:"from"`
++	To     int64      `json:"to"`
++	Okunan int64      `json:"readTo"` // nereye kadar okundu (ms)
++	Gecen  int64      `json:"elapsed"`
++	Rapor  *OlayRapor `json:"report,omitempty"`
++}
++
++var (
++	olayIsMu  sync.Mutex
++	olayIsSon *olayIsi
++)
++
++func (j *olayIsi) durum() OlayDurum {
++	d := OlayDurum{Job: j.id, From: j.from.UnixMilli(), To: j.to.UnixMilli(), Okunan: j.ilerleme.Load(),
++		Gecen: time.Since(j.basla).Milliseconds()}
++	j.mu.Lock()
++	d.Rapor = j.rapor
++	j.mu.Unlock()
++	switch {
++	case d.Rapor != nil:
++		d.Durum = "bitti"
++	case j.bekliyor.Load():
++		d.Durum = "bekliyor" // başka bir arama ya da inceleme bitmeyi bekliyor
++	default:
++		d.Durum = "okunuyor"
++	}
++	if d.Okunan < d.From {
++		d.Okunan = d.From
+ 	}
+-	return t.r, nil
++	return d
++}
++
++// İncelemeyi başlatır; aynı aralık zaten çalışıyorsa onu döndürür
++func (a *LogAnalyzer) IncidentStart(from, to time.Time) OlayDurum {
++	olayIsMu.Lock()
++	defer olayIsMu.Unlock()
++	if j := olayIsSon; j != nil && j.from.Equal(from) && j.to.Equal(to) && !j.iptal.Load() {
++		j.mu.Lock()
++		bitmedi := j.rapor == nil
++		j.mu.Unlock()
++		if bitmedi {
++			return j.durum()
++		}
++	}
++	if j := olayIsSon; j != nil {
++		j.iptal.Store(true) // yeni aralık istendi: eskisi bıraksın
++	}
++	j := &olayIsi{id: strconv.FormatInt(time.Now().UnixNano(), 36), from: from, to: to, basla: time.Now()}
++	olayIsSon = j
++	go func() {
++		// "bekliyor" yalnızca kilit gerçekten başkasındaysa gösterilir (eskiden iş başlarken bir
++		// an "başka bir arama sürüyor" yazıyordu)
++		if !aramaKilidi.TryLock() {
++			j.bekliyor.Store(true)
++			aramaKilidi.Lock()
++			j.bekliyor.Store(false)
++		}
++		defer aramaKilidi.Unlock()
++		if j.iptal.Load() {
++			r := OlayRapor{From: from.UnixMilli(), To: to.UnixMilli(), KapsamSon: from.UnixMilli(), Durduruldu: true, Truncated: true}
++			j.mu.Lock()
++			j.rapor = &r
++			j.mu.Unlock()
++			return
++		}
++		j.calisiyor.Store(true)
++		r := a.incele(from, to, &j.ilerleme, &j.iptal)
++		j.mu.Lock()
++		j.rapor = &r
++		j.mu.Unlock()
++		j.calisiyor.Store(false)
++	}()
++	return j.durum()
++}
++
++// Çalışan ya da biten incelemenin durumu; durdur true ise okumayı keser (okunan kısım raporlanır)
++func IncidentStatus(id string, durdur bool) (OlayDurum, bool) {
++	olayIsMu.Lock()
++	j := olayIsSon
++	olayIsMu.Unlock()
++	if j == nil || j.id != id {
++		return OlayDurum{}, false
++	}
++	if durdur {
++		j.iptal.Store(true)
++	}
++	return j.durum(), true
+ }
+ 
+ // HTTP parametrelerinden aralık: from, to (unix ms)
+diff --git a/incident_test.go b/incident_test.go
+index 752a096..e30ea94 100644
+--- a/incident_test.go
++++ b/incident_test.go
+@@ -423,3 +423,74 @@ func TestAramaOzelAralik(t *testing.T) {
+ 		t.Fatal("boş arama hata vermeli")
+ 	}
+ }
++
++// Arka plandaki inceleme: aynı aralık tekrar istenince aynı iş döner, yeni aralık eskisini
++// durdurur; durdurulan incelemede "nereye kadar okundu" bilgisi doğrudur ve o noktaya kadarki
++// dakikalar eksiksizdir (okunmayan kısım "istek yok" sanılmamalı).
++func TestOlayIncelemesiArkaPlanVeKapsam(t *testing.T) {
++	a, ul := olayOrtami(t, 21, 1, 120)
++	from := time.Now().Add(-23 * time.Hour).Truncate(time.Minute)
++	to := time.Now().Add(-1 * time.Hour).Truncate(time.Minute)
++	d1 := a.IncidentStart(from, to)
++	d2 := a.IncidentStart(from, to)
++	if d1.Job != d2.Job {
++		t.Fatalf("aynı aralık için ikinci iş açıldı: %s, %s", d1.Job, d2.Job)
++	}
++	// Biraz okusun, sonra durdur
++	for i := 0; i < 200; i++ {
++		d, _ := IncidentStatus(d1.Job, false)
++		if d.Okunan > from.Add(time.Hour).UnixMilli() || d.Durum == "bitti" {
++			break
++		}
++		time.Sleep(10 * time.Millisecond)
++	}
++	IncidentStatus(d1.Job, true)
++	var d OlayDurum
++	for i := 0; i < 500; i++ {
++		d, _ = IncidentStatus(d1.Job, false)
++		if d.Durum == "bitti" {
++			break
++		}
++		time.Sleep(10 * time.Millisecond)
++	}
++	if d.Durum != "bitti" || d.Rapor == nil {
++		t.Fatalf("durdurulan inceleme bitmedi: %+v", d)
++	}
++	r := d.Rapor
++	if r.KapsamSon >= r.To {
++		t.Logf("inceleme durdurulmadan bitti (makine hızlı); kapsam bütün aralık")
++	} else {
++		if !r.Durduruldu || !r.Truncated || r.KapsamSon <= r.From {
++			t.Fatalf("durdurma bilgisi yanlış: durduruldu=%v kesik=%v kapsam=%d", r.Durduruldu, r.Truncated, r.KapsamSon)
++		}
++	}
++	// Kapsamın pay kadar öncesine kadarki her dilim kaba kuvvetle aynı olmalı
++	k := kabaKuvvet(ul, from, to, time.Duration(r.Step)*time.Minute)
++	sinir := time.UnixMilli(r.KapsamSon).Add(-olayPay)
++	for i, dl := range r.Seri {
++		if time.UnixMilli(dl.T).Add(time.Duration(r.Step) * time.Minute).After(sinir) {
++			break
++		}
++		if dl.N != k.dilim[int64(i)] {
++			t.Fatalf("okunan kısımdaki %d. dilim %d, beklenen %d", i, dl.N, k.dilim[int64(i)])
++		}
++	}
++	// Başka bir aralık istenince yeni iş açılır, eskisi bulunamaz
++	d3 := a.IncidentStart(from.Add(time.Minute), to)
++	if d3.Job == d1.Job {
++		t.Fatal("yeni aralık için yeni iş açılmadı")
++	}
++	if _, ok := IncidentStatus(d1.Job, false); ok {
++		t.Fatal("eski iş hâlâ bulunuyor")
++	}
++	for i := 0; i < 3000; i++ {
++		if d, _ := IncidentStatus(d3.Job, false); d.Durum == "bitti" {
++			if d.Rapor.KapsamSon != d.Rapor.To || d.Rapor.Truncated {
++				t.Fatalf("tamamlanan incelemede kapsam bütün aralık olmalı: %+v", d.Rapor.KapsamSon)
++			}
++			return
++		}
++		time.Sleep(10 * time.Millisecond)
++	}
++	t.Fatal("ikinci inceleme bitmedi")
++}
+diff --git a/logformat.go b/logformat.go
+index 958af81..b7a55e9 100644
+--- a/logformat.go
++++ b/logformat.go
+@@ -111,6 +111,7 @@ type compiledFormat struct {
+ 	slots  []int       // roleCapSlot için slot numarası (roles ile aynı sırada)
+ 	has    map[fieldRole]bool
+ 	hits   int64
++	hizli  *hizliEslestirici // düzenli ifadesiz hızlı yol (fastmatch.go); kurulamazsa nil
+ }
+ 
+ type fmtItem struct {
+@@ -219,10 +220,16 @@ func compileFormat(kind, format string) *compiledFormat {
+ 	cf := &compiledFormat{Kind: kind, Source: format, has: map[fieldRole]bool{}}
+ 	var b strings.Builder
+ 	b.WriteString(`^`)
++	// Aynı biçimin hızlı eşleştiricisi düzenli ifadeyle adım adım birlikte kurulur
++	hz := &hizliEslestirici{}
++	hizliOlur := true
+ 	for i := 0; i < len(items); i++ {
+ 		it := items[i]
+ 		if !it.isVar {
+ 			b.WriteString(regexp.QuoteMeta(it.lit))
++			if it.lit != "" {
++				hz.ogeler = append(hz.ogeler, hizliOge{tur: hLit, lit: it.lit})
++			}
+ 			continue
+ 		}
+ 		if it.v.pat == "" { // %o gibi çıktısı olmayan
+@@ -232,6 +239,20 @@ func compileFormat(kind, format string) *compiledFormat {
+ 		if it.quote {
+ 			pat = `"[^"]*"|-`
+ 		}
++		ho := hizliOge{}
++		if tur, ok := hizliDesen[pat]; ok {
++			ho.tur = tur
++			switch pat {
++			case `\S{4}`:
++				ho.n = 4
++			case `\S{2}`:
++				ho.n = 2
++			case `\d{3}`:
++				ho.n = 3
++			}
++		} else {
++			hizliOlur = false
++		}
+ 		grp := `(` + pat + `)`
+ 		if it.v.role == roleNone {
+ 			grp = `(?:` + pat + `)`
+@@ -239,23 +260,33 @@ func compileFormat(kind, format string) *compiledFormat {
+ 			cf.roles = append(cf.roles, it.v.role)
+ 			cf.slots = append(cf.slots, it.slot)
+ 			cf.has[it.v.role] = true
++			ho.grup = len(cf.roles)
+ 		}
+ 		if it.v.opt {
++			ho.ops = true
+ 			// boşsa kendisi ve ardındaki tek boşluk yazılmaz
+ 			if i+1 < len(items) && !items[i+1].isVar && strings.HasPrefix(items[i+1].lit, " ") {
+ 				b.WriteString(`(?:` + grp + ` )?`)
+ 				items[i+1].lit = items[i+1].lit[1:]
++				ho.opsBosluk = true
+ 			} else {
+ 				b.WriteString(`(?:` + grp + `)?`)
+ 			}
++			hz.ogeler = append(hz.ogeler, ho)
+ 			continue
+ 		}
+ 		b.WriteString(grp)
++		hz.ogeler = append(hz.ogeler, ho)
+ 	}
+ 	// Fazladan alanlara izin ver (sonuna eklenmiş alanlar); alan adı için taranır
+ 	b.WriteString(`(?:\s+(.*?))?\s*$`)
+ 	cf.roles = append(cf.roles, roleTrailing)
+ 	cf.slots = append(cf.slots, 0)
++	if hizliOlur {
++		hz.gruplar = len(cf.roles)
++		hz.hazirla()
++		cf.hizli = hz
++	}
+ 	re, err := regexp.Compile(b.String())
+ 	if err != nil {
+ 		return nil
+@@ -277,7 +308,14 @@ func unquote(v string) string {
+ // hostSlot: frontend'in Host yakalama slotu (-1 bilinmiyor/yok, -2 config yok: sezgisel ara)
+ func (cf *compiledFormat) parse(msg string, hostSlotOf func(fe string) int) (logRecord, bool) {
+ 	var rec logRecord
+-	m := cf.re.FindStringSubmatch(msg)
++	var m []string
++	kesin := false
++	if cf.hizli != nil && hizliUygun(msg) {
++		m, kesin = cf.hizli.eslestir(msg)
++	}
++	if !kesin {
++		m = cf.re.FindStringSubmatch(msg)
++	}
+ 	if m == nil {
+ 		return rec, false
+ 	}
+@@ -290,7 +328,9 @@ func (cf *compiledFormat) parse(msg string, hostSlotOf func(fe string) int) (log
+ 		case roleClient:
+ 			rec.Client = v
+ 		case roleDateMs:
+-			if t, err := time.ParseInLocation("02/Jan/2006:15:04:05.000", v, time.Local); err == nil {
++			if t, ok := hizliTarihMs(v); ok {
++				rec.At, haveDate = t, true
++			} else if t, err := time.ParseInLocation("02/Jan/2006:15:04:05.000", v, time.Local); err == nil {
+ 				rec.At, haveDate = t, true
+ 			}
+ 		case roleDateTZ:
+diff --git a/logtail.go b/logtail.go
+index a88aced..3c40469 100644
+--- a/logtail.go
++++ b/logtail.go
+@@ -149,13 +149,26 @@ func normPath(uri string) string {
+ 			uri = "/"
+ 		}
+ 	}
+-	segs := strings.Split(uri, "/")
+-	for i, s := range segs {
+-		if isID(s) {
+-			segs[i] = "{id}"
++	// Kimlik gibi görünen parça yoksa (çoğu yol) bölüp birleştirmeye gerek yok
++	idVar := false
++	for bas := 0; bas <= len(uri) && !idVar; {
++		son := strings.IndexByte(uri[bas:], '/')
++		if son < 0 {
++			son = len(uri) - bas
++		}
++		idVar = isID(uri[bas : bas+son])
++		bas += son + 1
++	}
++	p := uri
++	if idVar {
++		segs := strings.Split(uri, "/")
++		for i, s := range segs {
++			if isID(s) {
++				segs[i] = "{id}"
++			}
+ 		}
++		p = strings.Join(segs, "/")
+ 	}
+-	p := strings.Join(segs, "/")
+ 	if len(p) > 120 {
+ 		p = p[:120] + "…"
+ 	}
+diff --git a/main.go b/main.go
+index 160c6a8..2563b4a 100644
+--- a/main.go
++++ b/main.go
+@@ -192,19 +192,26 @@ func main() {
+ 			writeJSON(w, map[string]string{"error": "Bu sunucuda log analizi kapalı; inceleme log'dan yapılır."})
+ 			return
+ 		}
+-		from, to, err := incidentRange(r.URL.Query().Get, time.Now())
+-		if err != nil {
+-			w.WriteHeader(http.StatusBadRequest)
+-			writeJSON(w, map[string]string{"error": err.Error()})
++		q := r.URL.Query()
++		// Arka planda çalışır: ?from&to başlatır, ?job=… durumunu (bitince sonucunu) verir,
++		// &stop=1 okumayı keser ve o ana kadar okunanı raporlar
++		if id := q.Get("job"); id != "" {
++			d, ok := IncidentStatus(id, q.Get("stop") == "1")
++			if !ok {
++				w.WriteHeader(http.StatusNotFound)
++				writeJSON(w, map[string]string{"error": "Bu inceleme artık yok; yeniden başlat."})
++				return
++			}
++			writeJSON(w, d)
+ 			return
+ 		}
+-		res, err := logs.Incident(from, to)
++		from, to, err := incidentRange(q.Get, time.Now())
+ 		if err != nil {
+-			w.WriteHeader(http.StatusTooManyRequests)
++			w.WriteHeader(http.StatusBadRequest)
+ 			writeJSON(w, map[string]string{"error": err.Error()})
+ 			return
+ 		}
+-		writeJSON(w, res)
++		writeJSON(w, logs.IncidentStart(from, to))
+ 	})
+ 	mux.HandleFunc("/api/ranges", func(w http.ResponseWriter, r *http.Request) {
+ 		writeJSON(w, map[string]any{"ranges": stats.Ranges(), "retention": retMin})
+diff --git a/webapp/src/App.jsx b/webapp/src/App.jsx
+index 1cfc8eb..8a6ba12 100644
+--- a/webapp/src/App.jsx
++++ b/webapp/src/App.jsx
+@@ -2271,15 +2271,29 @@ const ilkKucuk = (t) => t.charAt(0).toLocaleLowerCase("tr-TR") + t.slice(1);
+ const dilimDk = (res, d) => Math.max(1 / 60, Math.min(res.step, (res.to - d.t) / 60000));
+ 
+ // Raporu düz cümlelere çevirir. Her cümle: { lvl: bad|warn|ok|info, text }
++// Aralığın nereye kadar okunduğu. Süre sınırına takılan ya da durdurulan incelemede bitişten
++// önce kalır; ondan sonrası "okunmadı"dır, "istek yok" değil.
++const olayKapsam = (res) => (res.coveredTo && res.coveredTo < res.to ? res.coveredTo : res.to);
++
+ function olayOzeti(res) {
+   const z = zamanYazici(res.from, res.to);
+   const adim = res.step * 60000;
+-  // Trafik karşılaştırması dakika başına yapılır; kısa son dilim "düşüş" sayılmasın
+-  const s = (res.series || []).map((d) => ({ ...d, dk: d.n / dilimDk(res, d) }));
++  const kapsam = olayKapsam(res);
++  const eksik = kapsam < res.to;
++  // Yalnızca okunan dilimler değerlendirilir. Trafik karşılaştırması dakika başına yapılır; kısa
++  // son dilim (aralığın ya da okunan kısmın sonu) "düşüş" sayılmasın.
++  const s = (res.series || []).filter((d) => d.t < kapsam)
++    .map((d) => ({ ...d, dk: d.n / Math.max(1 / 60, Math.min(res.step, (kapsam - d.t) / 60000)) }));
+   const out = [];
++  if (eksik) {
++    out.push({
++      lvl: "warn", kalan: true,
++      text: `${res.stopped ? "İnceleme durduruldu" : "Süre sınırına ulaşıldı"}: yalnızca ${z.kisa(res.from)} ile ${z.kisa(kapsam)} arası okundu (aralığın ${fmtPct((kapsam - res.from) / (res.to - res.from))} kadarı). Aşağıdaki sayılar ve cümleler yalnızca bu kısım için; grafikte okunmayan kısım gri.`,
++    });
++  }
+   if (!res.n) {
+-    out.push({ lvl: "warn", text: "Bu aralıkta log'da hiç istek yok. Log o saatlerde yazılmamış, döndürülüp silinmiş ya da trafik HAProxy'ye hiç ulaşmamış olabilir (DNS, Cloudflare, ağ)." });
+-    return out;
++    out.push({ lvl: "warn", text: eksik ? "Okunan kısımda log'da hiç istek yok." : "Bu aralıkta log'da hiç istek yok. Log o saatlerde yazılmamış, döndürülüp silinmiş ya da trafik HAProxy'ye hiç ulaşmamış olabilir (DNS, Cloudflare, ağ)." });
++    return { cumleler: out, anaDonem: null, sorunlu: [] };
+   }
+   const e5 = res.c[3];
+ 
+@@ -2306,14 +2320,14 @@ function olayOzeti(res) {
+     let t = `Sunucu hataları (5xx) ${z.kisa(basT)} ile ${z.kisa(Math.min(bitT, res.to))} arasında arttı (${sureYazi(dk)}). `
+       + `En kötü dilim ${z.kisa(tepe.t)}: 5xx oranı ${fmtPct(tepe.c[3] / tepe.n)}`
+       + (disOran == null ? "." : disOran > 0.001 ? `, bu dönemin dışında ${fmtPct(disOran)}.` : ", bu dönemin dışında neredeyse hiç yok.");
+-    if (basta && sonda) t = `Sunucu hataları (5xx) aralığın tamamı boyunca yüksek: ${fmtPct(e5 / res.n)}. Ne zaman başladığını görmek için daha erken bir başlangıç seç.`;
++    if (basta && sonda) t = `Sunucu hataları (5xx) ${eksik ? "okunan kısım" : "aralığın tamamı"} boyunca yüksek: ${fmtPct(e5 / res.n)}. Ne zaman başladığını görmek için daha erken bir başlangıç seç.`;
+     else if (basta) t += " Sorun aralığın başında zaten vardı; ne zaman başladığını görmek için daha erken bir başlangıç seç.";
+-    else if (sonda) t += " Aralığın sonunda hâlâ sürüyordu.";
++    else if (sonda) t += eksik ? " Okunan kısmın sonunda hâlâ sürüyordu." : " Aralığın sonunda hâlâ sürüyordu.";
+     if (sorunlu.length > 1) t += ` Bu aralıkta ${sorunlu.length} ayrı artış var.`;
+     out.push({ lvl: "bad", text: t });
+   } else if (res.n >= 100 && e5 / res.n >= 0.03) {
+     // Belirli bir anda artmamış, aralık boyunca hep yüksek: bir "olay" değil, süregelen bir sorun
+-    out.push({ lvl: "bad", text: `Sunucu hataları (5xx) aralığın tamamı boyunca yüksek: isteklerin ${fmtPct(e5 / res.n)} kadarı. Belirli bir anda artmamış; bu, o saatte başlayan bir olaydan çok süregelen bir sorun gibi görünüyor.` });
++    out.push({ lvl: "bad", text: `Sunucu hataları (5xx) ${eksik ? "okunan kısım" : "aralığın tamamı"} boyunca yüksek: isteklerin ${fmtPct(e5 / res.n)} kadarı. Belirli bir anda artmamış; bu, o saatte başlayan bir olaydan çok süregelen bir sorun gibi görünüyor.` });
+   }
+ 
+   // 2) Hangi backend
+@@ -2406,13 +2420,13 @@ function olayOzeti(res) {
+     });
+   }
+ 
+-  if (!out.some((x) => x.lvl === "bad" || x.lvl === "warn")) {
+-    out.unshift({
++  if (!out.some((x) => (x.lvl === "bad" || x.lvl === "warn") && !x.kalan)) {
++    out.splice(eksik ? 1 : 0, 0, {
+       lvl: "ok",
+       text: `Bu aralıkta belirgin bir sorun görünmüyor: 5xx oranı ${fmtPct(e5 / res.n)}, trafikte düşüş yok, sunucu düşmesi yok. Sorun HAProxy'ye ulaşmadan (DNS, Cloudflare) ya da uygulamanın içinde (200 dönüp yanlış içerik vermek gibi) olmuş olabilir.`,
+     });
+   }
+-  if (res.truncated) out.push({ lvl: "warn", text: res.note });
++  // Süre sınırı ya da durdurma notu en başta (kapsam cümlesi); burada tekrar yazılmaz
+   return { cumleler: out, anaDonem, sorunlu };
+ }
+ 
+@@ -2444,8 +2458,11 @@ function KucukBtn({ children, onClick }) {
+ function OlayGrafik({ res, onSec }) {
+   const z = zamanYazici(res.from, res.to);
+   const adimMs = res.step * 60000;
++  const kapsam = olayKapsam(res);
+   const veri = (res.series || []).map((d) => {
+-    const dk = dilimDk(res, d);
++    // Okunmayan kısım boş bırakılır (çizgi kesilir); "0 istek" diye çizilmez
++    if (d.t >= kapsam) return { t: d.t, Diğer: null, "5xx": null, Süre: null, okunmadi: true };
++    const dk = Math.max(1 / 60, Math.min(res.step, (kapsam - d.t) / 60000));
+     return { t: d.t, Diğer: (d.n - d.c[3]) / dk, "5xx": d.c[3] / dk, Süre: d.avg >= 0 ? d.avg : null, dk, c: d.c, codes: d.codes || {} };
+   });
+   const [sec, setSec] = useState(null);
+@@ -2471,6 +2488,10 @@ function OlayGrafik({ res, onSec }) {
+     <ReferenceLine key={i} x={Math.floor((o.at - res.from) / adimMs) * adimMs + res.from} stroke={C.bad} strokeDasharray="4 4" strokeOpacity={0.9} ifOverflow="hidden" />
+   ));
+   const secim = sec && sec.b != null ? <ReferenceArea x1={sec.a} x2={sec.b} fill={C.info} fillOpacity={0.18} stroke={C.info} strokeOpacity={0.5} /> : null;
++  const okunmadi = kapsam < res.to ? (
++    <ReferenceArea x1={Math.max(kapsam, veri[0]?.t ?? kapsam)} x2={veri[veri.length - 1]?.t} fill={C.faint} fillOpacity={0.12} stroke="none"
++      label={{ value: "okunmadı", position: "insideTop", fill: C.muted, fontSize: 11 }} ifOverflow="hidden" />
++  ) : null;
+   const Legend = ({ items }) => (
+     <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs" style={{ color: C.muted }}>
+       {items.map(([n, col, kesik]) => (
+@@ -2494,6 +2515,7 @@ function OlayGrafik({ res, onSec }) {
+             <Area type="monotone" dataKey="Diğer" name="Sunucu hatası olmayan" stackId="1" stroke={C.info} strokeWidth={1.5} fill={C.info} fillOpacity={0.25} isAnimationActive={false} dot={false} />
+             <Area type="monotone" dataKey="5xx" name="Sunucu hatası (5xx)" stackId="1" stroke={C.bad} strokeWidth={1.5} fill={C.bad} fillOpacity={0.6} isAnimationActive={false} dot={false} />
+             {olayCizgi}
++            {okunmadi}
+             {secim}
+           </AreaChart>
+         </ResponsiveContainer>
+@@ -2509,6 +2531,7 @@ function OlayGrafik({ res, onSec }) {
+             <Tooltip cursor={{ stroke: C.faint }} content={<ChartTip birim={(v) => fmtMs(v)} etiketYaz={z.kisa} />} />
+             <Area type="monotone" dataKey="Süre" name="Ortalama yanıt süresi" stroke={C.info} strokeWidth={2} fill={C.info} fillOpacity={0.15} isAnimationActive={false} dot={false} connectNulls={false} />
+             {olayCizgi}
++            {okunmadi}
+             {secim}
+           </AreaChart>
+         </ResponsiveContainer>
+@@ -2526,6 +2549,13 @@ const IPUCU_GRUP = [
+ function OlayIstekTip({ active, payload, label, etiketYaz }) {
+   if (!active || !payload || !payload.length) return null;
+   const d = payload[0].payload;
++  if (d.okunmadi) {
++    return (
++      <div style={{ background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 6, padding: "8px 10px", fontSize: 12, color: C.muted }}>
++        {etiketYaz ? etiketYaz(label) : label}: bu kısım okunmadı
++      </div>
++    );
++  }
+   const dk = d.dk || 1;
+   const toplam = d.c.reduce((a, x) => a + x, 0);
+   if (!toplam) return null;
+@@ -2742,7 +2772,17 @@ function OlaySonuc({ res, onSec }) {
+       </p>
+       <div className="flex flex-col gap-2">
+         {cumleler.map((x, i) => (
+-          <div key={i} className="rounded-md px-4 py-3 text-sm leading-relaxed" style={{ background: C.panel2, boxShadow: `inset 3px 0 0 ${renk[x.lvl]}` }}>{x.text}</div>
++          <div key={i} className="rounded-md px-4 py-3 text-sm leading-relaxed" style={{ background: C.panel2, boxShadow: `inset 3px 0 0 ${renk[x.lvl]}` }}>
++            {x.text}
++            {x.kalan && (
++              <div className="mt-2">
++                <button type="button" onClick={() => onSec(olayKapsam(res), res.to)} className="rounded-md px-3 py-1.5 text-xs"
++                  style={{ border: `1px solid ${C.info}`, color: C.text }}>
++                  Kalan kısmı incele ({zamanYazici(res.from, res.to).kisa(olayKapsam(res))} – {zamanYazici(res.from, res.to).kisa(res.to)})
++                </button>
++              </div>
++            )}
++          </div>
+         ))}
+       </div>
+ 
+@@ -2897,12 +2937,46 @@ function OlaySonuc({ res, onSec }) {
+ const otherKeyUI = "(diğer)";
+ const yolAlt = (y) => (y.frontend ? `HAProxy yanıtladı (${y.backend})` : y.backend);
+ 
++// Okuma sürerken: nereye kadar okundu, yüzde kaç, ne kadar sürdü; istenirse durdurulur ve o
++// ana kadar okunan kısım gösterilir
++function IncelemeIlerleme({ d, onDurdur }) {
++  if (!d) return <p className="text-sm mt-3" style={{ color: C.muted }}>İnceleme başlatılıyor...</p>;
++  const z = zamanYazici(d.from, d.to);
++  const oran = Math.min(1, Math.max(0, (d.readTo - d.from) / Math.max(1, d.to - d.from)));
++  const sn = Math.round(d.elapsed / 1000);
++  return (
++    <div className="mt-4 text-sm" style={{ maxWidth: 560 }}>
++      {d.state === "bekliyor" ? (
++        <p style={{ color: C.muted }}>Başka bir arama ya da inceleme sürüyor; o bitince başlayacak.</p>
++      ) : (
++        <>
++          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1" style={{ color: C.muted }}>
++            <span>Log okunuyor: <span className="tnum" style={{ color: C.text }}>{z.kisa(d.from)} – {z.kisa(Math.max(d.from, d.readTo))}</span> arası okundu</span>
++            <span className="tnum nw">{fmtPct(oran)} · {sn}{NB}sn</span>
++          </div>
++          <div style={{ height: 6, background: C.line, borderRadius: 3, marginTop: 6 }}>
++            <div style={{ width: `${Math.max(2, oran * 100)}%`, height: 6, background: C.info, borderRadius: 3, transition: "width .5s" }} />
++          </div>
++        </>
++      )}
++      <div className="flex flex-wrap items-center gap-3 mt-3">
++        <button type="button" onClick={onDurdur} className="rounded-md px-3 py-1.5 text-xs" style={{ border: `1px solid ${C.line}`, color: C.text }}>
++          Durdur ve okunan kısmı göster
++        </button>
++        <span className="text-xs" style={{ color: C.faint }}>Uzun aralıklar birkaç dakika sürebilir; en fazla 3 dakika okunur.</span>
++      </div>
++    </div>
++  );
++}
++
+ function IncidentSection({ inputRef }) {
+   const simdi = () => Date.now();
+   const [form, setForm] = useState(() => ({ from: yerelGiris(simdi() - 3600e3), to: yerelGiris(simdi()) }));
+   const [durum, setDurum] = useState("hazir");
+   const [res, setRes] = useState(null);
+   const [hata, setHata] = useState("");
++  const [ilerleme, setIlerleme] = useState(null);
++  const isRef = useRef(null);
+ 
+   const incele = async (f = form) => {
+     const a = girisMs(f.from);
+@@ -2912,17 +2986,38 @@ function IncidentSection({ inputRef }) {
+     if (b - a > 7 * 86400e3) { setHata("Aralık en fazla 7 gün olabilir."); setDurum("hata"); return; }
+     setDurum("inceleniyor");
+     setHata("");
++    setIlerleme(null);
++    // İnceleme ajanda arka planda çalışır; saniyede bir nereye kadar okunduğu sorulur
+     try {
+-      const r = await fetch(`/api/incident?from=${a}&to=${b}`, { cache: "no-store" });
+-      const j = await r.json();
++      let r = await fetch(`/api/incident?from=${a}&to=${b}`, { cache: "no-store" });
++      let j = await r.json();
+       if (j.error) { setHata(j.error); setDurum("hata"); return; }
+-      setRes(j);
+-      setDurum("bitti");
++      const id = j.job;
++      isRef.current = id;
++      for (;;) {
++        if (isRef.current !== id) return; // yeni bir inceleme başlatıldı
++        setIlerleme(j);
++        if (j.state === "bitti") {
++          setRes(j.report);
++          setDurum("bitti");
++          return;
++        }
++        await new Promise((ok) => setTimeout(ok, 1000));
++        if (isRef.current !== id) return;
++        r = await fetch(`/api/incident?job=${id}`, { cache: "no-store" });
++        j = await r.json();
++        if (j.error) { setHata(j.error); setDurum("hata"); return; }
++      }
+     } catch (err) {
+       setHata("İnceleme yapılamadı: " + err.message);
+       setDurum("hata");
+     }
+   };
++  const durdur = () => {
++    if (isRef.current) fetch(`/api/incident?job=${isRef.current}&stop=1`, { cache: "no-store" }).catch(() => {});
++  };
++  // Bölüm kapanırsa (sayfa değişirse) sormayı bırak
++  useEffect(() => () => { isRef.current = null; }, []);
+   const hizli = (dk) => {
+     const f = { from: yerelGiris(simdi() - dk * 60000), to: yerelGiris(simdi()) };
+     setForm(f);
+@@ -2972,11 +3067,7 @@ function IncidentSection({ inputRef }) {
+           İpucu: sorunun yaşandığı saatin biraz öncesinden başlat. Sorunsuz dönemle karşılaştırınca neyin değiştiği daha kolay görünür.
+         </p>
+         {durum === "hata" && <p className="text-sm mt-3" style={{ color: C.warn }}>{hata}</p>}
+-        {durum === "inceleniyor" && (
+-          <p className="text-sm mt-3" style={{ color: C.muted }}>
+-            Log dosyaları okunuyor. Uzun aralıklarda bu biraz sürebilir; inceleme en fazla 1 dakika çalışır.
+-          </p>
+-        )}
++        {durum === "inceleniyor" && <IncelemeIlerleme d={ilerleme} onDurdur={durdur} />}
+         {durum === "bitti" && res && <OlaySonuc res={res} onSec={sec} />}
+       </Panel>
+     </section>
