@@ -192,6 +192,14 @@ func karsilastir(t *testing.T, ad string, r OlayRapor, k kabaSonuc) {
 		t.Fatalf("%s: %d dilim, beklenen %d", ad, len(r.Seri), beklenenDilim)
 	}
 	for i, d := range r.Seri {
+		// Dilimdeki kod dökümü sınıflarla tutarlı olmalı
+		var kc [5]int64
+		for kod, n := range d.Codes {
+			kc[sinifIdx(kod)] += n
+		}
+		if kc != d.C {
+			t.Fatalf("%s: %d. dilimin kodları %v, sınıflar %v", ad, i, kc, d.C)
+		}
 		if d.N != k.dilim[int64(i)] {
 			t.Fatalf("%s: %d. dilim %d, beklenen %d", ad, i, d.N, k.dilim[int64(i)])
 		}

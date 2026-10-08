@@ -124,6 +124,8 @@ type OlayDilim struct {
 	NoSrv int64    `json:"ns"` // çalışan sunucu olmadığı için 503
 	Ort   int      `json:"avg"`
 	P95   int      `json:"p95"`
+	// O dilimde dönen yanıt kodları (200, 304, 502...); grafiğin üzerine gelince gösterilir
+	Codes map[int]int64 `json:"codes"`
 }
 
 type OlaySunucu struct {
@@ -270,6 +272,7 @@ type olayDilimAgg struct {
 	c     [5]int64
 	noSrv int64
 	sure  sureDagilim
+	kod   map[int]int64
 }
 
 type olayToplayici struct {
@@ -359,6 +362,10 @@ func (t *olayToplayici) kayit(r logRecord) {
 	d := &t.dilim[i]
 	d.n++
 	d.c[k]++
+	if d.kod == nil {
+		d.kod = map[int]int64{}
+	}
+	d.kod[r.Status]++
 	if r.Kind == KindNoServer {
 		d.noSrv++
 	}
@@ -804,7 +811,7 @@ func (t *olayToplayici) bitir() {
 	})
 	for i := range t.dilim {
 		d := &t.dilim[i]
-		o := OlayDilim{T: t.from.Add(time.Duration(i) * t.step).UnixMilli(), N: d.n, C: d.c, NoSrv: d.noSrv}
+		o := OlayDilim{T: t.from.Add(time.Duration(i) * t.step).UnixMilli(), N: d.n, C: d.c, NoSrv: d.noSrv, Codes: d.kod}
 		o.Ort, o.P95 = dagilimBas(&d.sure)
 		r.Seri = append(r.Seri, o)
 	}

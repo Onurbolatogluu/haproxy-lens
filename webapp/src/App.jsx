@@ -2438,7 +2438,7 @@ function OlayGrafik({ res, onSec }) {
   const adimMs = res.step * 60000;
   const veri = (res.series || []).map((d) => {
     const dk = dilimDk(res, d);
-    return { t: d.t, Diğer: (d.n - d.c[3]) / dk, "5xx": d.c[3] / dk, Süre: d.avg >= 0 ? d.avg : null };
+    return { t: d.t, Diğer: (d.n - d.c[3]) / dk, "5xx": d.c[3] / dk, Süre: d.avg >= 0 ? d.avg : null, dk, c: d.c, codes: d.codes || {} };
   });
   const [sec, setSec] = useState(null);
   const tick = { fill: C.faint, fontSize: 11 };
@@ -2476,13 +2476,13 @@ function OlayGrafik({ res, onSec }) {
   return (
     <div className="grid gap-4 md:grid-cols-2 mt-4" style={{ userSelect: "none" }}>
       <Panel title="Dakikada gelen istek"
-        note={`${dakika} Kırmızı kısım sunucu hatası (5xx) alan istekler.${dusme.length ? " Kesikli çizgi: bir sunucunun düştüğü an." : ""} Grafikte fareyle sürükleyerek daha dar bir aralık seçebilirsin.`}>
+        note={`${dakika} Kırmızı kısım sunucu hatası (5xx) alan istekler. Üzerine gelince o dakikanın yanıt kodları türlerine göre görünür.${dusme.length ? " Kesikli çizgi: bir sunucunun düştüğü an." : ""} Grafikte fareyle sürükleyerek daha dar bir aralık seçebilirsin.`}>
         <ResponsiveContainer width="100%" height={220}>
           <AreaChart {...ortak}>
             <CartesianGrid stroke={C.line} vertical={false} />
             {eksen}
             <YAxis tick={tick} tickLine={false} axisLine={false} width={44} />
-            <Tooltip cursor={{ stroke: C.faint }} content={<ChartTip birim={(v) => `${fmtRate(v)} istek/dk`} toplamGoster etiketYaz={z.kisa} />} />
+            <Tooltip cursor={{ stroke: C.faint }} content={<OlayIstekTip etiketYaz={z.kisa} />} />
             <Area type="monotone" dataKey="Diğer" name="Sunucu hatası olmayan" stackId="1" stroke={C.info} strokeWidth={1.5} fill={C.info} fillOpacity={0.25} isAnimationActive={false} dot={false} />
             <Area type="monotone" dataKey="5xx" name="Sunucu hatası (5xx)" stackId="1" stroke={C.bad} strokeWidth={1.5} fill={C.bad} fillOpacity={0.6} isAnimationActive={false} dot={false} />
             {olayCizgi}
@@ -2508,6 +2508,73 @@ function OlayGrafik({ res, onSec }) {
     </div>
   );
 }
+
+// İstek grafiğinin ipucu: iki ana grup (sunucu hatası / olmayan), altlarında türler ve gerçek
+// yanıt kodları (200, 304, 404, 502...). Grafik iki renkle sade kalır, ayrıntı burada.
+const IPUCU_GRUP = [
+  [3, "Sunucu hatası (5xx)", C.bad],
+  [0, "Başarılı (2xx)", C.ok], [1, "Yönlendirme (3xx)", C.info], [2, "İstemci hatası (4xx)", C.warn], [4, "Yanıtsız", C.faint],
+];
+function OlayIstekTip({ active, payload, label, etiketYaz }) {
+  if (!active || !payload || !payload.length) return null;
+  const d = payload[0].payload;
+  const dk = d.dk || 1;
+  const toplam = d.c.reduce((a, x) => a + x, 0);
+  if (!toplam) return null;
+  // Bir dakikalık dilimde sayılar tamdır ("2", "2,0" değil); daha uzun dilimde dakika ortalaması
+  const hiz = (n) => (Number.isInteger(n / dk) ? fmtNum(n / dk) : fmtRate(n / dk));
+  // Her grubun kodları, en sık önce; çok kod varsa ilk 4'ü ve "diğer"
+  const kodlar = (i) => Object.entries(d.codes).map(([k, n]) => [Number(k), n])
+    .filter(([k]) => sinifIdxUI(k) === i).sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+  const Satir = ({ renk, ad, n, kalin, girinti }) => (
+    <div className="flex items-baseline justify-between gap-4" style={{ paddingLeft: girinti ? 14 : 0 }}>
+      <span className={`inline-flex items-center gap-2${kalin ? " nw" : ""}`} style={{ color: kalin ? C.text : C.muted }}>
+        <span style={{ width: 8, height: 8, borderRadius: 2, background: renk, flexShrink: 0 }} />{ad}
+      </span>
+      <span className="tnum nw" style={{ color: kalin ? C.text : C.muted }}>
+        {hiz(n)}{kalin ? " istek/dk" : ""} <span style={{ color: C.faint }}>({fmtPct(n / toplam)})</span>
+      </span>
+    </div>
+  );
+  const KodSatiri = ({ kod, n }) => (
+    <div className="flex items-baseline justify-between gap-4" style={{ paddingLeft: 30, fontSize: 11 }}>
+      <span style={{ color: C.faint }}><b className="tnum" style={{ color: C.muted }}>{kod > 0 ? kod : "—"}</b> {kod > 0 ? CODE_TEXT[kod] || "" : "yanıt gönderilmedi"}</span>
+      <span className="tnum nw" style={{ color: C.faint }}>{hiz(n)}</span>
+    </div>
+  );
+  const grup = (i, ad, renk, girinti) => {
+    if (!d.c[i]) return null;
+    const k = kodlar(i);
+    const goster = k.slice(0, 4);
+    const kalan = k.slice(4).reduce((a, x) => a + x[1], 0);
+    return (
+      <div key={i} className="mt-1">
+        <Satir renk={renk} ad={ad} n={d.c[i]} girinti={girinti} kalin={!girinti} />
+        {goster.map(([kod, n]) => <KodSatiri key={kod} kod={kod} n={n} />)}
+        {kalan > 0 && <div style={{ paddingLeft: 30, fontSize: 11, color: C.faint }}>diğer kodlar {hiz(kalan)}</div>}
+      </div>
+    );
+  };
+  const hatasiz = toplam - d.c[3];
+  return (
+    <div style={{ background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 6, padding: "8px 10px", fontSize: 12, color: C.text, width: "min(300px, 70vw)" }}>
+      <div style={{ color: C.muted, marginBottom: 4 }}>{etiketYaz ? etiketYaz(label) : label}</div>
+      {grup(3, "Sunucu hatası (5xx)", C.bad, false)}
+      {hatasiz > 0 && (
+        <div className="mt-2">
+          <Satir renk={C.info} ad="Sunucu hatası olmayan" n={hatasiz} kalin />
+          {IPUCU_GRUP.slice(1).map(([i, ad, renk]) => grup(i, ad, renk, true))}
+        </div>
+      )}
+      <div className="flex items-baseline justify-between gap-4 mt-2 pt-1" style={{ borderTop: `1px solid ${C.line}` }}>
+        <span style={{ color: C.muted }}>Toplam</span>
+        <span className="tnum nw">{hiz(toplam)} istek/dk</span>
+      </div>
+    </div>
+  );
+}
+// Ajanla aynı sınıflandırma: 200-599 arası kodun ilk hanesi, geri kalanı "yanıtsız"
+const sinifIdxUI = (k) => (k >= 200 && k < 600 ? Math.floor(k / 100) - 2 : 4);
 
 // Backend'in durumu tek kelimeyle: ilk defa bakan biri hangisine bakması gerektiğini görsün
 function beDurum(b) {

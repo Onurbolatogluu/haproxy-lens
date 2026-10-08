@@ -4,6 +4,22 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 1.1.2
+
+- **Olay incelemesi: grafiğin üzerine gelince yanıt kodları.** "Dakikada gelen istek" grafiği iki renkle sade kalıyor, ama bir dakikanın üzerine gelince açılan kutu artık o dakikanın tam dökümünü gösteriyor:
+  - Sunucu hatası (5xx) ve altında gerçek kodlar: "503 servis yok 149, 500 sunucu hatası 2, 502 geçit hatası 1".
+  - "Sunucu hatası olmayan" türlerine ayrılmış hali: başarılı (2xx), yönlendirme (3xx), istemci hatası (4xx), yanıtsız. Her birinin altında yine gerçek kodlar (200, 301, 304, 404, 403…) ve oranı.
+  - Bir dakikalık dilimde sayılar tam yazılıyor ("2", "2,0" değil); daha uzun aralıklarda dakika ortalaması.
+- Ajan bunun için her dakikanın yanıt kodu dökümünü de gönderiyor; test, her dilimde kodların toplamının yanıt türü sayılarıyla tutarlı olduğunu denetliyor.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 1.1.1
 
 Olay incelemesi sadeleşti; ilk defa bakan birinin de anlayabilmesi için.
