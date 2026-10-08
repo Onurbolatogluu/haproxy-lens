@@ -17,6 +17,7 @@ Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur
 - "En çok istenen adresler": satıra tıklayınca o adrese en çok istek yapan 20 IP; her IP'nin yanında aldığı yanıt kodları tam olarak (200, 404, 500...). Yanıt kodundan bağımsız çalışır, yani başarılı isteklerde de görünür. Cloudflare'e ait IP'ler etiketlenir, doğrudan gelenler etiketsiz görünür.
 - Bir backend'i açınca o backend'e gelen isteklerin adres ve IP dökümü: "buraya hiç trafik gitmemeli" dediğin bir backend'e kimin, nereye istek attığı.
 - Log'dan: en çok istenen adresler, engellenen (403) ve hiçbir backend'e eşleşmeyen (503) istekler, en çok istek atan IP'ler.
+- **Olay incelemesi:** başlangıç ve bitiş saati seçersin ("dün 14:00–14:40"), o aralıkta ne olduğu log dosyalarından çıkarılır: sunucu hataları ne zaman arttı ve bitti, hangi backend ve sunucuda, HAProxy isteği neden kesti, sunucular ne zaman düşüp geri geldi, trafik düştü mü, yanıtlar yavaşladı mı, hangi adresler ve IP'ler etkilendi; en üstte düz cümlelerle özet.
 - Her terimin sade Türkçe açıklaması ve her satır için HAProxy'nin verdiği tüm alanlar.
 
 ## Temel kurallar
@@ -25,7 +26,7 @@ Her HAProxy sunucusuna kurulur, o sunucunun kendi stats verisini ve log'unu okur
 - **Her sunucuya kendini uydurur.** Ajan, çalışan HAProxy'nin config'ini sadece okuyarak stats socket'ini, log kaynağını ve her frontend'in log biçimini kendisi bulur. Özel `log-format` tanımları da okunur.
 - **Geçmişi saklar.** Grafikler ve oranlar varsayılan olarak 24 saat geriye gider. Veriler `/var/lib/haproxy-lens` altına yazılır (24 saat için birkaç yüz KB), böylece ajan yeniden başladığında geçmiş kaybolmaz.
 - **Sunucunun kendi ölçümleri.** İşlemci, disk beklemesi, bellek, yük ortalaması, disk doluluğu ve disk okuma/yazma hızı; canlı grafiklerle. Veriler `/proc` altından okunur: ek yetki, ek araç ya da ek servis gerekmez.
-- **Log'da arama.** Panelden bağımsız olarak log dosyalarında (döndürülmüş ve sıkıştırılmış dahil) arama yapar; saklama süresinin ötesine bakabilir.
+- **Log'da arama ve olay incelemesi.** Panelden bağımsız olarak log dosyalarını (döndürülmüş ve sıkıştırılmış dahil) doğrudan okur; saklama süresinin ötesine bakabilir.
 - **Çalışırken izler, yeniden kurulum istemez.** Config değişip HAProxy reload edilince (yeni log biçimi, yeni Host yakalaması, yeni backend) ajan bunu en geç 30 saniyede fark eder ve kendini günceller. Log kaynağı susarsa yenisini arar; stats socket çalışmazsa config'teki başka bir socket'e geçer.
 - **Eksiği panelde söyler.** Config'te veriyi kısıtlayan bir şey varsa (log kapalı, `dontlog-normal`, alan adı yakalanmıyor, sağlık kontrolü yok, okunamayan log satırları...) panelin üstündeki "Yapılandırma notları" bölümünde ne olduğunu, neyi etkilediğini ve eklenebilecek config satırını yazar.
 - **Emin olamazsa kurmaz.** Çalışan bir stats socket bulamazsa hiçbir şey değiştirmeden durur ve sebebini yazar.
@@ -156,7 +157,7 @@ cd /root && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./inst
 
 Panelin en altındaki "Log'da ara" bölümü (sayfanın başındaki **Log'da ara** düğmesi oraya götürür), paneldeki verilerden bağımsız çalışır: doğrudan log dosyalarını okur, döndürülmüş (`haproxy.log.1`) ve sıkıştırılmış (`.gz`) dosyalar dahil. Bu yüzden panelin saklama süresinden (varsayılan 24 saat) çok daha geriye gidebilir.
 
-Aranabilenler: adresin içinde geçen metin, IP (tam ya da başlangıcı), HTTP yöntemi (GET, POST, DELETE…), durum kodu (`500` ya da `5xx`) ve zaman aralığı. Bunlar birlikte ya da tek başına kullanılabilir; örneğin yalnızca yöntem seçip "son 24 saatteki tüm DELETE istekleri" aranabilir. Paneldeki bir satırın ayrıntısı artık tutulmuyorsa (ayrıntılar panelde yalnızca son 1 saat tutulur), satırdaki "IP'leri ve zamanları log'dan getir" düğmesi o isteği yöntemi ve tam adresiyle burada aratır. Sonuçta toplam eşleşme, kod dağılımı, en çok istek yapan IP'ler, en çok eşleşen adresler ve en yeni eşleşen istekler zaman damgalarıyla listelenir.
+Aranabilenler: adresin içinde geçen metin, IP (tam ya da başlangıcı), HTTP yöntemi (GET, POST, DELETE…), durum kodu (`500` ya da `5xx`) ve zaman aralığı. Zaman aralığı "son N saat/gün" ya da elle seçilen başlangıç ve bitiş ("Özel aralık") olabilir; özel aralıkta bütün alanlar boş bırakılabilir, o aralıktaki bütün istekler listelenir. Bunlar birlikte ya da tek başına kullanılabilir; örneğin yalnızca yöntem seçip "son 24 saatteki tüm DELETE istekleri" aranabilir. Paneldeki bir satırın ayrıntısı artık tutulmuyorsa (ayrıntılar panelde yalnızca son 1 saat tutulur), satırdaki "IP'leri ve zamanları log'dan getir" düğmesi o isteği yöntemi ve tam adresiyle burada aratır. Sonuçta toplam eşleşme, kod dağılımı, en çok istek yapan IP'ler, en çok eşleşen adresler ve en yeni eşleşen istekler zaman damgalarıyla listelenir.
 
 Nasıl korunur:
 
@@ -166,7 +167,26 @@ Nasıl korunur:
 - Log dosyaları **sondan başa** okunur: en yeni kayıtlar önce taranır. Bu sayede "son 1 saat" araması dosya ne kadar büyük olursa olsun hızlı biter ve süre sınırına takılsa bile elde edilen sonuçlar en güncel kayıtları kapsar.
 - Arama en fazla 1 dakika çalışır ve aynı anda tek arama yapılır (ajanın işlemci tavanı düşük). Belirli bir kod, IP ya da adres içeren aramalar birkaç saniyede biter; yalnızca "GET" ya da "2xx" gibi neredeyse her satırın eşleştiği aramalar daha uzun sürer. Sınıra takılırsa sonuç bunu açıkça yazar.
 - Alanlar birlikte kullanılırsa "ve" ile birleşir: hepsine uyan istekler bulunur. Tek alan da yeterlidir.
-- Zaman aralığı verildiğinde, son yazma zamanı aralığın dışında kalan dosyalar hiç açılmaz.
+- Zaman aralığı verildiğinde, son yazma zamanı aralığın dışında kalan dosyalar hiç açılmaz. Özel aralıkta bitiş verildiyse okuma dosyanın o noktasından başlar (ikili aramayla bulunur); dün öğleden sonrasına bakan bir arama bugünün satırlarını tek tek geçmez.
+- Log satırları istek *bitince* yazılır ama içlerindeki zaman isteğin *başladığı* andır; yani tam sıralı değiller. Okuma, satırlar aralığın başından 5 dakika daha eski olunca durur; sınırdaki uzun bir istek kaçmaz.
+
+## Olay incelemesi
+
+"Olay incelemesi" bölümü "dün 14:00 ile 14:40 arasında ne oldu?" sorusunu cevaplar. Başlangıç ve bitiş saatini seçersin (ya da hazır seçeneklerden birini: son 30 dakika, 1 saat, 6 saat, 24 saat, dün), ajan o aralığı log dosyalarından okur; döndürülmüş ve sıkıştırılmış dosyalar dahil. Panelin saklama süresine takılmaz; log ne kadar geriye gidiyorsa oraya kadar bakılabilir, tek incelemede en fazla 7 gün.
+
+Neler gösterir:
+
+- **Düz cümlelerle özet**, örneğin: "Sunucu hataları (5xx) 14:01 ile 14:20 arasında arttı (19 dakika). En kötü dilim 14:16: 5xx oranı %64,5, bu dönemin dışında %0,3." · "Sunucu hatalarının %99,6 kadarı be_web backend'inden." · "Bu hataların %95,9 kadarında HAProxy'nin log'a yazdığı sebep (SC): sunucuya bağlanılamadı." · "web1 (be_web) 14:04:48 itibarıyla düştü: porta bağlanırken zaman aşımı. 14:20:07 itibarıyla geri geldi." · "16:30 ile 16:40 arasında log'da hiç istek yok; istekler HAProxy'ye ulaşmamış olabilir (DNS, Cloudflare, ağ)." · "Yanıtlar 14:01 ile 14:05 arasında yavaşladı."
+- **Dakika dakika grafikler:** yanıt türüne göre istekler ve yanıt süresi (ortalama ve %95). Sunucu hatalarının arttığı dönem kırmızı, sunucu olayları kesikli çizgiyle işaretlenir. Grafikte bir bölümü fareyle sürüklersen yalnızca o kısım incelenir.
+- **Log'daki sunucu olayları:** sağlık kontrolüyle düşme/kalkma ve sebebi, "backend'de çalışan sunucu kalmadı", bakım ve HAProxy'nin yeniden yüklenmesi. Aralığın 5 dakika öncesi de dahil, çünkü sebep çoğu zaman hemen öncesindedir.
+- **Backend'ler**, sorunlu olanlar üstte: istek, 5xx, 4xx, "çalışan sunucu yok" 503'leri, ortalama ve %95 yanıt süresi, ilk ve son sunucu hatası. Backend'i açınca sunucuları ve HAProxy'nin isteklerini neden kestiği görünür.
+- **HAProxy isteği neden kesti:** log'daki iki harfli sonlandırma kodu (SC, sH, CD, PR…) düz cümleyle; kaçının hata olduğu ve en çok hangi backend'de görüldüğü.
+- **En çok hata alan adresler, en çok istenen adresler, en çok istek atan IP'ler**, alan adları (log'da varsa) ve bütün yanıt kodları.
+- Herhangi bir backend, adres ya da IP'den **"Log'da gör"**, aynı aralıkla log aramasını açar; tek tek istekleri tam zamanlarıyla görürsün.
+
+Nasıl hızlı kalır: sıkıştırılmamış dosyada aralığın başlangıcı ikili aramayla bulunur, yalnızca aralık okunur; sıkıştırılmış dosyada aralıktan önceki satırlar ayrıştırılmadan gruplar halinde geçilir. 900 bin satırlık bir log'da 40 dakikalık bir aralık için yaklaşık 18 bin satır okunur. Log aramasıyla aynı kilidi ve 1 dakikalık sınırı kullanır; ajanın %10 işlemci tavanıyla birkaç saatlik bir aralık birkaç saniye sürer, yoğun bir LB'de bütün bir gün sınıra takılabilir. Takılırsa aralığın başından itibaren okunan kısım eksiksizdir ve sonuç bunu yazar.
+
+Neyi göremez: log'a yazılmamış olan hiçbir şeyi. Log dosyaları döndürülüp silindiyse o günler incelenemez. Sunucu düşme/kalkma olayları yalnızca HAProxy bunları aynı log'a yazıyorsa ("notice" seviyesinde yazar) ve yalnızca sağlık kontrolü olan sunucular için görünür. Bir site HAProxy'ye ulaşmadan çöktüyse (DNS, Cloudflare), inceleme bunu yalnızca trafikte düşüş olarak gösterebilir.
 
 ## Yapılandırma notları
 
@@ -304,7 +324,7 @@ Ayarlar: `DETAIL=6h LISTS=24h BUDGET=500 MEMMAX=768M ./install.sh`. Bütçeyi y�
 | Log bölümü boş ya da eksik | Panelin üstündeki "Yapılandırma notları" sebebini ve varsa eklenebilecek config satırını yazar |
 | Ayarları değiştirmek istiyorsun | Aynı paketten `ALLOW=... LISTEN=... ./install.sh` çalıştırmak yeterli; servis dosyası yeniden yazılır |
 | Kurulum "HATA: ... olmalı" diyerek durdu | Verdiğin parametrelerden biri geçersiz; mesaj hangisi olduğunu ve örneğini yazar. Bu durumda sisteme hiçbir şey dokunulmamıştır |
-| Aramada "başka bir arama sürüyor" | Ajan aynı anda tek arama yapar (işlemci tavanı düşük olduğu için); birkaç saniye sonra tekrar dene |
+| Aramada ya da olay incelemesinde "başka bir arama ya da inceleme sürüyor" | Ajan aynı anda tek arama ya da inceleme yapar (işlemci tavanı düşük olduğu için); birkaç saniye sonra tekrar dene |
 
 ### Kurulum hangi değerleri kabul eder
 
@@ -355,6 +375,7 @@ Dosyalar:
 | `access.go` | Panele erişebilecek ağların kontrolü |
 | `cloudflare.go` | Yerleşik Cloudflare IP aralıkları (etiketleme için) |
 | `search.go` | Log'da arama: döndürülmüş ve sıkıştırılmış dosyalar dahil, sondan başa okuma |
+| `incident.go` | Olay incelemesi: seçilen aralığı log dosyalarından okuyup özetler (`/api/incident`) |
 | `*_test.go` | Ayrıştırıcı, config uyumu, bellek, saldırı dayanıklılığı, arama, ayar doğrulama ve erişim testleri |
 | `webapp/` | Panel arayüzü (React) ve simge (`favicon.svg`, `favicon.png`); `build.sh` derleyip programa gömer |
 | `deploy/` | `install.sh` ve `uninstall.sh` |

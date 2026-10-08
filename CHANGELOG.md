@@ -4,6 +4,28 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 1.1.0
+
+- **Yeni: Olay incelemesi.** "Dün 14:00 ile 14:40 arasında ne oldu?" sorusu için. Başlangıç ve bitiş saati seçiyorsun (ya da son 30 dk, 1 saat, 6 saat, 24 saat, dün), ajan o aralığı doğrudan log dosyalarından okuyor; panelin 24 saatlik saklama süresine takılmıyor, log ne kadar geriye gidiyorsa oraya kadar bakabiliyor (tek incelemede en fazla 7 gün). Sayfanın üstündeki **Olay incelemesi** düğmesi bölüme götürür. Gösterilenler:
+  - En üstte düz cümlelerle özet: sunucu hataları ne zaman arttı ve ne zaman normale döndü, en kötü dakika, hataların hangi backend'den geldiği, HAProxy'nin log'a yazdığı sebep, hangi sunucunun ne zaman ve neden düşüp ne zaman geri geldiği, "çalışan sunucu yok" 503'leri, trafiğin düştüğü ya da hiç istek gelmediği dönem, yanıtların yavaşladığı dönem. Belirgin bir sorun yoksa bunu ve sorunun nerede olmuş olabileceğini söylüyor.
+  - Dakika dakika istek (yanıt türüne göre) ve yanıt süresi (ortalama ve %95) grafikleri. Sorunlu dönem kırmızı, sunucu olayları kesikli çizgiyle işaretli; grafikte fareyle bir bölümü sürükleyince yalnızca o kısım inceleniyor.
+  - Log'daki sunucu olayları (sağlık kontrolüyle düşme/kalkma ve sebebi, backend'de sunucu kalmaması, bakım, HAProxy'nin yeniden yüklenmesi); aralığın 5 dakika öncesi de dahil.
+  - Backend tablosu (istek, 5xx, 4xx, çalışan sunucu yok, ortalama ve %95 süre); açınca sunucular ve HAProxy'nin istekleri neden kestiği.
+  - "HAProxy isteği neden kesti": log'daki iki harfli sonlandırma kodları (SC, sH, CD, PR…) düz cümleyle.
+  - En çok hata alan adresler, en çok istenen adresler, en çok istek atan IP'ler, alan adları ve yanıt kodları. Her backend, adres ve IP'den "Log'da gör" ile aynı aralıktaki tek tek isteklere geçiliyor.
+  - Hızlı: sıkıştırılmamış dosyada aralığın başı ikili aramayla bulunuyor, yalnızca aralık okunuyor. 900 bin satırlık bir log'da 40 dakikalık aralık için ~18 bin satır okunuyor.
+- **Log'da ara: özel aralık.** Zaman aralığında "Özel aralık" seçip başlangıç ve bitiş saati verilebiliyor. Bu durumda alanların hepsi boş bırakılabiliyor ("o aralıktaki bütün istekler"). Bitiş verilince okuma dosyanın o noktasından başlıyor; dün öğleden sonrasına bakan bir arama bugünün satırlarını geçmek zorunda kalmıyor. Arama backend'e göre de daraltılabiliyor (olay incelemesinden gelince).
+- **Düzeltme: aramada aralık başındaki satırlar nadiren kaçabiliyordu.** Log satırları istek bitince yazılır ama içlerindeki zaman isteğin başladığı andır. Uzun süren bir isteğin satırı arkada kalınca okuma erken duruyor, sınırdaki birkaç satır sayılmıyordu. Artık okuma, satırlar aralığın başından 5 dakika daha eski olunca duruyor. Hata yeni eklenen ve bütün satırları tek tek sayan testle yakalandı.
+- Testler: olay incelemesi, rastgele 60 aralıkta (dosya sınırlarını geçen, sıkıştırılmış dosyaya düşen, 2 dakikadan 30 saate kadar) satırları tek tek sayan kaba kuvvetle birebir aynı sonucu veriyor; koda bilerek sokulan iki hatayı yakalıyor. Arayüz altı ekran genişliğinde (360–1600) taşmasız.
+
+### Kurulum ve güncelleme
+
+Sunucuda root olarak aşağıdaki komutlar yeterli. Betik önceki kurulumu görür ve üzerine yazar; adres, erişim listesi ve log ayarların korunur.
+
+    cd /root && rm -rf lens && mkdir lens && cd lens && wget -nv https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/haproxy-lens-linux-amd64.tar.gz https://github.com/Onurbolatogluu/haproxy-lens/releases/latest/download/SHA256SUMS && sha256sum -c --ignore-missing SHA256SUMS && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./install.sh
+
+Tek satır: temiz bir klasöre indirir, doğrular, açar ve kurar; bir adım hata verirse sonrakiler çalışmaz ve sebebi ekrana yazılır. ARM sunucularda `amd64` yerine `arm64` yazın. Kurmadan önce sadece kontrol etmek için satırın sonundaki `./install.sh` yerine `./install.sh --check`, ayrıntılar için [README](https://github.com/Onurbolatogluu/haproxy-lens#readme).
+
 ## 1.0.15
 
 - **Kritik uyarılar şu anki durumu gösteriyor.** Bulgular seçili zaman aralığına göre hesaplanıyordu: sağlık kontrolü olmayan bir sunucuya bağlanılamadığında uyarı kırmızı çıkıyor, ama sorun düzeldikten sonra da 15 dakikalık ya da 1 saatlik görünümde, aralığın içinde kaldığı için "bağlanılamıyor" diye kırmızı görünmeye devam ediyordu. Artık ajan seçili aralıktan bağımsız olarak son 2 dakikanın verisini de gönderiyor:

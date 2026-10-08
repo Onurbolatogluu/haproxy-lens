@@ -17,6 +17,7 @@ It is installed on each HAProxy server, reads that server's own stats data and l
 - "Most requested addresses": click a row to see the 20 IPs that requested that address most, with the exact response codes each got (200, 404, 500...). This works regardless of the response code, so successful requests are covered too. Cloudflare IPs are labeled; direct clients are shown without a label.
 - Open a backend to see which addresses and IPs sent requests to it: who is calling a backend that "should get no traffic", and where.
 - From the logs: most requested addresses, blocked (403) requests and requests that matched no backend (503), top client IPs.
+- **Incident review:** pick a start and end time ("yesterday 14:00–14:40") and get, from the log files, what happened in that window: when server errors rose and fell, which backend and server, why HAProxy ended the requests, when servers went down and came back, traffic drops, slow responses, and the addresses and IPs involved, summarized in plain sentences.
 - A plain explanation for every term, and every field HAProxy reports for each row.
 
 ## Core principles
@@ -25,7 +26,7 @@ It is installed on each HAProxy server, reads that server's own stats data and l
 - **Adapts to each server.** By only reading the running HAProxy's configuration, the agent finds the stats socket, the log source and each frontend's log format by itself. Custom `log-format` definitions are read too.
 - **Keeps history.** Charts and rates go back 24 hours by default. Data is written under `/var/lib/haproxy-lens` (a few hundred KB for 24 hours), so history survives an agent restart.
 - **The server's own metrics.** CPU, I/O wait, memory, load average, disk usage and disk read/write speed, with live charts. Read from `/proc`: no extra privileges, tools or services needed.
-- **Log search.** Searches the log files directly (including rotated and compressed ones), independently of the dashboard, so it can look further back than the retention period.
+- **Log search and incident review.** Read the log files directly (including rotated and compressed ones), independently of the dashboard, so they can look further back than the retention period.
 - **Follows changes while running, no reinstall needed.** When the configuration changes and HAProxy is reloaded (new log format, new Host capture, new backend), the agent notices within 30 seconds and updates itself. If the log source goes silent it looks for a new one; if the stats socket stops working it switches to another socket from the configuration.
 - **Tells you what is missing.** If something in the configuration limits the data (logging off, `dontlog-normal`, host name not captured, no health checks, unreadable log lines...), the "Configuration notes" section at the top of the dashboard explains what it is, what it affects, and the configuration line you could add.
 - **Does not install if unsure.** If it cannot find a working stats socket, it stops without changing anything and tells you why.
@@ -156,7 +157,7 @@ cd /root && tar xzf haproxy-lens-linux-amd64.tar.gz && cd haproxy-lens && ./inst
 
 The "Log'da ara" (log search) section at the bottom of the dashboard (the **Log'da ara** button at the top of the page takes you there) works independently of the dashboard data: it reads the log files directly, including rotated (`haproxy.log.1`) and compressed (`.gz`) files. So it can go much further back than the dashboard's retention period (24 hours by default).
 
-You can search by: text contained in the address, IP (full or a prefix), HTTP method (GET, POST, DELETE…), status code (`500` or `5xx`) and time range. They can be used together or alone; for example you can pick only a method and search for "all DELETE requests in the last 24 hours". If a dashboard row's detail is no longer kept (the dashboard keeps detail only for the last hour), the "IP'leri ve zamanları log'dan getir" (get IPs and times from the log) button on that row searches for that request here, by its method and exact address. Results show the total number of matches, the status code breakdown, the top client IPs, the most matched addresses, and the newest matching requests with timestamps.
+You can search by: text contained in the address, IP (full or a prefix), HTTP method (GET, POST, DELETE…), status code (`500` or `5xx`) and time range. The time range is either "last N hours/days" or a custom start and end ("Özel aralık"); with a custom range all fields may be left empty to list every request in that window. They can be used together or alone; for example you can pick only a method and search for "all DELETE requests in the last 24 hours". If a dashboard row's detail is no longer kept (the dashboard keeps detail only for the last hour), the "IP'leri ve zamanları log'dan getir" (get IPs and times from the log) button on that row searches for that request here, by its method and exact address. Results show the total number of matches, the status code breakdown, the top client IPs, the most matched addresses, and the newest matching requests with timestamps.
 
 How it is protected:
 
@@ -166,7 +167,26 @@ How it is protected:
 - Log files are read **from the end backwards**: the newest records are scanned first. So a "last 1 hour" search finishes quickly however large the file is, and even if it hits the time limit, the results cover the most recent records.
 - A search runs for at most 1 minute, and only one search runs at a time (the agent's CPU limit is low). Searches for a specific code, IP or address finish in a few seconds; searches that match almost every line, such as only "GET" or "2xx", take longer. If the limit is reached, the result says so clearly.
 - When several fields are filled in, they are combined with "and": requests matching all of them are found. A single field is enough too.
-- When a time range is given, files last written before the range are not opened at all.
+- When a time range is given, files last written before the range are not opened at all. With a custom end time, reading starts at that point of the file (found by binary search), so a search for yesterday afternoon does not wade through today's lines.
+- Log lines are written when a request *ends* but carry the time it *started*, so they are not strictly in order. Reading stops only once lines are 5 minutes older than the start of the range, so a long request near the boundary is not missed.
+
+## Incident review
+
+The "Olay incelemesi" (incident review) section answers "what happened between 14:00 and 14:40 yesterday?". Pick a start and end time (or one of the quick choices: last 30 minutes, 1 hour, 6 hours, 24 hours, yesterday) and the agent reads that window from the log files, including rotated and compressed ones. It is not limited by the dashboard's retention; it goes back as far as your logs do, up to 7 days per review.
+
+What you get:
+
+- **A summary in plain sentences**, for example: "Server errors (5xx) rose between 14:01 and 14:20 (19 minutes). Worst minute 14:16: 5xx rate 64.5%, 0.3% outside this period." · "99.6% of server errors came from backend be_web." · "In 95.9% of them HAProxy logged the reason SC: could not connect to the server." · "web1 (be_web) went down at 14:04:48: connection timeout. Came back at 14:20:07." · "Between 16:30 and 16:40 there are no requests in the log; they may not have reached HAProxy at all (DNS, Cloudflare, network)." · "Responses slowed down between 14:01 and 14:05."
+- **Per-minute charts** of requests by response class and of response time (average and 95th percentile). The period with raised server errors is shaded red and server events are marked. Drag across a part of the chart to review just that part.
+- **Server events from the log:** health check DOWN/UP with the reason, "backend has no server available", maintenance, and HAProxy reloads. Events up to 5 minutes before the window are included, because the cause is usually just before.
+- **Backends**, problem ones first: requests, 5xx, 4xx, "no server available" 503s, average and 95th percentile response time, first and last server error. Open a backend to see its servers and the reasons HAProxy ended its requests.
+- **Why HAProxy ended requests:** the two-letter termination state from the log (SC, sH, CD, PR…) explained in plain words, with how many of them were errors and which backend they came from most.
+- **Addresses with the most errors, most requested addresses, top client IPs**, host names (if they are in the log) and all status codes.
+- From any backend, address or IP, **"Log'da gör"** opens the log search with the same window, so you can see the individual requests with their exact times.
+
+How it stays fast: in an uncompressed file the start of the window is found by binary search and only the window is read; in a compressed file the lines before the window are skipped in groups without being parsed. A 40-minute window in a 900,000-line log reads about 18,000 lines. It shares the log search's lock and 1-minute limit; with the agent's 10% CPU limit, a few hours take a few seconds, while a full busy day may hit the limit. If it does, the part from the start of the window is complete and the result says so.
+
+What it cannot see: anything not written to the log. If log files have been rotated away, those days cannot be reviewed. Server DOWN/UP events appear only if HAProxy writes them to the same log (it does so at "notice" level) and only for servers with health checks. If a site failed before reaching HAProxy (DNS, Cloudflare), the review shows it only as a drop in traffic.
 
 ## Configuration notes
 
@@ -304,7 +324,7 @@ Settings: `DETAIL=6h LISTS=24h BUDGET=500 MEMMAX=768M ./install.sh`. If you rais
 | The log section is empty or incomplete | "Configuration notes" at the top of the dashboard gives the reason and, if any, the configuration line you could add |
 | You want to change settings | Running `ALLOW=... LISTEN=... ./install.sh` from the same package is enough; the service file is rewritten |
 | The installer stopped with "HATA: ... olmalı" (error: must be ...) | One of the parameters you gave is invalid; the message says which one and gives an example. Nothing on the system was touched in this case |
-| Search says "başka bir arama sürüyor" (another search is running) | The agent runs one search at a time (because of its low CPU limit); try again in a few seconds |
+| Search or incident review says "başka bir arama ya da inceleme sürüyor" (another search or review is running) | The agent runs one search or review at a time (because of its low CPU limit); try again in a few seconds |
 
 ### Which values the installer accepts
 
@@ -355,6 +375,7 @@ Files:
 | `access.go` | Checking which networks may reach the dashboard |
 | `cloudflare.go` | Built-in Cloudflare IP ranges (for labeling) |
 | `search.go` | Log search: including rotated and compressed files, reading from the end backwards |
+| `incident.go` | Incident review: reads a chosen window from the log files and summarizes it (`/api/incident`) |
 | `*_test.go` | Tests for the parser, configuration compatibility, memory, attack resilience, search, settings validation and access |
 | `webapp/` | The dashboard interface (React) and icon (`favicon.svg`, `favicon.png`); `build.sh` builds it and embeds it in the program |
 | `deploy/` | `install.sh` and `uninstall.sh` |

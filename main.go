@@ -186,6 +186,26 @@ func main() {
 		}
 		writeJSON(w, res)
 	})
+	// Olay incelemesi: seçilen başlangıç-bitiş aralığını log dosyalarından özetler
+	mux.HandleFunc("/api/incident", func(w http.ResponseWriter, r *http.Request) {
+		if logs == nil {
+			writeJSON(w, map[string]string{"error": "Bu sunucuda log analizi kapalı; inceleme log'dan yapılır."})
+			return
+		}
+		from, to, err := incidentRange(r.URL.Query().Get, time.Now())
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			writeJSON(w, map[string]string{"error": err.Error()})
+			return
+		}
+		res, err := logs.Incident(from, to)
+		if err != nil {
+			w.WriteHeader(http.StatusTooManyRequests)
+			writeJSON(w, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, res)
+	})
 	mux.HandleFunc("/api/ranges", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ranges": stats.Ranges(), "retention": retMin})
 	})

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, createContext, useContext, Fragment } from "react";
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
-import { ChevronDown, ChevronRight, Info, X, Pause, Play, Search } from "lucide-react";
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceArea, ReferenceLine } from "recharts";
+import { ChevronDown, ChevronRight, Info, X, Pause, Play, Search, History } from "lucide-react";
 
 /* haproxy-lens paneli — ajan API'sinden (/api/state, /api/logs) beslenir. */
 
@@ -61,6 +61,7 @@ const GLOSSARY = {
   dresp: ["Engellenen yanıt", "Kural yüzünden istemciye gönderilmeyen sunucu yanıtı."],
   ereq: ["Hatalı istek", "İstemciden bozuk, yarım ya da geçersiz gelen istek."],
   econ: ["Bağlanamama", "Sunucuya bağlantı kurulamayan deneme sayısı."],
+  ns_olay: ["Çalışan sunucu yok", "Backend seçildi ama içinde istek alabilecek hiçbir sunucu yoktu; istek 503 aldı. O anda backend'in bütün sunucuları kapalı ya da sağlık kontrolünden geçemiyor demektir.", "Log'da sunucu adı <NOSRV> olan 503'ler"],
   eresp: ["Yanıt hatası", "Sunucu yanıtı bozuk geldi ya da yarıda kesildi."],
   wretr: ["Tekrar deneme", "Bağlantı kurulamayınca aynı sunucuya yeniden denendi."],
   wredis: ["Başka sunucuya aktarma", "İstek, sorunlu sunucu yerine başka bir sunucuya gönderildi."],
@@ -1210,7 +1211,7 @@ function buildFindings(model, rates, logs, wrates = {}, label = "", recent = nul
   return out.sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
 }
 
-function Header({ info, running, onToggleRun, ok, lastAt, agentVersion, onSearch }) {
+function Header({ info, running, onToggleRun, ok, lastAt, agentVersion, onSearch, onIncident }) {
   const up = num(info?.Uptime_sec);
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 pb-5" style={{ borderBottom: `1px solid ${C.line}` }}>
@@ -1230,6 +1231,7 @@ function Header({ info, running, onToggleRun, ok, lastAt, agentVersion, onSearch
           {!ok ? "Bağlantı sorunu" : running ? `Canlı, ${TICK_SEC} saniyede bir` : "Duraklatıldı"}
           {lastAt ? <span style={{ color: C.faint }}>({new Date(lastAt).toLocaleTimeString("tr-TR")})</span> : null}
         </span>
+        {onIncident && <Btn onClick={onIncident}><History size={14} />Olay incelemesi</Btn>}
         {onSearch && <Btn onClick={onSearch}><Search size={14} />Log'da ara</Btn>}
         <Btn onClick={onToggleRun}>{running ? <Pause size={14} /> : <Play size={14} />}{running ? "Duraklat" : "Devam et"}</Btn>
       </div>
@@ -1387,13 +1389,13 @@ function PulseStrip({ model, rates, info }) {
 
 // Yığılmış alan grafiğinde bir çizginin yüksekliği o türün değeri değil, altındakilerle
 // birlikte toplamıdır. İpucu bu yüzden hem tek tek değerleri hem toplamı yazar.
-function ChartTip({ active, payload, label, birim, toplamGoster }) {
+function ChartTip({ active, payload, label, birim, toplamGoster, etiketYaz }) {
   if (!active || !payload || payload.length === 0) return null;
   const satir = [...payload].reverse(); // yığının üstten alta sırası
   const sum = satir.reduce((a, r) => a + (Number(r.value) || 0), 0);
   return (
     <div style={{ background: C.panel2, border: `1px solid ${C.line}`, borderRadius: 6, padding: "8px 10px", fontSize: 12, color: C.text }}>
-      <div style={{ color: C.muted, marginBottom: 4 }}>{label}</div>
+      <div style={{ color: C.muted, marginBottom: 4 }}>{etiketYaz ? etiketYaz(label) : label}</div>
       {satir.map((r) => (
         <div key={r.name} className="flex items-baseline justify-between gap-4">
           <span className="inline-flex items-center gap-2">
@@ -1892,10 +1894,10 @@ function CodePathsPanel({ logs, openRows, toggleRow, frozen }) {
 // Log'da arama. Panelin belleğinden değil doğrudan log dosyalarından okur; bu yüzden
 // saklama süresinin (varsayılan 24 saat) ötesine, döndürülmüş ve sıkıştırılmış
 // dosyalara da bakabilir.
-const ARAMA_ARALIK = [[1, "Son 1 saat"], [24, "Son 24 saat"], [168, "Son 7 gün"], [720, "Son 30 gün"], [0, "Tüm log"]];
+const ARAMA_ARALIK = [[1, "Son 1 saat"], [24, "Son 24 saat"], [168, "Son 7 gün"], [720, "Son 30 gün"], [0, "Tüm log"], [-1, "Özel aralık"]];
 
 function SearchSection({ inputRef }) {
-  const [form, setForm] = useState({ path: "", ip: "", status: "", hours: 24, method: "", exact: false });
+  const [form, setForm] = useState({ path: "", ip: "", status: "", hours: 24, method: "", exact: false, backend: "", from: "", to: "" });
   const [durum, setDurum] = useState("hazir"); // hazir | araniyor | bitti | hata
   const [res, setRes] = useState(null);
   const [hata, setHata] = useState("");
@@ -1903,8 +1905,17 @@ function SearchSection({ inputRef }) {
   const ara = async (e, f = form) => {
     e?.preventDefault?.();
     const form = f;
-    if (!form.path && !form.ip && !form.status && !form.method) {
-      setHata("Aramak için adres, IP, yöntem ya da durum kodu girin.");
+    const ozel = form.hours === -1;
+    const a = girisMs(form.from);
+    const b = girisMs(form.to);
+    if (ozel && (!Number.isFinite(a) || !Number.isFinite(b) || b <= a)) {
+      setHata("Özel aralık için başlangıç ve bitiş saatini seç; bitiş başlangıçtan sonra olmalı.");
+      setDurum("hata");
+      return;
+    }
+    // Alanların hepsi boş olabilir yalnızca özel aralıkta: "o aralıktaki bütün istekler"
+    if (!ozel && !form.path && !form.ip && !form.status && !form.method && !form.backend) {
+      setHata("Aramak için adres, IP, yöntem ya da durum kodu girin. Bir aralıktaki bütün istekleri görmek için zaman aralığında \"Özel aralık\" seç.");
       setDurum("hata");
       return;
     }
@@ -1912,9 +1923,9 @@ function SearchSection({ inputRef }) {
     setHata("");
     try {
       const p = new URLSearchParams();
-      for (const k of ["path", "ip", "status", "method"]) if (form[k]) p.set(k, form[k]);
+      for (const k of ["path", "ip", "status", "method", "backend"]) if (form[k]) p.set(k, form[k]);
       if (form.exact) p.set("exact", "1");
-      if (form.hours) p.set("hours", String(form.hours));
+      if (ozel) { p.set("from", String(a)); p.set("to", String(b)); } else if (form.hours) p.set("hours", String(form.hours));
       const r = await fetch(`/api/search?${p}`, { cache: "no-store" });
       const j = await r.json();
       if (j.error) {
@@ -1932,8 +1943,10 @@ function SearchSection({ inputRef }) {
 
   useEffect(() => {
     const dinle = (ev) => {
-      const yeni = { path: ev.detail.path || "", ip: "", status: ev.detail.status || "", hours: ev.detail.hours || 24,
-        method: ev.detail.method || "", exact: !!ev.detail.exact };
+      const d = ev.detail;
+      const yeni = { path: d.path || "", ip: d.ip || "", status: d.status || "", hours: d.from ? -1 : d.hours || 24,
+        method: d.method || "", exact: !!d.exact, backend: d.backend || "",
+        from: d.from ? yerelGiris(d.from) : "", to: d.to ? yerelGiris(d.to) : "" };
       setForm(yeni);
       document.getElementById("search")?.scrollIntoView({ behavior: "smooth", block: "start" });
       ara(null, yeni);
@@ -1973,10 +1986,26 @@ function SearchSection({ inputRef }) {
           </label>
           <label className="text-sm">
             <div className="text-xs mb-1" style={{ color: C.muted }}>Zaman aralığı</div>
-            <select value={form.hours} onChange={(e) => setForm({ ...form, hours: Number(e.target.value) })} style={alan}>
+            <select value={form.hours} onChange={(e) => {
+              const h = Number(e.target.value);
+              // Özel aralığa geçerken boş kutular yerine son 1 saat önerilir
+              setForm(h === -1 && !form.from ? { ...form, hours: h, from: yerelGiris(Date.now() - 3600e3), to: yerelGiris(Date.now()) } : { ...form, hours: h });
+            }} style={alan}>
               {ARAMA_ARALIK.map(([h, t]) => <option key={h} value={h}>{t}</option>)}
             </select>
           </label>
+          {form.hours === -1 && (
+            <>
+              <label className="text-sm">
+                <div className="text-xs mb-1" style={{ color: C.muted }}>Başlangıç</div>
+                <input type="datetime-local" value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value })} style={{ ...alan, colorScheme: "dark" }} />
+              </label>
+              <label className="text-sm">
+                <div className="text-xs mb-1" style={{ color: C.muted }}>Bitiş</div>
+                <input type="datetime-local" value={form.to} onChange={(e) => setForm({ ...form, to: e.target.value })} style={{ ...alan, colorScheme: "dark" }} />
+              </label>
+            </>
+          )}
           <button type="submit" disabled={durum === "araniyor"}
             className="rounded-md px-4 py-2 text-sm"
             style={{ background: C.info, color: C.bg, opacity: durum === "araniyor" ? 0.6 : 1 }}>
@@ -1991,6 +2020,15 @@ function SearchSection({ inputRef }) {
             <button type="button" className="underline" style={{ color: C.info }}
               onClick={() => setForm({ ...form, exact: false })}>
               içinde geçenleri ara
+            </button>
+          </p>
+        )}
+        {form.backend && (
+          <p className="text-xs mt-3 flex flex-wrap items-center gap-2" style={{ color: C.muted }}>
+            Yalnızca bu backend:
+            <b className="brk" style={{ color: C.text }}>{form.backend}</b>
+            <button type="button" className="underline" style={{ color: C.info }} onClick={() => setForm({ ...form, backend: "" })}>
+              kaldır
             </button>
           </p>
         )}
@@ -2098,6 +2136,731 @@ function SearchResult({ res }) {
         </table>
       </div>
     </div>
+  );
+}
+
+// ---------- Olay incelemesi ----------
+// "Dün 14:00 ile 14:40 arasında ne oldu?" Seçilen aralık log dosyalarından okunur (panelin
+// saklama süresine takılmaz) ve sorunun ne zaman başlayıp bittiği, hangi backend'de olduğu
+// ve HAProxy'nin isteği neden kestiği düz cümlelerle yazılır.
+
+const OLAY_HIZLI = [[30, "Son 30 dk"], [60, "Son 1 saat"], [360, "Son 6 saat"], [1440, "Son 24 saat"]];
+const iki = (n) => String(n).padStart(2, "0");
+// <input type="datetime-local"> tarayıcının saatiyle çalışır: "2026-10-07T14:00"
+const yerelGiris = (ms) => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${iki(d.getMonth() + 1)}-${iki(d.getDate())}T${iki(d.getHours())}:${iki(d.getMinutes())}`;
+};
+const girisMs = (s) => (s ? new Date(s).getTime() : NaN);
+
+// Zaman yazımı: aralık tek güne sığıyorsa yalnız saat, değilse gün de yazılır
+function zamanYazici(from, to) {
+  const ayniGun = new Date(from).toDateString() === new Date(to).toDateString();
+  const gun = (ms) => new Date(ms).toLocaleDateString("tr-TR", { day: "numeric", month: "long" });
+  const saat = (ms, sn) => new Date(ms).toLocaleTimeString("tr-TR", sn ? { hour: "2-digit", minute: "2-digit", second: "2-digit" } : { hour: "2-digit", minute: "2-digit" });
+  return {
+    kisa: (ms) => (ayniGun ? saat(ms) : `${gun(ms)} ${saat(ms)}`),
+    sn: (ms) => (ayniGun ? saat(ms, true) : `${gun(ms)} ${saat(ms, true)}`),
+    eksen: (ms) => (ayniGun || to - from <= 36 * 3600e3 ? saat(ms) : `${new Date(ms).toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit" })} ${saat(ms)}`),
+    aralik: () => (ayniGun ? `${gun(from)} ${saat(from)} – ${saat(to)}` : `${gun(from)} ${saat(from)} – ${gun(to)} ${saat(to)}`),
+  };
+}
+
+const sureYazi = (dk) => (dk < 60 ? `${dk}${NB}dakika` : dk % 60 === 0 ? `${dk / 60}${NB}saat` : `${Math.floor(dk / 60)}${NB}saat ${dk % 60}${NB}dakika`);
+
+// HAProxy'nin log'a yazdığı iki harfli sonlandırma kodu: ilk harf kimin yüzünden, ikinci
+// harf hangi aşamada bittiğini söyler. Sık görülenlere özel, ötekilere birleşik açıklama.
+const TERM_OZEL = {
+  SC: "Sunucuya bağlanılamadı (sunucu bağlantıyı reddetti ya da ulaşılamadı)",
+  sC: "Sunucuya bağlanırken zaman aşımı (sunucu bağlantıya hiç yanıt vermedi)",
+  SH: "Sunucu yanıt göndermeden bağlantıyı kapattı ya da bozuk yanıt verdi (genelde 502)",
+  sH: "Sunucu zamanında yanıt vermedi, 'timeout server' süresi doldu (genelde 504)",
+  SD: "Sunucu yanıtı gönderirken bağlantıyı kopardı",
+  sD: "Sunucu yanıtı gönderirken zaman aşımı",
+  SQ: "İstek sunucu kuyruğunda beklerken sunucu bağlantıyı reddetti",
+  sQ: "İstek kuyrukta çok bekledi ve boşalan sunucu olmadı (genelde 503)",
+  CD: "Kullanıcı yanıt gelirken bağlantıyı kapattı (sayfadan ayrıldı ya da indirmeyi iptal etti)",
+  cD: "Kullanıcı tarafında veri aktarılırken zaman aşımı",
+  CR: "Kullanıcı isteğini tamamlamadan bağlantıyı kapattı",
+  cR: "Kullanıcı isteğini zamanında göndermedi (408)",
+  CH: "Kullanıcı yanıtı beklerken vazgeçip bağlantıyı kapattı",
+  CC: "Kullanıcı, sunucuya bağlanılırken vazgeçti",
+  CQ: "Kullanıcı, istek kuyrukta beklerken vazgeçti",
+  PR: "HAProxy kuralı isteği engelledi (ör. http-request deny)",
+  PH: "HAProxy sunucunun yanıtını engelledi (hatalı ya da izin verilmeyen başlık)",
+  LR: "HAProxy yanıtı kendisi verdi (ör. yönlendirme)",
+  LH: "HAProxy yanıtı kendisi verdi",
+  DD: "Sunucu düştüğü için açık bağlantı kesildi",
+  DC: "Sunucu düştüğü için bağlantı kesildi",
+};
+const TERM_KIM = {
+  C: "Kullanıcı bağlantıyı kapattı", c: "Kullanıcı tarafında zaman aşımı", S: "Sunucu bağlantıyı kesti ya da reddetti",
+  s: "Sunucu tarafında zaman aşımı", P: "HAProxy isteği durdurdu", L: "HAProxy yanıtı kendisi verdi",
+  R: "HAProxy'nin kaynağı yetmedi (bellek, soket ya da bağlantı sınırı)", I: "HAProxy içinde hata",
+  D: "Sunucu düştüğü için bağlantı kesildi", U: "Yedek sunucu devreye girdiği için bağlantı kesildi", K: "Yönetici bağlantıyı kesti",
+};
+const TERM_NE_ZAMAN = {
+  R: "istek beklenirken", Q: "istek kuyrukta beklerken", C: "sunucuya bağlanırken", H: "sunucunun yanıtı beklenirken",
+  D: "veri aktarılırken", L: "son veri gönderilirken", T: "istek bekletilirken (tarpit)",
+};
+function termAcikla(kod) {
+  if (TERM_OZEL[kod]) return TERM_OZEL[kod];
+  const kim = TERM_KIM[kod[0]] || `Bilinmeyen sebep (${kod[0]})`;
+  const ne = TERM_NE_ZAMAN[kod[1]];
+  return ne ? `${kim}, ${ne}` : kim;
+}
+// Sorunun tarafı: sunucu/HAProxy tarafı kırmızı, kullanıcı tarafı ve kurallar soluk
+const termRenk = (kod) => ("SsRIDU".includes(kod[0]) ? C.bad : "Cc".includes(kod[0]) ? C.muted : C.info);
+
+// Sağlık kontrolünün log'daki sebep yazısı (HAProxy İngilizce yazar)
+function sebepAcikla(s) {
+  if (!s) return "";
+  const kod = (s.match(/code: (\d+)/) || [])[1];
+  if (/Layer4 timeout/.test(s)) return "porta bağlanırken zaman aşımı (sunucu yanıt vermedi)";
+  if (/Layer4 connection problem/.test(s)) return "porta bağlanılamadı (kapalı ya da bağlantıyı reddediyor)";
+  if (/Layer7 wrong status/.test(s)) return `sağlık kontrolü beklenmeyen yanıt aldı${kod ? ` (${kod})` : ""}`;
+  if (/Layer7 timeout/.test(s)) return "sağlık kontrolü zamanında yanıt alamadı";
+  if (/Layer6|SSL/.test(s)) return "SSL/TLS el sıkışması başarısız";
+  if (/invalid response/.test(s)) return "sağlık kontrolü geçersiz yanıt aldı";
+  if (/Socket error/.test(s)) return "bağlantı hatası";
+  if (/check passed/.test(s)) return "sağlık kontrolü geçti";
+  return s;
+}
+const OLAY_TUR = {
+  down: ["düştü", C.bad], up: ["geri geldi", C.ok], maint: ["bakıma alındı", C.maint], drain: ["boşaltmaya alındı", C.maint],
+  noserver: ["çalışan sunucusu kalmadı", C.bad], start: ["HAProxy başladı ya da yeniden yüklendi", C.info], stop: ["HAProxy durduruldu", C.warn],
+};
+function olayYazi(o) {
+  if (o.type === "start" || o.type === "stop") return OLAY_TUR[o.type][0];
+  if (o.type === "noserver") return `${o.backend}: çalışan sunucusu kalmadı`;
+  const kalan = o.type === "down" && o.left >= 0 ? (o.left === 0 ? " Backend'de çalışan sunucu kalmadı." : ` Backend'de ${o.left} çalışan sunucu kaldı.`) : "";
+  return `${o.server} (${o.backend}) ${OLAY_TUR[o.type]?.[0] || o.type}${o.reason && o.type !== "up" ? `: ${sebepAcikla(o.reason)}` : ""}.${kalan}`;
+}
+
+const medyan = (a) => {
+  if (!a.length) return 0;
+  const s = [...a].sort((x, y) => x - y);
+  return s[Math.floor(s.length / 2)];
+};
+// Koşulu sağlayan ardışık dilimleri gruplar; aradaki tek dilimlik boşluk grubu bölmez
+function dilimGruplari(seri, kosul) {
+  const g = [];
+  let cur = null;
+  seri.forEach((d, i) => {
+    if (kosul(d)) {
+      if (cur && i - cur.son <= 2) cur.son = i;
+      else { cur = { bas: i, son: i }; g.push(cur); }
+    }
+  });
+  return g;
+}
+
+// Dilimin gerçek uzunluğu (dakika): aralık adımın katı değilse son dilim kısadır
+// "x'in %y kadarı": neredeyse hepsiyse "hepsi" yazılır ("%100,0 kadarı" garip duruyordu)
+const kadari = (pay, hepsi) => (pay > 0.9995 ? hepsi : `${fmtPct(pay)} kadarı`);
+const ilkKucuk = (t) => t.charAt(0).toLocaleLowerCase("tr-TR") + t.slice(1);
+
+const dilimDk = (res, d) => Math.max(1 / 60, Math.min(res.step, (res.to - d.t) / 60000));
+
+// Raporu düz cümlelere çevirir. Her cümle: { lvl: bad|warn|ok|info, text }
+function olayOzeti(res) {
+  const z = zamanYazici(res.from, res.to);
+  const adim = res.step * 60000;
+  // Trafik karşılaştırması dakika başına yapılır; kısa son dilim "düşüş" sayılmasın
+  const s = (res.series || []).map((d) => ({ ...d, dk: d.n / dilimDk(res, d) }));
+  const out = [];
+  if (!res.n) {
+    out.push({ lvl: "warn", text: "Bu aralıkta log'da hiç istek yok. Log o saatlerde yazılmamış, döndürülüp silinmiş ya da trafik HAProxy'ye hiç ulaşmamış olabilir (DNS, Cloudflare, ağ)." });
+    return out;
+  }
+  const e5 = res.c[3];
+
+  // 1) Sunucu hatalarının arttığı dönem
+  const oranlar = s.filter((d) => d.n >= 5).map((d) => d.c[3] / d.n).sort((a, b) => a - b);
+  const sakin = oranlar.length ? oranlar[Math.floor(oranlar.length / 4)] : 0;
+  const esik = Math.min(0.1, Math.max(0.05, sakin * 3));
+  const sorunlu = dilimGruplari(s, (d) => d.c[3] >= 3 && d.n > 0 && d.c[3] / d.n >= esik);
+  let anaDonem = null;
+  if (sorunlu.length) {
+    const top = (g) => s.slice(g.bas, g.son + 1).reduce((a, d) => a + d.c[3], 0);
+    anaDonem = sorunlu.reduce((a, g) => (top(g) > top(a) ? g : a));
+    const parca = s.slice(anaDonem.bas, anaDonem.son + 1);
+    const tepe = parca.reduce((a, d) => (d.n && d.c[3] / d.n > (a.n ? a.c[3] / a.n : -1) ? d : a), parca[0]);
+    const basT = s[anaDonem.bas].t;
+    const bitT = s[anaDonem.son].t + adim;
+    const dk = Math.round((Math.min(bitT, res.to) - basT) / 60000);
+    const basta = anaDonem.bas === 0;
+    const sonda = anaDonem.son >= s.length - 1;
+    // Dönemin dışında kalan kısmın 5xx oranı: "normalde" ne olduğu
+    const dis = s.filter((d, i) => i < anaDonem.bas || i > anaDonem.son);
+    const disN = dis.reduce((a, d) => a + d.n, 0);
+    const disOran = disN ? dis.reduce((a, d) => a + d.c[3], 0) / disN : null;
+    let t = `Sunucu hataları (5xx) ${z.kisa(basT)} ile ${z.kisa(Math.min(bitT, res.to))} arasında arttı (${sureYazi(dk)}). `
+      + `En kötü dilim ${z.kisa(tepe.t)}: 5xx oranı ${fmtPct(tepe.c[3] / tepe.n)}`
+      + (disOran == null ? "." : disOran > 0.001 ? `, bu dönemin dışında ${fmtPct(disOran)}.` : ", bu dönemin dışında neredeyse hiç yok.");
+    if (basta && sonda) t = `Sunucu hataları (5xx) aralığın tamamı boyunca yüksek: ${fmtPct(e5 / res.n)}. Ne zaman başladığını görmek için daha erken bir başlangıç seç.`;
+    else if (basta) t += " Sorun aralığın başında zaten vardı; ne zaman başladığını görmek için daha erken bir başlangıç seç.";
+    else if (sonda) t += " Aralığın sonunda hâlâ sürüyordu.";
+    if (sorunlu.length > 1) t += ` Bu aralıkta ${sorunlu.length} ayrı artış var; grafikte kırmızı alanlar.`;
+    out.push({ lvl: "bad", text: t });
+  }
+
+  // 2) Hangi backend
+  const bes = res.backends || [];
+  if (e5 > 0) {
+    const b = bes[0];
+    // Genel 5xx oranı düşükse (%1'in altı) bu bir sorun değil, bilgi: sakin bir aralıkta birkaç
+    // 502 her zaman olur ve "sorun var" gibi yazılınca yanıltıyordu
+    const onemli = anaDonem || e5 / res.n >= 0.01;
+    if (b && b.c[3] > 0) {
+      const pay = b.c[3] / e5;
+      out.push({
+        lvl: anaDonem ? "bad" : onemli ? "warn" : "info",
+        text: (onemli ? "" : `Bu aralıkta ${fmtNum(e5)} sunucu hatası (5xx) var, isteklerin ${fmtPct(e5 / res.n)} kadarı. `)
+          + `Sunucu hatalarının ${kadari(pay, "hepsi")} ${b.name} backend'inden; bu backend'in 5xx oranı ${fmtPct(b.c[3] / b.n)}.`
+          + (pay <= 0.9995 && bes[1] && bes[1].c[3] > 0 ? ` Sonra ${bes[1].name} geliyor (${fmtNum(bes[1].c[3])} hata).` : ""),
+      });
+    }
+    // Sebep: sunucu tarafında sonlandırılan istekler
+    const terms = (res.terms || []).filter((x) => x.errors > 0);
+    const hataTop = terms.reduce((a, x) => a + x.errors, 0);
+    if (terms[0] && hataTop > 0) {
+      const x = terms[0];
+      const pay = x.errors / e5;
+      out.push({ lvl: "info", text: `${pay > 0.9995 ? "Bu hataların hepsinde" : `Bu hataların ${fmtPct(pay)} kadarında`} HAProxy'nin log'a yazdığı sebep (${x.code}): ${ilkKucuk(termAcikla(x.code))}.` });
+    }
+  }
+  for (const b of bes) {
+    const ns = b.kinds?.noserver || 0;
+    if (ns > 0) out.push({ lvl: "bad", text: `${b.name} backend'inde ${fmtNum(ns)} istek, çalışan sunucu olmadığı için 503 aldı: o anda backend'in bütün sunucuları kapalıydı.` });
+  }
+
+  // 3) Sunucu olayları: her sunucunun ilk düşüşü ve sonraki geri gelişi
+  const ev = res.events || [];
+  const dusme = ev.filter((o) => o.type === "down");
+  const gorulen = new Set();
+  let yazilan = 0;
+  for (const o of dusme) {
+    const k = `${o.backend}/${o.server}`;
+    if (gorulen.has(k)) continue;
+    gorulen.add(k);
+    if (yazilan++ >= 3) continue;
+    const geri = ev.find((x) => x.type === "up" && x.backend === o.backend && x.server === o.server && x.at > o.at);
+    const once = o.at < res.from ? " Bu, seçilen aralığın başlangıcından hemen önce." : "";
+    out.push({
+      lvl: "bad",
+      text: `${o.server} (${o.backend}) ${z.sn(o.at)} itibarıyla düştü: ${sebepAcikla(o.reason) || "sebep yazılmamış"}.${once}`
+        + (geri ? ` ${z.sn(geri.at)} itibarıyla geri geldi.` : " Aralığın sonuna kadar geri gelmedi."),
+    });
+  }
+  if (gorulen.size > 3) out.push({ lvl: "warn", text: `${gorulen.size - 3} sunucu daha düştü; aşağıdaki olay listesinde.` });
+  const basla = ev.filter((o) => o.type === "start");
+  if (basla.length) out.push({ lvl: "info", text: `HAProxy ${basla.map((o) => z.sn(o.at)).join(", ")} itibarıyla başladı ya da yeniden yüklendi (reload).` });
+
+  // 4) Trafik düşüşü: istekler HAProxy'ye hiç ulaşmamış olabilir
+  const nler = s.map((d) => d.dk);
+  const nMed = medyan(nler);
+  if (nMed * res.step >= 20) {
+    const dusuk = dilimGruplari(s, (d) => d.dk < nMed * 0.25);
+    const g = dusuk.reduce((a, x) => (!a || x.son - x.bas > a.son - a.bas ? x : a), null);
+    if (g) {
+      const parca = s.slice(g.bas, g.son + 1);
+      const ort = parca.reduce((a, d) => a + d.dk, 0) / parca.length;
+      const basT = s[g.bas].t;
+      const bitT = Math.min(s[g.son].t + adim, res.to);
+      out.push({
+        lvl: "warn",
+        text: (ort < 0.5 ? `${z.kisa(basT)} ile ${z.kisa(bitT)} arasında log'da hiç istek yok` : `Trafik ${z.kisa(basT)} ile ${z.kisa(bitT)} arasında normalin ${fmtPct(ort / nMed)} kadarına düştü`)
+          + ". İstekler HAProxy'ye ulaşmamış olabilir: DNS, Cloudflare, ağ ya da HAProxy'nin kendisi. Log'un o saatlerde yazılıp yazılmadığına da bak.",
+      });
+    }
+  }
+
+  // 5) Yavaşlama
+  const p95ler = s.filter((d) => d.n >= 5 && d.p95 >= 0).map((d) => d.p95);
+  const pMed = medyan(p95ler);
+  const yavas = dilimGruplari(s, (d) => d.n >= 5 && d.p95 > Math.max(1000, pMed * 3));
+  if (yavas.length) {
+    const g = yavas.reduce((a, x) => (x.son - x.bas > a.son - a.bas ? x : a));
+    const parca = s.slice(g.bas, g.son + 1);
+    const tepe = parca.reduce((a, d) => (d.p95 > a.p95 ? d : a), parca[0]);
+    out.push({
+      lvl: "warn",
+      text: `Yanıtlar ${z.kisa(s[g.bas].t)} ile ${z.kisa(Math.min(s[g.son].t + adim, res.to))} arasında yavaşladı: en yavaş dilimde (${z.kisa(tepe.t)}) isteklerin %95'i ${fmtMs(tepe.p95)} içinde yanıtlandı, normalde ${fmtMs(pMed)}.`,
+    });
+  }
+
+  if (!out.some((x) => x.lvl === "bad" || x.lvl === "warn")) {
+    out.unshift({
+      lvl: "ok",
+      text: `Bu aralıkta belirgin bir sorun görünmüyor: 5xx oranı ${fmtPct(e5 / res.n)}, trafikte düşüş yok, sunucu düşmesi yok. Sorun HAProxy'ye ulaşmadan (DNS, Cloudflare) ya da uygulamanın içinde (200 dönüp yanlış içerik vermek gibi) olmuş olabilir.`,
+    });
+  }
+  if (res.truncated) out.push({ lvl: "warn", text: res.note });
+  return { cumleler: out, anaDonem, sorunlu };
+}
+
+// Bir satırdan "Log'da ara" bölümünü bu aralıkla doldurup aramayı başlatır
+function logdaGor(res, alanlar) {
+  window.dispatchEvent(new CustomEvent("hl-ara", { detail: { ...alanlar, from: res.from, to: res.to } }));
+}
+
+function SinifSayilari({ c, n }) {
+  return (
+    <span className="inline-flex flex-wrap gap-1.5 justify-end">
+      {c[3] > 0 && <span className="text-xs rounded px-1.5 tnum nw" style={{ background: C.panel2, color: C.bad }} title="Sunucu hatası (5xx)">5xx {fmtNum(c[3])}</span>}
+      {c[2] > 0 && <span className="text-xs rounded px-1.5 tnum nw" style={{ background: C.panel2, color: C.warn }} title="İstemci hatası (4xx)">4xx {fmtNum(c[2])}</span>}
+      {n != null && <span className="tnum nw text-sm" style={{ color: C.muted, minWidth: "4.5ch", textAlign: "right" }}>{fmtNum(n)}</span>}
+    </span>
+  );
+}
+
+function KucukBtn({ children, onClick }) {
+  return (
+    <button type="button" onClick={onClick} className="text-xs underline nw" style={{ color: C.info }}>{children}</button>
+  );
+}
+
+function OlayGrafik({ res, sorunlu, onSec }) {
+  const z = zamanYazici(res.from, res.to);
+  const adim = res.step;
+  const veri = (res.series || []).map((d) => ({
+    t: d.t,
+    ...Object.fromEntries(["2xx", "3xx", "4xx", "5xx", "Diğer"].map((k, i) => [k, d.c[i] / dilimDk(res, d)])),
+    Ortalama: d.avg >= 0 ? d.avg : null, "%95": d.p95 >= 0 ? d.p95 : null,
+  }));
+  const [sec, setSec] = useState(null);
+  const tick = { fill: C.faint, fontSize: 11 };
+  const seriler = [["2xx", "Başarılı", C.ok], ["3xx", "Yönlendirme", C.info], ["4xx", "İstemci hatası", C.warn], ["5xx", "Sunucu hatası", C.bad], ["Diğer", "Yanıtsız", C.faint]];
+  const adimMs = adim * 60000;
+  const bitir = () => {
+    if (sec && sec.a != null && sec.b != null && sec.a !== sec.b) {
+      const a = Math.min(sec.a, sec.b);
+      const b = Math.max(sec.a, sec.b) + adimMs;
+      onSec(a, Math.min(b, res.to));
+    }
+    setSec(null);
+  };
+  const ortak = {
+    data: veri, margin: { top: 6, right: 6, left: -14, bottom: 0 },
+    onMouseDown: (e) => e && e.activeLabel != null && setSec({ a: e.activeLabel, b: null }),
+    onMouseMove: (e) => sec && e && e.activeLabel != null && setSec({ ...sec, b: e.activeLabel }),
+    onMouseUp: bitir,
+  };
+  const eksen = <XAxis dataKey="t" type="number" scale="time" domain={["dataMin", "dataMax"]} tickFormatter={z.eksen} tick={tick} tickLine={false} axisLine={false} minTickGap={48} />;
+  const isaret = (sorunlu || []).map((g, i) => (
+    <ReferenceArea key={i} x1={veri[g.bas]?.t} x2={veri[Math.min(g.son + 1, veri.length - 1)]?.t} fill={C.bad} fillOpacity={0.12} stroke="none" ifOverflow="hidden" />
+  ));
+  const secim = sec && sec.b != null ? <ReferenceArea x1={sec.a} x2={sec.b} fill={C.info} fillOpacity={0.18} stroke={C.info} strokeOpacity={0.5} /> : null;
+  const olaylar = (res.events || []).filter((o) => o.at >= res.from && (o.type === "down" || o.type === "noserver" || o.type === "start"));
+  const olayCizgi = olaylar.slice(0, 40).map((o, i) => (
+    <ReferenceLine key={i} x={Math.floor((o.at - res.from) / adimMs) * adimMs + res.from} stroke={OLAY_TUR[o.type][1]} strokeDasharray="3 3" strokeOpacity={0.8} ifOverflow="hidden" />
+  ));
+  const Legend = ({ items }) => (
+    <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs" style={{ color: C.muted }}>
+      {items.map(([n, col, kesik]) => (
+        <span key={n} className="inline-flex items-center gap-2"><span style={{ width: 10, height: kesik ? 0 : 3, borderTop: kesik ? `2px dashed ${col}` : "none", background: kesik ? "none" : col, borderRadius: 2 }} />{n}</span>
+      ))}
+    </div>
+  );
+  const birimNot = adim === 1 ? "Her nokta bir dakika." : `Her nokta ${adim} dakika; değer o dilimin dakika ortalaması.`;
+  return (
+    <div className="grid gap-4 md:grid-cols-2 mt-4" style={{ userSelect: "none" }}>
+      <Panel title="Dakikadaki istek, yanıt türüne göre"
+        note={`${birimNot} Kırmızı alanlar sunucu hatalarının arttığı dönem, kesikli çizgiler sunucu olayları. Bir bölümü fareyle sürükleyerek seçersen o aralık incelenir.`}>
+        <ResponsiveContainer width="100%" height={220}>
+          <AreaChart {...ortak}>
+            <CartesianGrid stroke={C.line} vertical={false} />
+            {eksen}
+            <YAxis tick={tick} tickLine={false} axisLine={false} width={48} />
+            <Tooltip cursor={{ stroke: C.faint }} content={<ChartTip birim={(v) => `${fmtRate(v)} istek/dk`} toplamGoster etiketYaz={z.kisa} />} />
+            {isaret}
+            {olayCizgi}
+            {seriler.map(([key, name, col]) => (
+              <Area key={key} type="monotone" dataKey={key} name={name} stackId="1" stroke={col} strokeWidth={1} fill={col} fillOpacity={0.55} isAnimationActive={false} dot={false} />
+            ))}
+            {secim}
+          </AreaChart>
+        </ResponsiveContainer>
+        <Legend items={[...seriler.map(([, n, c]) => [n, c]), ["Sunucu olayı", C.bad, true]]} />
+      </Panel>
+      <Panel title="Yanıt süresi" note={`${birimNot} Ortalama ve %95: isteklerin %95'i bu süreden kısa sürede yanıtlandı. Süre, isteğin HAProxy'ye gelişinden yanıtın bitişine kadar.`}>
+        <ResponsiveContainer width="100%" height={220}>
+          <AreaChart {...ortak}>
+            <CartesianGrid stroke={C.line} vertical={false} />
+            {eksen}
+            {/* Eksende kısa yazım ("30 sn", "500 ms"); "30,0 sn" dar eksene sığmayıp kesiliyordu */}
+            <YAxis tick={tick} tickLine={false} axisLine={false} width={56} tickFormatter={(v) => (v >= 1000 ? `${trDec(v / 1000, v % 1000 ? 1 : 0)} sn` : `${Math.round(v)} ms`)} />
+            <Tooltip cursor={{ stroke: C.faint }} content={<ChartTip birim={(v) => fmtMs(v)} etiketYaz={z.kisa} />} />
+            {isaret}
+            {olayCizgi}
+            <Area type="monotone" dataKey="%95" name="%95" stroke={C.warn} fill={C.warn} fillOpacity={0.12} isAnimationActive={false} dot={false} connectNulls={false} />
+            <Area type="monotone" dataKey="Ortalama" stroke={C.info} fill={C.info} fillOpacity={0.12} isAnimationActive={false} dot={false} connectNulls={false} />
+            {secim}
+          </AreaChart>
+        </ResponsiveContainer>
+        <Legend items={[["Ortalama", C.info], ["%95", C.warn]]} />
+      </Panel>
+    </div>
+  );
+}
+
+function OlayBackendler({ res }) {
+  const [acik, setAcik] = useState(() => new Set());
+  const bes = res.backends || [];
+  if (!bes.length) return null;
+  const z = zamanYazici(res.from, res.to);
+  const ac = (ad) => setAcik((s) => { const n = new Set(s); if (n.has(ad)) n.delete(ad); else n.add(ad); return n; });
+  return (
+    <Panel title="Backend'ler" note="Bu aralıkta log'da görünen her backend. Sunucu hatası en çok olan üstte. Satıra tıkla: sunucular ve HAProxy'nin isteği neden kestiği açılır.">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm" style={{ minWidth: 560 }}>
+          <thead>
+            <tr className="text-xs text-left" style={{ color: C.muted }}>
+              <th className="py-2 pr-3 font-normal">Backend</th>
+              <th className="py-2 pr-3 font-normal text-right">İstek</th>
+              <th className="py-2 pr-3 font-normal text-right">5xx</th>
+              <th className="py-2 pr-3 font-normal text-right">4xx</th>
+              <th className="py-2 pr-3 font-normal text-right"><Term k="ns_olay">Sunucu yok</Term></th>
+              <th className="py-2 pr-3 font-normal text-right">Ort. süre</th>
+              <th className="py-2 font-normal text-right">%95 süre</th>
+            </tr>
+          </thead>
+          <tbody>
+            {bes.map((b) => {
+              const o = acik.has(b.name);
+              const ns = b.kinds?.noserver || 0;
+              return (
+                <Fragment key={b.name}>
+                  <tr className="hl-row cursor-pointer" style={{ borderTop: `1px solid ${C.line}` }} onClick={() => ac(b.name)}>
+                    <td className="py-2 pr-3 brk">
+                      <span className="inline-flex items-center gap-1.5">
+                        {o ? <ChevronDown size={14} style={{ color: C.faint, flexShrink: 0 }} /> : <ChevronRight size={14} style={{ color: C.faint, flexShrink: 0 }} />}
+                        <span className="brk">{b.name}</span>
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3 text-right tnum">{fmtNum(b.n)}</td>
+                    <td className="py-2 pr-3 text-right tnum nw" style={{ color: b.c[3] ? C.bad : C.faint }}>{b.c[3] ? <>{fmtNum(b.c[3])} <span className="text-xs">({fmtPct(b.c[3] / b.n)})</span></> : "0"}</td>
+                    <td className="py-2 pr-3 text-right tnum" style={{ color: b.c[2] ? C.warn : C.faint }}>{fmtNum(b.c[2])}</td>
+                    <td className="py-2 pr-3 text-right tnum" style={{ color: ns ? C.bad : C.faint }}>{fmtNum(ns)}</td>
+                    <td className="py-2 pr-3 text-right tnum nw">{b.avg >= 0 ? fmtMs(b.avg) : "—"}</td>
+                    <td className="py-2 text-right tnum nw">{b.p95 >= 0 ? fmtMs(b.p95) : "—"}</td>
+                  </tr>
+                  {o && (
+                    <tr>
+                      <td colSpan={7} className="pb-4 pt-1 pl-5">
+                        {b.c[3] > 0 && b.first5xx > 0 && (
+                          <p className="text-xs mb-2" style={{ color: C.muted }}>
+                            İlk sunucu hatası {z.sn(b.first5xx)}, son sunucu hatası {z.sn(b.last5xx)}.
+                          </p>
+                        )}
+                        {(b.servers || []).length > 0 && (
+                          <table className="w-full text-xs mb-3">
+                            <thead>
+                              <tr style={{ color: C.faint }}>
+                                <th className="py-1 pr-3 font-normal text-left">Sunucu</th>
+                                <th className="py-1 pr-3 font-normal text-right">İstek</th>
+                                <th className="py-1 pr-3 font-normal text-right">5xx</th>
+                                <th className="py-1 pr-3 font-normal text-right">Ort. süre</th>
+                                <th className="py-1 pr-3 font-normal text-right">%95</th>
+                                <th className="py-1 font-normal text-right">En uzun</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {b.servers.map((s) => (
+                                <tr key={s.name} style={{ borderTop: `1px solid ${C.line}` }}>
+                                  <td className="py-1 pr-3 brk">{s.name}</td>
+                                  <td className="py-1 pr-3 text-right tnum">{fmtNum(s.n)}</td>
+                                  <td className="py-1 pr-3 text-right tnum nw" style={{ color: s.c[3] ? C.bad : C.faint }}>{fmtNum(s.c[3])}{s.c[3] ? ` (${fmtPct(s.c[3] / s.n)})` : ""}</td>
+                                  <td className="py-1 pr-3 text-right tnum nw">{s.avg >= 0 ? fmtMs(s.avg) : "—"}</td>
+                                  <td className="py-1 pr-3 text-right tnum nw">{s.p95 >= 0 ? fmtMs(s.p95) : "—"}</td>
+                                  <td className="py-1 text-right tnum nw">{s.max >= 0 ? fmtMs(s.max) : "—"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                        {(b.terms || []).length > 0 && (
+                          <div className="text-xs mb-3">
+                            <div className="mb-1" style={{ color: C.faint }}>HAProxy'nin isteği normal bitirmediği durumlar:</div>
+                            <ul>
+                              {b.terms.map((x) => (
+                                <li key={x.code} className="flex items-baseline justify-between gap-3 py-0.5">
+                                  <span><b className="tnum" style={{ color: termRenk(x.code) }}>{x.code}</b> <span style={{ color: C.muted }}>{termAcikla(x.code)}</span></span>
+                                  <span className="tnum nw" style={{ color: C.muted }}>{fmtNum(x.n)}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        <div className="flex flex-wrap gap-4">
+                          {b.c[3] > 0 && <KucukBtn onClick={() => logdaGor(res, { backend: b.name, status: "5xx" })}>Bu backend'in 5xx isteklerini log'da gör</KucukBtn>}
+                          <KucukBtn onClick={() => logdaGor(res, { backend: b.name })}>Bu backend'in bütün isteklerini log'da gör</KucukBtn>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
+
+function OlaySonuc({ res, onSec }) {
+  const z = zamanYazici(res.from, res.to);
+  const { cumleler, sorunlu } = useMemo(() => olayOzeti(res), [res]);
+  const renk = { bad: C.bad, warn: C.warn, ok: C.ok, info: C.info };
+  const ns = res.kinds?.noserver || 0;
+  const terms = (res.terms || []).filter((x) => x.n > 0);
+  const olaylar = res.events || [];
+  return (
+    <div className="mt-5">
+      <p className="text-sm mb-3" style={{ color: C.muted }}>
+        <b style={{ color: C.text }}>{z.aralik()}</b> · {fmtNum(res.n)} istek
+      </p>
+      <div className="flex flex-col gap-2">
+        {cumleler.map((x, i) => (
+          <div key={i} className="rounded-md px-4 py-3 text-sm leading-relaxed" style={{ background: C.panel2, boxShadow: `inset 3px 0 0 ${renk[x.lvl]}` }}>{x.text}</div>
+        ))}
+      </div>
+
+      {res.n > 0 && (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-px mt-4 rounded-md overflow-hidden" style={{ background: C.line, border: `1px solid ${C.line}` }}>
+            {[
+              ["Toplam istek", fmtNum(res.n), C.text],
+              ["Başarılı (2xx/3xx)", fmtPct((res.c[0] + res.c[1]) / res.n), C.ok],
+              ["İstemci hatası (4xx)", fmtNum(res.c[2]), res.c[2] ? C.warn : C.text],
+              ["Sunucu hatası (5xx)", `${fmtNum(res.c[3])} · ${fmtPct(res.c[3] / res.n)}`, res.c[3] ? C.bad : C.text],
+              ["Çalışan sunucu yok (503)", fmtNum(ns), ns ? C.bad : C.text],
+              ["Yanıt süresi ort. / %95", `${fmtMs(res.avg)} / ${fmtMs(res.p95)}`, C.text],
+            ].map(([k, v, col]) => (
+              <div key={k} className="px-3 py-2.5 hl-hucre" style={{ background: C.panel }}>
+                <div className="hl-etiket" style={{ color: C.muted }}>{k}</div>
+                <div className="hl-deger tnum" style={{ color: col, fontSize: "clamp(0.95rem,11cqi,1.25rem)" }}>{v}</div>
+              </div>
+            ))}
+          </div>
+
+          <OlayGrafik res={res} sorunlu={sorunlu} onSec={onSec} />
+
+          {olaylar.length > 0 && (
+            <div className="mt-4">
+              <Panel title="Log'daki sunucu olayları" note="HAProxy'nin sağlık kontrolü sonuçları ve yeniden yüklemeler. Aralığın 5 dakika öncesi de dahil, çünkü sebep çoğu zaman hemen öncesindedir.">
+                <ul className="text-sm max-h-72 overflow-auto">
+                  {olaylar.map((o, i) => (
+                    <li key={i} className="flex gap-3 py-1.5" style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
+                      <span className="tnum nw text-xs pt-0.5" style={{ color: o.at < res.from ? C.faint : C.muted, minWidth: "8ch" }}>{z.sn(o.at)}</span>
+                      <span style={{ width: 8, height: 8, borderRadius: 99, background: OLAY_TUR[o.type]?.[1] || C.faint, marginTop: 6, flexShrink: 0 }} />
+                      <span className="brk">{olayYazi(o)}</span>
+                    </li>
+                  ))}
+                </ul>
+                {res.eventsCut && <p className="text-xs mt-2" style={{ color: C.warn }}>Çok fazla olay var; ilk 500 tanesi gösteriliyor.</p>}
+              </Panel>
+            </div>
+          )}
+
+          <div className="mt-4"><OlayBackendler res={res} /></div>
+
+          {terms.length > 0 && (
+            <div className="mt-4">
+              <Panel title="HAProxy isteği neden kesti" note="Normal bitmeyen istekler, log'daki sonlandırma koduna göre. İlk harf kimin yüzünden (S sunucu, C kullanıcı, P kural), ikinci harf hangi aşamada bittiğini söyler. Kırmızılar sunucu ya da HAProxy tarafı, soluklar kullanıcı tarafı.">
+                <ul className="text-sm">
+                  {terms.slice(0, 12).map((x, i) => (
+                    <li key={x.code} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2" style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
+                      <span className="min-w-0 flex-1" style={{ minWidth: "16rem" }}>
+                        <b className="tnum mr-2" style={{ color: termRenk(x.code) }}>{x.code}</b>
+                        {termAcikla(x.code)}
+                        {x.backend && <span className="block text-xs mt-0.5" style={{ color: C.faint }}>En çok: {x.backend}</span>}
+                      </span>
+                      <span className="tnum nw text-sm" style={{ color: C.muted }}>
+                        {fmtNum(x.n)} istek{x.errors > 0 && <span style={{ color: C.bad }}> · {fmtNum(x.errors)} hata</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </Panel>
+            </div>
+          )}
+
+          <div className="grid gap-4 lg:grid-cols-2 mt-4">
+            <Panel title="En çok hata alan adresler" note="Sunucu hatası (5xx) en çok olan üstte. Satırdan aynı aralıkta log'daki isteklere geçebilirsin.">
+              {(res.errorPaths || []).length === 0 ? <p className="text-sm" style={{ color: C.muted }}>Bu aralıkta hata alan adres yok.</p> : (
+                <ul className="text-sm">
+                  {res.errorPaths.map((y, i) => (
+                    <li key={`${y.method} ${y.path} ${y.backend}`} className="py-2 hl-satir" style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
+                      <div className="flex items-start justify-between gap-3 hl-yigin">
+                        <YontemYol method={y.method} path={y.path} alt={y.backend} />
+                        <SinifSayilari c={y.c} n={y.n} />
+                      </div>
+                      {y.path !== otherKeyUI && <div className="mt-1"><KucukBtn onClick={() => logdaGor(res, { path: y.path, method: y.method, exact: true, status: y.c[3] ? "5xx" : "" })}>Log'da gör</KucukBtn></div>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
+            <Panel title="En çok istenen adresler" note="Bu aralıkta en çok istek alan adresler, aldıkları hatalarla.">
+              <ul className="text-sm">
+                {(res.topPaths || []).map((y, i) => (
+                  <li key={`${y.method} ${y.path} ${y.backend}`} className="py-2 hl-satir" style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
+                    <div className="flex items-start justify-between gap-3 hl-yigin">
+                      <YontemYol method={y.method} path={y.path} alt={y.backend} />
+                      <SinifSayilari c={y.c} n={y.n} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2 mt-4">
+            <Panel title="En çok istek atan IP'ler" note="Bir saldırı ya da tek bir istemcinin aşırı yükü sorunu başlatmış olabilir mi? Cloudflare'den gelenlerde IP Cloudflare'e aittir.">
+              <ul className="text-sm">
+                {(res.ips || []).map((c, i) => (
+                  <li key={c.ip} className="flex items-baseline justify-between gap-3 py-1.5 hl-satir" style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
+                    <span className="min-w-0">
+                      {c.ip === otherKeyUI ? <span style={{ color: C.faint }}>diğer IP'ler</span> : <IPAg ip={c.ip} ag={agAdi(c)} />}
+                    </span>
+                    <span className="inline-flex items-baseline gap-3">
+                      {c.ip !== otherKeyUI && <span className="hidden sm:inline"><KucukBtn onClick={() => logdaGor(res, { ip: c.ip })}>Log'da gör</KucukBtn></span>}
+                      <SinifSayilari c={c.c} n={c.n} />
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+            {(res.hosts || []).length > 0 ? (
+              <Panel title="Alan adları" note={`Alan adı log'daki isteklerin ${fmtPct(res.hostLines / res.n)} kadarında var. Sunucu hatası en çok olan üstte.`}>
+                <ul className="text-sm">
+                  {res.hosts.map((h, i) => (
+                    <li key={h.name} className="flex items-baseline justify-between gap-3 py-1.5" style={{ borderTop: i ? `1px solid ${C.line}` : "none" }}>
+                      <span className="brk">{h.name === otherKeyUI ? <span style={{ color: C.faint }}>diğer alan adları</span> : h.name}</span>
+                      <SinifSayilari c={h.c} n={h.n} />
+                    </li>
+                  ))}
+                </ul>
+              </Panel>
+            ) : (
+              <Panel title="Yanıt kodları" note="Bu aralıkta dönen bütün kodlar.">
+                <div className="flex flex-wrap gap-1.5">
+                  {(res.codes || []).map((c) => <CodeChip key={c.code} code={c.code <= 0 ? 0 : c.code} n={c.n} />)}
+                </div>
+              </Panel>
+            )}
+          </div>
+          {(res.hosts || []).length > 0 && (
+            <div className="mt-4">
+              <Panel title="Yanıt kodları" note="Bu aralıkta dönen bütün kodlar.">
+                <div className="flex flex-wrap gap-1.5">
+                  {(res.codes || []).map((c) => <CodeChip key={c.code} code={c.code <= 0 ? 0 : c.code} n={c.n} />)}
+                </div>
+              </Panel>
+            </div>
+          )}
+        </>
+      )}
+
+      <p className="text-xs mt-4 leading-relaxed" style={{ color: C.faint }}>
+        {fmtNum(res.scanned)} satır okundu ({(res.files || []).join(", ") || "dosya yok"}), {fmtNum(res.took)} ms.
+        {res.skipped > 0 && <> {res.skipped} eski dosya aralığın dışında kaldığı için açılmadı.</>}
+        {res.unparsed > 0 && <> {fmtNum(res.unparsed)} trafik satırı okunamadı.</>}
+        {res.tcp > 0 && <> {fmtNum(res.tcp)} TCP modu kaydı sayılmadı.</>}
+        {res.eventsUnknown && <> Log satırlarında zaman damgası olmadığı için sunucu olayları gösterilemiyor.</>}
+        {" "}Sunucu düşme olayları yalnızca log'a yazılıyorsa görünür (HAProxy bunları "notice" seviyesinde yazar; sağlık kontrolü olmayan sunucularda hiç yazmaz).
+      </p>
+    </div>
+  );
+}
+const otherKeyUI = "(diğer)";
+
+function IncidentSection({ inputRef }) {
+  const simdi = () => Date.now();
+  const [form, setForm] = useState(() => ({ from: yerelGiris(simdi() - 3600e3), to: yerelGiris(simdi()) }));
+  const [durum, setDurum] = useState("hazir");
+  const [res, setRes] = useState(null);
+  const [hata, setHata] = useState("");
+
+  const incele = async (f = form) => {
+    const a = girisMs(f.from);
+    const b = girisMs(f.to);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) { setHata("Başlangıç ve bitiş saatini seç."); setDurum("hata"); return; }
+    if (b <= a) { setHata("Bitiş, başlangıçtan sonra olmalı."); setDurum("hata"); return; }
+    if (b - a > 7 * 86400e3) { setHata("Aralık en fazla 7 gün olabilir."); setDurum("hata"); return; }
+    setDurum("inceleniyor");
+    setHata("");
+    try {
+      const r = await fetch(`/api/incident?from=${a}&to=${b}`, { cache: "no-store" });
+      const j = await r.json();
+      if (j.error) { setHata(j.error); setDurum("hata"); return; }
+      setRes(j);
+      setDurum("bitti");
+    } catch (err) {
+      setHata("İnceleme yapılamadı: " + err.message);
+      setDurum("hata");
+    }
+  };
+  const hizli = (dk) => {
+    const f = { from: yerelGiris(simdi() - dk * 60000), to: yerelGiris(simdi()) };
+    setForm(f);
+    incele(f);
+  };
+  const dun = () => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    const f = { from: yerelGiris(d.getTime() - 86400e3), to: yerelGiris(d.getTime()) };
+    setForm(f);
+    incele(f);
+  };
+  const sec = (a, b) => {
+    const f = { from: yerelGiris(a), to: yerelGiris(b) };
+    setForm(f);
+    document.getElementById("incident")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    incele(f);
+  };
+
+  const alan = { background: C.bg, border: `1px solid ${C.line}`, color: C.text, borderRadius: 6, padding: "6px 10px", colorScheme: "dark" };
+  return (
+    <section id="incident" className="mt-12">
+      <SectionTitle title="Olay incelemesi"
+        sub="Bir sorunun yaşandığı zaman aralığını seç: o aralıkta ne kadar istek geldiği, hangi kodların döndüğü, hangi backend'de sorun olduğu, sunucuların ne zaman düşüp kalktığı ve HAProxy'nin isteği neden kestiği log dosyalarından çıkarılır. Panelin saklama süresine takılmaz; log ne kadar geriye gidiyorsa oraya kadar bakılabilir." />
+      <Panel>
+        <form onSubmit={(e) => { e.preventDefault(); incele(); }} className="flex flex-wrap items-end gap-3">
+          <label className="text-sm">
+            <div className="text-xs mb-1" style={{ color: C.muted }}>Başlangıç</div>
+            <input ref={inputRef} type="datetime-local" value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value })} style={alan} />
+          </label>
+          <label className="text-sm">
+            <div className="text-xs mb-1" style={{ color: C.muted }}>Bitiş</div>
+            <input type="datetime-local" value={form.to} onChange={(e) => setForm({ ...form, to: e.target.value })} style={alan} />
+          </label>
+          <button type="submit" disabled={durum === "inceleniyor"} className="rounded-md px-4 py-2 text-sm"
+            style={{ background: C.info, color: C.bg, opacity: durum === "inceleniyor" ? 0.6 : 1 }}>
+            {durum === "inceleniyor" ? "İnceleniyor..." : "İncele"}
+          </button>
+        </form>
+        <div className="flex flex-wrap gap-2 mt-3">
+          {OLAY_HIZLI.map(([dk, t]) => (
+            <button key={dk} type="button" onClick={() => hizli(dk)} className="rounded-md px-2.5 py-1 text-xs" style={{ color: C.muted, border: `1px solid ${C.line}` }}>{t}</button>
+          ))}
+          <button type="button" onClick={dun} className="rounded-md px-2.5 py-1 text-xs" style={{ color: C.muted, border: `1px solid ${C.line}` }}>Dün (bütün gün)</button>
+        </div>
+        <p className="text-xs mt-3" style={{ color: C.faint }}>
+          İpucu: sorunun yaşandığı saatin biraz öncesinden başlat. Sorunsuz dönemle karşılaştırınca neyin değiştiği daha kolay görünür.
+        </p>
+        {durum === "hata" && <p className="text-sm mt-3" style={{ color: C.warn }}>{hata}</p>}
+        {durum === "inceleniyor" && (
+          <p className="text-sm mt-3" style={{ color: C.muted }}>
+            Log dosyaları okunuyor. Uzun aralıklarda bu biraz sürebilir; inceleme en fazla 1 dakika çalışır.
+          </p>
+        )}
+        {durum === "bitti" && res && <OlaySonuc res={res} onSec={sec} />}
+      </Panel>
+    </section>
   );
 }
 
@@ -2426,6 +3189,11 @@ export default function App() {
     return n;
   });
   const searchRef = useRef(null);
+  const incidentRef = useRef(null);
+  const goIncident = () => {
+    document.getElementById("incident")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setTimeout(() => incidentRef.current?.focus(), 400);
+  };
   const goSearch = () => {
     document.getElementById("search")?.scrollIntoView({ behavior: "smooth", block: "start" });
     setTimeout(() => searchRef.current?.focus(), 400);
@@ -2448,7 +3216,7 @@ export default function App() {
     <div className="hl-root" style={{ background: C.bg, color: C.text, minHeight: "100vh" }}>
       <style>{CSS}</style>
       <div className="max-w-6xl mx-auto px-4 py-6 md:px-8 md:py-8">
-        <Header info={cur?.info} running={running} onToggleRun={() => setRunning((r) => !r)} ok={!problem} lastAt={cur?.at} agentVersion={cfg?.version} onSearch={goSearch} />
+        <Header info={cur?.info} running={running} onToggleRun={() => setRunning((r) => !r)} ok={!problem} lastAt={cur?.at} agentVersion={cfg?.version} onSearch={goSearch} onIncident={goIncident} />
         {problem && (
           <div className="mt-6 rounded-md px-4 py-3 text-sm leading-relaxed" style={{ background: C.panel, boxShadow: `inset 3px 0 0 ${C.bad}` }}>
             <div>{problem}</div>
@@ -2475,6 +3243,7 @@ export default function App() {
             <BackendList model={model} rates={rates} expanded={expanded} onToggle={toggle} onFields={setFieldsRow} />
 
             <LogSection logs={logs} minutes={minutes} />
+            <IncidentSection inputRef={incidentRef} />
             <SearchSection inputRef={searchRef} />
 
             <SectionTitle title="Frontend'ler" sub="Kullanıcıların bağlandığı giriş noktaları." />

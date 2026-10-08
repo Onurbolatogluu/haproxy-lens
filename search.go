@@ -360,7 +360,8 @@ func (t *aramaToplayici) bitir() {
 
 // Aynı anda ikinci bir arama gelirse beklemez; kuyruğa giren her arama 1 dakikaya
 // kadar bağlantı tutup paneli yavaşlatıyordu.
-var ErrAramaSuruyor = fmt.Errorf("başka bir arama sürüyor; birkaç saniye sonra tekrar deneyin")
+// Olay incelemesi de aynı kilidi kullanır; mesaj ikisini de söyler.
+var ErrAramaSuruyor = fmt.Errorf("başka bir arama ya da inceleme sürüyor; birkaç saniye sonra tekrar deneyin")
 
 // Log'da arama yapar. Panelin belleğine değil, doğrudan dosyalara bakar.
 func (a *LogAnalyzer) Search(q SearchQuery) (SearchResult, error) {
@@ -402,6 +403,8 @@ func (a *LogAnalyzer) Search(q SearchQuery) (SearchResult, error) {
 			// durup boş sonuç döndürür. Güvenlik, dosya başına iki sınırla sağlanıyor:
 			// aralık dışındaki dosya hiç açılmaz (yukarıda), açılan dosya da sondan
 			// başa okunup aralığın öncesine geçilince bırakılır.
+			// Bitişten sonra yazılmaya başlamış dosyaya bakmaya gerek yok; bunu ancak açınca
+			// anlarız, o yüzden düz dosyada ikili arama zaten bitiş noktasına atlar.
 			t.aramaDosya(f.Yol, parser, bitis)
 		}
 	}
@@ -421,8 +424,15 @@ func (t *aramaToplayici) aramaDosya(yol string, parser *LogParser, bitis time.Ti
 	}
 	// Ön eleme satırların çoğunu ayrıştırmadan atar. Zaman sınırını bilmek için
 	// zamana ihtiyaç olduğundan her 500 satırda bir örnek satır tam ayrıştırılır.
+	// Bitiş verilmişse (özel aralık) dosyanın bitişten sonraki kısmı hiç okunmaz: başlangıç
+	// noktası ikili aramayla bulunur. Dün öğleden sonrasına bakan bir arama, bugünün
+	// satırlarını tek tek geçmek zorunda kalmaz.
+	son := int64(-1)
+	if !t.q.Until.IsZero() {
+		son = bitisOfseti(yol, t.q.Until.Add(olayPay), parser)
+	}
 	n, eski := 0, 0
-	geriSatirlar(yol, func(satir string) bool {
+	geriSatirlar(yol, son, func(satir string) bool {
 		t.res.Scanned++
 		t.res.Bytes += int64(len(satir)) + 1
 		n++
@@ -440,15 +450,22 @@ func (t *aramaToplayici) aramaDosya(yol string, parser *LogParser, bitis time.Ti
 			return true
 		}
 		if !t.q.Since.IsZero() {
-			if rec.At.Before(t.q.Since) {
-				// Sondan başa okunuyor: aralığın öncesine geçilmiş olabilir. Satırlar
-				// tam sıralı olmayabileceği için birkaç örnek üst üste eski olmalı.
+			// Sondan başa okunuyor: aralığın öncesine geçilmiş olabilir. Satırlar log'a
+			// istek BİTİNCE yazılır ama zamanları isteğin başladığı andır; yani tam sıralı
+			// değiller. Uzun süren bir isteğin satırı, kendisinden sonra başlamış kısa
+			// isteklerin arkasına düşer. Eskiden aralığın başını geçen ilk örneklerde durulunca
+			// sınırdaki bu satırlar kaçabiliyordu. Artık durmak için örneklerin aralığın
+			// başından pay kadar (5 dk) daha eski olması gerekiyor.
+			if rec.At.Before(t.q.Since.Add(-olayPay)) {
 				if eski++; eski >= 3 {
 					return false
 				}
+			} else {
+				eski = 0
+			}
+			if rec.At.Before(t.q.Since) {
 				return true
 			}
-			eski = 0
 		}
 		if gecer && t.q.uyuyor(rec) {
 			t.ekle(rec)
@@ -534,7 +551,16 @@ func searchQueryFrom(get func(string) string) (SearchQuery, error) {
 		Backend: strings.TrimSpace(get("backend")),
 		Exact:   get("exact") == "1",
 	}
-	if q.bos() {
+	// Özel aralık (from/to, unix ms): olay incelemesinden ya da elle seçilen başlangıç-bitiş
+	if get("from") != "" || get("to") != "" {
+		from, to, err := incidentRange(get, time.Now())
+		if err != nil {
+			return q, err
+		}
+		q.Since, q.Until = from, to
+	}
+	// Alan boş olabilir yalnızca aralık açıkça verildiyse: "o aralıktaki bütün istekler"
+	if q.bos() && q.Until.IsZero() {
 		return q, fmt.Errorf("aranacak bir şey yazın: adres, IP, durum kodu, yöntem ya da backend")
 	}
 	if q.Method != "" {
@@ -562,7 +588,7 @@ func searchQueryFrom(get func(string) string) (SearchQuery, error) {
 			return q, fmt.Errorf("durum kodu 200 ya da 5xx biçiminde olmalı")
 		}
 	}
-	if v := get("hours"); v != "" {
+	if v := get("hours"); v != "" && q.Since.IsZero() {
 		h, err := strconv.Atoi(v)
 		if err != nil || h < 0 || h > 24*365 {
 			return q, fmt.Errorf("zaman aralığı geçersiz")
@@ -578,7 +604,8 @@ func searchQueryFrom(get func(string) string) (SearchQuery, error) {
 // sonundadır; baştan okumak, büyük bir dosyada aranan aralığa hiç ulaşamadan süre
 // sınırına takılmak demekti. Geriye okuyunca "son 1 saat" araması dosya ne kadar
 // büyük olursa olsun hızlı biter.
-func geriSatirlar(yol string, fn func(satir string) bool) error {
+// son: okumanın başlayacağı konum (bir satır sonu ya da dosya sonu); -1 ise dosyanın sonu.
+func geriSatirlar(yol string, son int64, fn func(satir string) bool) error {
 	f, err := os.Open(yol)
 	if err != nil {
 		return err
@@ -590,6 +617,9 @@ func geriSatirlar(yol string, fn func(satir string) bool) error {
 	}
 	const parca = 1 << 20
 	kalan := fi.Size()
+	if son >= 0 && son < kalan {
+		kalan = son
+	}
 	var kuyruk []byte // parçanın başındaki yarım satır
 	buf := make([]byte, parca)
 	for kalan > 0 {
@@ -635,4 +665,41 @@ func geriSatirlar(yol string, fn func(satir string) bool) error {
 		fn(string(kuyruk))
 	}
 	return nil
+}
+
+// Düz dosyada zamanı hedefi geçen satırların başladığı yerin, bir satır sonuna hizalanmış
+// konumu. Geriye okuma buradan başlar. Bulunamazsa -1 (dosyanın sonundan oku).
+func bitisOfseti(yol string, hedef time.Time, parser *LogParser) int64 {
+	if strings.HasSuffix(yol, ".gz") {
+		return -1
+	}
+	f, err := os.Open(yol)
+	if err != nil {
+		return -1
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return -1
+	}
+	zaman := func(s string) (time.Time, bool) {
+		if rec, ok := parser.Parse(s); ok {
+			return rec.At, true
+		}
+		return syslogZamani(s, time.Now())
+	}
+	_, hi := zamanOfseti(f, fi.Size(), hedef, zaman)
+	if hi >= fi.Size() {
+		return -1
+	}
+	// hi bir satırın ortasına düşebilir: o satır da okunsun diye satırın sonuna ilerle
+	if _, err := f.Seek(hi, io.SeekStart); err != nil {
+		return -1
+	}
+	r := bufio.NewReader(f)
+	satir, err := r.ReadString('\n')
+	if err != nil {
+		return -1
+	}
+	return hi + int64(len(satir))
 }
