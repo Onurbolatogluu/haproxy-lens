@@ -4,6 +4,10 @@ Her sürümün altında, o sürüme geçmek için sunucuda çalıştırılacak k
 GitHub'da release yayınlarken bu dosyadaki ilgili sürüm bölümünün tamamını (en üstteki
 sürüm numarası satırı hariç) açıklama kutusuna yapıştırmak yeterli.
 
+## 1.2.1
+
+- **Düzeltme: çok eski bir sürümden güncelleme "MEMMAX en az 128 MB büyük olmalı" diye duruyordu.** 0.12'den önceki sürümler servis dosyasına sabit bir bellek tavanı (128M ya da 256M) yazıyordu. Güncellemede "önceki ayarları koru" adımı bu sabit değeri kullanıcının seçtiği bir ayar sanıp taşıyordu; yeni sürümün 250 MB'lık bellek bütçesiyle uyuşmadığı için kurulum hiçbir şeye dokunmadan duruyordu. Artık bellek tavanı yalnızca bu ayarın seçilebildiği sürümlerden (0.12 ve sonrası) geliyorsa korunuyor; daha eski bir kurulumun sabit değeri yok sayılıyor, varsayılan 512M kullanılıyor ve kurulum bunu ekrana yazıyor. Elle verilen `MEMMAX` her zamanki gibi geçerli; çok küçük bir değer yine reddediliyor.
+
 ## 1.2.0
 
 - **Düzeltme: olay incelemesinde okunamayan kısım "trafik yok" gibi görünüyordu.** Uzun bir aralıkta (ör. 24 saat) inceleme 1 dakikalık süre sınırına takılınca yalnızca aralığın başını okuyabiliyordu; grafik ise okunmayan kısmı sıfır istek gibi çiziyordu, sanki trafik bir anda kesilmiş gibi. Artık:

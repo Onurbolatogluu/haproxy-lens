@@ -35,9 +35,17 @@ if [ -f "$UNIT" ]; then
     deger="$(eski_env LOG)"
     [ -n "$deger" ] && [ "$deger" != auto ] && { LOG="$deger"; KORUNAN="$KORUNAN LOG=$deger"; }
   fi
+  # Bellek tavanı yalnızca seçilebildiği sürümlerden (0.12 ve sonrası; bellek bütçesiyle
+  # birlikte geldi) korunur. Daha eski sürümler sabit 128M/256M yazıyordu; bu değer kullanıcının
+  # seçimi değildir ve yeni sürümün bütçesiyle uyuşmaz (güncelleme "MEMMAX en az 128 MB büyük
+  # olmalı" diye duruyordu). Öyle bir kurulumda varsayılan kullanılır.
   if [ -z "${MEMMAX+x}" ]; then
     deger="$(sed -n 's/^MemoryMax=\(.*\)$/\1/p' "$UNIT" | head -1)"
-    [ -n "$deger" ] && { MEMMAX="$deger"; KORUNAN="$KORUNAN MEMMAX=$deger"; }
+    if [ -n "$deger" ] && [ -n "$(eski_env BUDGET)" ]; then
+      MEMMAX="$deger"; KORUNAN="$KORUNAN MEMMAX=$deger"
+    elif [ -n "$deger" ]; then
+      ESKI_TAVAN="$deger"
+    fi
   fi
   # Panel adresi ve portu: ExecStart'taki -listen değerinden
   eski_listen="$(sed -n 's/^ExecStart=.* -listen \([^ ]*\) .*/\1/p' "$UNIT" | head -1)"
@@ -102,6 +110,7 @@ case "$MEMMAX_MB" in ''|*[!0-9]*) die "MEMMAX anlaşılamadı: $MEMMAX" ;; esac
 "$BIN" -validate -retention "$RETENTION" -detail "$DETAIL" -lists "$LISTS" -memory-budget "$BUDGET" >/dev/null \
   || die "Ayarlar geçersiz; yukarıdaki mesaja bakın. Hiçbir şey değiştirilmedi."
 [ -n "$KORUNAN" ] && echo "Önceki kurulumdan korunan ayarlar:$KORUNAN (değiştirmek için komutta yeniden verin)"
+[ -n "${ESKI_TAVAN:-}" ] && echo "Eski sürümün sabit bellek tavanı ($ESKI_TAVAN) korunmadı; bu sürümün varsayılanı $MEMMAX kullanılıyor."
 
 # 1) Tespit: config sadece okunur, bulunan socket ve log denenir
 if ! "$BIN" -detect; then
